@@ -16,14 +16,19 @@
     "binding": "ASSETS"
   },
 
-  // Run `wrangler d1 create solar-lens` and paste the id it prints here.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "solar-lens",
-      "database_id": "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+      "database_id": "${CF_D1_DATABASE_ID}"
     }
   ],
+
+  // Non-secret config. Secrets go in via `wrangler secret put`, never here.
+  "vars": {
+    // Solis "Solis Ongrid" + SolarMan "Nitrox Hybrid"; the shared Solis plant is skipped.
+    "INCLUDE_PLANTS": "<your-solis-plant-id>,<your-solarman-station-id>"
+  },
 
   "observability": {
     "enabled": true
