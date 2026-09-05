@@ -1,0 +1,16 @@
+# Copy to .dev.vars (gitignored) and fill in. Never commit real values.
+
+# --- SolisCloud: Service -> API Management -> Activate Now ---
+SOLIS_KEY_ID=
+SOLIS_KEY_SECRET=
+
+# --- SolarMan: appId/appSecret from service@solarmanpv.com ---
+SOLARMAN_APP_ID=
+SOLARMAN_APP_SECRET=
+SOLARMAN_EMAIL=
+# sha256 hex of your SolarMan password (lowercase, no salt)
+SOLARMAN_PASSWORD_SHA256=
+
+# --- Shared secret gating /api/* and the local agent's /api/ingest ---
+API_TOKEN=
+INGEST_TOKEN=

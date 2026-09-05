@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "solar-lens",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Poll both clouds every 5 minutes. SolisCloud itself only refreshes
+  // roughly every 5 min, so faster polling buys nothing but rate-limit risk.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+
+  // Run `wrangler d1 create solar-lens` and paste the id it prints here.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "solar-lens",
+      "database_id": "PLACEHOLDER_RUN_WRANGLER_D1_CREATE"
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

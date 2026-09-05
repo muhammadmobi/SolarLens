@@ -1,0 +1,24 @@
+{
+  "name": "solar-lens",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One screen for both inverters: SolisCloud + SolarMan, unified.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 execute solar-lens --local --file=./migrations/0001_init.sql",
+    "db:remote": "wrangler d1 execute solar-lens --remote --file=./migrations/0001_init.sql",
+    "probe:solis": "node scripts/probe-solis.mjs",
+    "seed:local": "node scripts/seed-local.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.13.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260905.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.129.0"
+  }
+}

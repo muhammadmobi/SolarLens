@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolarLens</title>
+<meta name="color-scheme" content="light dark">
+<style>
+  :root {
+    --bg: #f6f5f1;
+    --panel: #ffffff;
+    --ink: #1c1c1a;
+    --muted: #6b6a66;
+    --line: #dedcd5;
+    --soft: #efede7;
+    --ok: #2e8b57;
+    --warn: #c98a12;
+    --bad: #c0392b;
+    --solis: #e8792b;
+    --solarman: #2f6fde;
+    --local: #6b4fbb;
+    --total: #1c1c1a;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121311;
+      --panel: #1b1c19;
+      --ink: #ecebe6;
+      --muted: #9a9993;
+      --line: #2c2d29;
+      --soft: #232420;
+      --total: #ecebe6;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 48px; }
+
+  header {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
+  }
+  header h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; font-weight: 650; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  .fleet { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .fleet .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .fleet .sub { color: var(--muted); font-size: 13px; }
+
+  /* Two panels separated by a divider; the divider turns horizontal when stacked. */
+  .panels {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  }
+  .panel { padding: 22px 24px 20px; min-width: 0; }
+  @media (min-width: 720px) { .panel + .panel { border-left: 1px solid var(--line); } }
+  @media (max-width: 719.98px) { .panel + .panel { border-top: 1px solid var(--line); } }
+
+  .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+  .who .name { font-weight: 600; font-size: 16px; }
+  .who .plant { color: var(--muted); font-size: 13px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 9px;
+    border-radius: 999px; border: 1px solid var(--line); background: var(--soft); white-space: nowrap;
+  }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .badge.ok .dot { background: var(--ok); }
+  .badge.warn .dot { background: var(--warn); }
+  .badge.bad .dot { background: var(--bad); }
+  .provider { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 650; }
+  .provider.soliscloud { color: var(--solis); }
+  .provider.solarman { color: var(--solarman); }
+  .provider.local { color: var(--local); }
+
+  .hero { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 4px; }
+  .hero .val { font-size: 46px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .hero .unit { font-size: 18px; color: var(--muted); }
+  .hero .cap { font-size: 13px; color: var(--muted); margin-left: auto; }
+  .stale { color: var(--warn); font-size: 12px; margin-bottom: 8px; min-height: 1.2em; }
+
+  .spark { width: 100%; height: 64px; display: block; margin: 8px 0 14px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 14px; }
+  .stat .k { color: var(--muted); font-size: 12px; }
+  .stat .v { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px; }
+  .stat .v.pos { color: var(--ok); }
+  .stat .v.neg { color: var(--solarman); }
+
+  .batt { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); }
+  .ring { width: 56px; height: 56px; flex: none; }
+  .ring circle { fill: none; stroke-width: 6; }
+  .ring .track { stroke: var(--soft); }
+  .ring .fill { stroke: var(--ok); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+  .ring text { font-size: 13px; font-weight: 650; fill: var(--ink); }
+  .batt .k { color: var(--muted); font-size: 12px; }
+  .batt .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  section.chart { margin-top: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  section.chart h2 { font-size: 14px; margin: 0 0 8px; font-weight: 600; color: var(--muted); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .combined { width: 100%; height: 220px; display: block; }
+  .axis { fill: var(--muted); font-size: 11px; }
+  .grid { stroke: var(--line); stroke-dasharray: 3 4; }
+
+  footer { margin-top: 18px; color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .empty { padding: 48px 24px; text-align: center; color: var(--muted); }
+  .empty code { background: var(--soft); padding: 2px 6px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>SolarLens <span>· both inverters, one screen</span></h1>
+    <div class="fleet">
+      <div class="big" id="fleet-power">—</div>
+      <div class="sub" id="fleet-today">—</div>
+      <div class="sub" id="updated">loading…</div>
+    </div>
+  </header>
+
+  <div class="panels" id="panels"><div class="empty">Loading…</div></div>
+
+  <section class="chart">
+    <h2>Today · AC output</h2>
+    <div class="legend" id="legend"></div>
+    <svg class="combined" id="combined" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg>
+  </section>
+
+  <footer>
+    <span id="poll-status">—</span>
+    <span id="auth-note"></span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const REFRESH_MS = 30_000;
+  const STALE_AFTER_S = 15 * 60;
+
+  const colorFor = (provider) => ({
+    soliscloud: 'var(--solis)', solarman: 'var(--solarman)', local: 'var(--local)',
+  }[provider] || 'var(--muted)');
+
+  const fmtW = (w) => {
+    if (w === null || w === undefined) return ['—', ''];
+    const a = Math.abs(w);
+    return a >= 1000 ? [(w / 1000).toFixed(2), 'kW'] : [Math.round(w).toString(), 'W'];
+  };
+  const fmtWs = (w) => { const [v, u] = fmtW(w); return u ? `${v} ${u}` : v; };
+  const fmtKwh = (k) => (k === null || k === undefined) ? '—' : `${k >= 100 ? k.toFixed(0) : k.toFixed(1)} kWh`;
+  const ago = (s) => {
+    if (!s) return 'never';
+    const d = Math.max(0, Math.floor(Date.now() / 1000) - s);
+    if (d < 60) return `${d}s ago`;
+    if (d < 3600) return `${Math.floor(d / 60)} min ago`;
+    return `${Math.floor(d / 3600)} h ${Math.floor((d % 3600) / 60)} min ago`;
+  };
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  async function api(path) {
+    const r = await fetch(path, { credentials: 'same-origin' });
+    if (r.status === 401) throw new Error('unauthorized');
+    if (!r.ok) throw new Error(`${path} -> ${r.status}`);
+    return r.json();
+  }
+
+  function startOfToday() {
+    const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000);
+  }
+
+  // ---- sparkline: today's AC power for one inverter ----
+  function sparkline(points, color) {
+    const W = 300, H = 64, P = 2;
+    if (points.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"></svg>`;
+    const t0 = startOfToday(), t1 = t0 + 86400;
+    const max = Math.max(1, ...points.map((p) => p.ac_power_w || 0));
+    const x = (t) => P + ((t - t0) / (t1 - t0)) * (W - 2 * P);
+    const y = (v) => H - P - ((v || 0) / max) * (H - 2 * P);
+    const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.ac_power_w).toFixed(1)}`).join(' ');
+    const last = points[points.length - 1];
+    const area = `${d} L${x(last.ts).toFixed(1)},${H - P} L${x(points[0].ts).toFixed(1)},${H - P} Z`;
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <path d="${area}" fill="${color}" opacity="0.12"/>
+      <path d="${d}" fill="none" stroke="${color}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+  }
+
+  function ring(soc) {
+    const r = 22, c = 2 * Math.PI * r, off = c * (1 - Math.min(100, Math.max(0, soc)) / 100);
+    return `<svg class="ring" viewBox="0 0 56 56">
+      <circle class="track" cx="28" cy="28" r="${r}"/>
+      <circle class="fill" cx="28" cy="28" r="${r}" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
+      <text x="28" y="32" text-anchor="middle">${Math.round(soc)}%</text>
+    </svg>`;
+  }
+
+  function panel(inv, pts) {
+    const now = Math.floor(Date.now() / 1000);
+    const age = inv.ts ? now - inv.ts : null;
+    const stale = age === null || age > STALE_AFTER_S;
+    const statusClass = !inv.ts ? '' : stale ? 'warn' : (inv.status === 'alarm' ? 'bad' : (inv.status === 'offline' ? 'warn' : 'ok'));
+    const statusText = !inv.ts ? 'no data yet' : (inv.status || 'reporting');
+    const [pv, pu] = fmtW(inv.ac_power_w);
+    const cap = inv.capacity_w ? `of ${fmtWs(inv.capacity_w)}` : '';
+    const color = colorFor(inv.provider);
+
+    const gridV = inv.grid_power_w;
+    const gridText = gridV === null || gridV === undefined ? '—'
+      : gridV >= 0 ? `↓ ${fmtWs(gridV)} import` : `↑ ${fmtWs(-gridV)} export`;
+    const battV = inv.battery_power_w;
+    const battText = battV === null || battV === undefined ? '—'
+      : battV >= 0 ? `charging ${fmtWs(battV)}` : `discharging ${fmtWs(-battV)}`;
+
+    return `<article class="panel" style="--accent:${color}">
+      <div class="panel-head">
+        <div class="who">
+          <div class="provider ${esc(inv.provider)}">${esc(inv.provider === 'soliscloud' ? 'SolisCloud' : inv.provider === 'solarman' ? 'SolarMan' : inv.provider)}</div>
+          <div class="name">${esc(inv.name)}</div>
+          <div class="plant">${esc(inv.plant_name || '')}${inv.serial ? ` · ${esc(inv.serial)}` : ''}</div>
+        </div>
+        <span class="badge ${statusClass}"><span class="dot"></span>${esc(statusText)}</span>
+      </div>
+      <div class="hero">
+        <span class="val">${pv}</span><span class="unit">${pu}</span>
+        <span class="cap">${cap}</span>
+      </div>
+      <div class="stale">${inv.ts ? (stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}${inv.source && inv.source !== inv.provider ? ` via ${esc(inv.source)}` : ''}`) : ''}</div>
+      ${sparkline(pts, color)}
+      <div class="stats">
+        <div class="stat"><div class="k">Today</div><div class="v">${fmtKwh(inv.today_kwh)}</div></div>
+        <div class="stat"><div class="k">Lifetime</div><div class="v">${fmtKwh(inv.total_kwh)}</div></div>
+        <div class="stat"><div class="k">Load</div><div class="v">${fmtWs(inv.load_power_w)}</div></div>
+        <div class="stat"><div class="k">Grid</div><div class="v ${gridV > 0 ? 'neg' : gridV < 0 ? 'pos' : ''}">${gridText}</div></div>
+        <div class="stat"><div class="k">DC in</div><div class="v">${fmtWs(inv.dc_power_w)}</div></div>
+        <div class="stat"><div class="k">Temp</div><div class="v">${inv.temp_c === null || inv.temp_c === undefined ? '—' : `${inv.temp_c.toFixed(1)} °C`}</div></div>
+      </div>
+      ${inv.battery_soc === null || inv.battery_soc === undefined ? '' : `
+      <div class="batt">
+        ${ring(inv.battery_soc)}
+        <div><div class="k">Battery</div><div class="v">${battText}</div></div>
+      </div>`}
+    </article>`;
+  }
+
+  // ---- combined chart: every inverter + fleet total ----
+  function combined(byInv, invs) {
+    const svg = $('combined');
+    const W = 1000, H = 220, L = 44, R = 10, T = 12, B = 24;
+    const t0 = startOfToday(), t1 = t0 + 86400;
+    const all = Object.values(byInv).flat();
+    if (!all.length) { svg.innerHTML = `<text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">No samples yet today</text>`; $('legend').innerHTML = ''; return; }
+
+    // Fleet total = sum of the latest value from each inverter at 5-min buckets.
+    const bucket = 300;
+    const totals = new Map();
+    for (const [id, pts] of Object.entries(byInv)) {
+      for (const p of pts) {
+        const b = Math.floor(p.ts / bucket) * bucket;
+        const m = totals.get(b) || {};
+        m[id] = p.ac_power_w || 0;
+        totals.set(b, m);
+      }
+    }
+    const totalPts = [...totals.entries()].sort((a, b) => a[0] - b[0])
+      .map(([ts, m]) => ({ ts, ac_power_w: Object.values(m).reduce((a, v) => a + v, 0) }));
+
+    const max = Math.max(500, ...all.map((p) => p.ac_power_w || 0), ...totalPts.map((p) => p.ac_power_w));
+    const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
+    const y = (v) => T + (1 - (v || 0) / max) * (H - T - B);
+    const line = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.ac_power_w).toFixed(1)}`).join(' ');
+
+    let out = '';
+    for (let i = 0; i <= 4; i++) {
+      const v = (max / 4) * i, yy = y(v);
+      out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" vector-effect="non-scaling-stroke"/>`;
+      out += `<text class="axis" x="${L - 6}" y="${yy + 4}" text-anchor="end">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>`;
+    }
+    for (let h = 0; h <= 24; h += 6) {
+      const xx = x(t0 + h * 3600);
+      out += `<text class="axis" x="${xx}" y="${H - 6}" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${String(h).padStart(2, '0')}:00</text>`;
+    }
+    const legend = [];
+    for (const inv of invs) {
+      const pts = byInv[inv.id] || [];
+      if (pts.length < 2) continue;
+      const c = colorFor(inv.provider);
+      out += `<path d="${line(pts)}" fill="none" stroke="${c}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+      legend.push(`<span><i style="background:${c}"></i>${esc(inv.name)}</span>`);
+    }
+    if (invs.length > 1 && totalPts.length > 1) {
+      out += `<path d="${line(totalPts)}" fill="none" stroke="var(--total)" stroke-width="1.4" stroke-dasharray="4 3" opacity="0.8" vector-effect="non-scaling-stroke"/>`;
+      legend.push(`<span><i style="background:var(--total);opacity:.8"></i>Fleet total</span>`);
+    }
+    svg.innerHTML = out;
+    $('legend').innerHTML = legend.join('');
+  }
+
+  async function refresh() {
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const [lat, ser, health] = await Promise.all([
+        api('/api/latest'),
+        api(`/api/series?from=${startOfToday()}&to=${now}`),
+        api('/api/health').catch(() => null),
+      ]);
+      const invs = lat.inverters;
+      const byInv = {};
+      for (const p of ser.points) (byInv[p.inverter_id] ||= []).push(p);
+
+      if (!invs.length) {
+        $('panels').innerHTML = `<div class="empty">No inverters yet. Trigger a poll with <code>POST /api/poll</code> or wait for the next cron run.</div>`;
+      } else {
+        $('panels').innerHTML = invs.map((inv) => panel(inv, byInv[inv.id] || [])).join('');
+      }
+      combined(byInv, invs);
+
+      const withData = invs.filter((i) => i.ts);
+      const fleetW = withData.reduce((a, i) => a + (i.ac_power_w || 0), 0);
+      const fleetKwh = withData.reduce((a, i) => a + (i.today_kwh || 0), 0);
+      $('fleet-power').textContent = withData.length ? fmtWs(fleetW) : '—';
+      $('fleet-today').textContent = withData.length ? `${fmtKwh(fleetKwh)} today` : '';
+      const newest = Math.max(0, ...withData.map((i) => i.ts));
+      $('updated').textContent = newest ? `newest sample ${ago(newest)}` : 'no samples yet';
+
+      if (health && health.polls.length) {
+        const p = health.polls[0];
+        $('poll-status').textContent = `last poll (${p.provider}) ${p.ok ? 'ok' : 'FAILED'} ${ago(p.ts)} — ${p.detail}`;
+        $('poll-status').style.color = p.ok ? '' : 'var(--bad)';
+      }
+      $('auth-note').textContent = '';
+    } catch (e) {
+      if (e.message === 'unauthorized') {
+        $('panels').innerHTML = `<div class="empty">This dashboard is token-protected. Open <code>/auth?t=&lt;API_TOKEN&gt;</code> once on this device.</div>`;
+        $('updated').textContent = 'unauthorized';
+      } else {
+        $('updated').textContent = `error: ${e.message}`;
+      }
+    }
+  }
+
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+})();
+</script>
+</body>
+</html>
