@@ -32,6 +32,73 @@ interface Envelope extends Rec {
 
 type TokenResponse = Envelope & { access_token?: string; expires_in?: number | string };
 
+export const STATION_PREFIX = 'solarman:station:';
+
+/**
+ * Station-level snapshot -> Reading. The same field names come back from the
+ * official `/station/v1.0/realTime` and the portal's `fast/system` (see
+ * docs/api-notes.md), all in W / kWh with no unit strings:
+ *   generationPower, usePower, batterySoc, batteryPower, chargePower,
+ *   dischargePower, purchasePower|buyPower (import), gridPower (export),
+ *   wirePower (net, observed + while buying), generationValue (today kWh),
+ *   generationUploadTotal (lifetime kWh), lastUpdateTime (epoch s).
+ */
+export function stationReading(inv: Inverter, s: Rec, source = 'solarman'): Reading {
+  const buy = num(pick(s, 'purchasePower', 'buyPower'));
+  const sell = num(pick(s, 'gridPower'));
+  const wire = num(pick(s, 'wirePower'));
+  const gridPowerW = buy !== null || sell !== null ? (buy ?? 0) - (sell ?? 0) : wire;
+
+  const charge = num(pick(s, 'chargePower')) ?? 0;
+  const discharge = num(pick(s, 'dischargePower')) ?? 0;
+  const rawBattery = num(pick(s, 'batteryPower'));
+  const batteryStatus = String(pick(s, 'batteryStatus') ?? '').toUpperCase();
+  let batteryPowerW: number | null;
+  if (charge !== 0 || discharge !== 0) batteryPowerW = charge - discharge;
+  else if (rawBattery === null) batteryPowerW = null;
+  else if (batteryStatus === 'CHARGING') batteryPowerW = Math.abs(rawBattery);
+  else if (batteryStatus === 'DISCHARGING') batteryPowerW = -Math.abs(rawBattery);
+  else batteryPowerW = rawBattery; // STATIC: a few watts of idle drift, sign irrelevant
+
+  const network = String(pick(s, 'networkStatus') ?? '').toUpperCase();
+  const warning = String(pick(s, 'warningStatus') ?? '').toUpperCase();
+  let status: string | null = null;
+  if (warning && warning !== 'NORMAL') status = 'alarm';
+  else if (network === 'NORMAL') status = 'online';
+  else if (network) status = network.toLowerCase();
+
+  return {
+    inverterId: inv.id,
+    ts: toEpochSeconds(pick(s, 'lastUpdateTime')),
+    source,
+    acPowerW: num(pick(s, 'generationPower')),
+    dcPowerW: null,
+    todayKwh: toKwh(pick(s, 'generationValue'), 'kWh'),
+    totalKwh: toKwh(pick(s, 'generationUploadTotal', 'generationTotal'), 'kWh'),
+    batterySoc: num(pick(s, 'batterySoc')),
+    batteryPowerW,
+    gridPowerW,
+    loadPowerW: num(pick(s, 'usePower')),
+    tempC: num(pick(s, 'temperature')),
+    status,
+    raw: s,
+  };
+}
+
+/** A plant treated as its own single monitoring unit. */
+export function stationInverter(plant: Plant): Inverter {
+  return {
+    id: STATION_PREFIX + plant.id,
+    provider: 'solarman',
+    vendorId: plant.id,
+    serial: null,
+    name: plant.name,
+    plantId: plant.id,
+    plantName: plant.name,
+    capacityW: plant.capacityW ?? null,
+  };
+}
+
 export class SolarmanProvider implements Provider {
   readonly id = 'solarman' as const;
 
@@ -99,17 +166,21 @@ export class SolarmanProvider implements Provider {
     return json;
   }
 
+  private plants = new Map<string, Plant>();
+
   async listPlants(): Promise<Plant[]> {
     const json = await this.call<Envelope & { stationList?: Rec[] }>('/station/v1.0/list', {
       page: 1,
       size: 50,
     });
-    return (json.stationList ?? []).map((s) => ({
+    const plants = (json.stationList ?? []).map((s) => ({
       id: String(s.id),
       name: String(pick(s, 'name') ?? s.id),
       // installedCapacity is reported in kW.
       capacityW: toWatts(pick(s, 'installedCapacity'), 'kW'),
     }));
+    for (const p of plants) this.plants.set(p.id, p);
+    return plants;
   }
 
   async listInverters(plantId: string): Promise<Inverter[]> {
@@ -117,7 +188,7 @@ export class SolarmanProvider implements Provider {
       stationId: Number(plantId),
       deviceType: 'INVERTER',
     });
-    return (json.deviceListItems ?? []).map((d) => {
+    const invs = (json.deviceListItems ?? []).map((d): Inverter => {
       const serial = String(pick(d, 'deviceSn') ?? '');
       const vendorId = String(pick(d, 'deviceId') ?? serial);
       return {
@@ -131,21 +202,23 @@ export class SolarmanProvider implements Provider {
         capacityW: null,
       };
     });
+    if (invs.length > 0) return invs;
+    // No device rows: fall back to the station as the monitoring unit, which
+    // for a single-inverter plant carries the same live numbers anyway.
+    const plant = this.plants.get(plantId) ?? { id: plantId, name: `Station ${plantId}` };
+    return [stationInverter(plant)];
   }
 
   async getReading(inv: Inverter): Promise<Reading | null> {
-    if (!inv.serial) return null;
+    const station = await this.call<Envelope>('/station/v1.0/realTime', { stationId: Number(inv.plantId) });
+    if (inv.id.startsWith(STATION_PREFIX) || !inv.serial) return stationReading(inv, station);
 
-    // Two calls per inverter: the device's own registers carry energy counters
-    // and temperature; the station realtime view carries the unambiguous
-    // charge/discharge and buy/sell splits that make sign conventions moot.
-    const [device, station] = await Promise.all([
-      this.call<Envelope & { dataList?: Rec[]; collectionTime?: unknown }>('/device/v1.0/currentData', {
-        deviceSn: inv.serial,
-      }),
-      this.call<Envelope>('/station/v1.0/realTime', { stationId: Number(inv.plantId) }),
-    ]);
-
+    // Device registers add per-inverter energy counters and temperature on top
+    // of the station snapshot, which keeps the unambiguous grid/battery splits.
+    const device = await this.call<Envelope & { dataList?: Rec[]; collectionTime?: unknown }>(
+      '/device/v1.0/currentData',
+      { deviceSn: inv.serial },
+    );
     const reg = new Map<string, Rec>();
     for (const item of device.dataList ?? []) reg.set(String(item.key), item);
     const regVal = (...keys: string[]) => {
@@ -167,34 +240,17 @@ export class SolarmanProvider implements Provider {
       return v ? toKwh(v.value, v.unit) : null;
     };
 
-    const purchase = num(pick(station, 'purchasePower'));
-    const feedIn = num(pick(station, 'wirePower'));
-    const charge = num(pick(station, 'chargePower'));
-    const discharge = num(pick(station, 'dischargePower'));
-
-    const gridPowerW =
-      purchase !== null || feedIn !== null
-        ? (purchase ?? 0) - (feedIn ?? 0)
-        : num(pick(station, 'gridPower'));
-    const batteryPowerW =
-      charge !== null || discharge !== null
-        ? (charge ?? 0) - (discharge ?? 0)
-        : num(pick(station, 'batteryPower'));
-
+    const base = stationReading(inv, station);
     return {
-      inverterId: inv.id,
+      ...base,
       ts: toEpochSeconds(pick(device, 'collectionTime') ?? pick(station, 'lastUpdateTime')),
-      source: 'solarman',
-      acPowerW: regW('APo_t1', 'P_AC') ?? num(pick(station, 'generationPower')),
+      acPowerW: regW('APo_t1', 'P_AC') ?? base.acPowerW,
       dcPowerW: regW('DPi_t1', 'P_DC'),
-      todayKwh: regKwh('Etdy_ge1', 'E_Day'),
-      totalKwh: regKwh('Et_ge0', 'Et_ge1', 'E_Total'),
-      batterySoc: regNum('B_left_cap1', 'SOC') ?? num(pick(station, 'batterySoc')),
-      batteryPowerW,
-      gridPowerW,
-      loadPowerW: num(pick(station, 'usePower')),
-      tempC: regNum('AC_RDT_T1', 'T_AC_RDT1', 'INV_T0'),
-      status: (regVal('INV_ST1', 'Inverter_Status')?.value as string | undefined) ?? null,
+      todayKwh: regKwh('Etdy_ge1', 'E_Day') ?? base.todayKwh,
+      totalKwh: regKwh('Et_ge0', 'Et_ge1', 'E_Total') ?? base.totalKwh,
+      batterySoc: regNum('B_left_cap1', 'SOC') ?? base.batterySoc,
+      tempC: regNum('AC_RDT_T1', 'T_AC_RDT1', 'INV_T0') ?? base.tempC,
+      status: (regVal('INV_ST1', 'Inverter_Status')?.value as string | undefined) ?? base.status,
       raw: { device, station },
     };
   }
