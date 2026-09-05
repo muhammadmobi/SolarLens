@@ -10,6 +10,11 @@ export interface Env {
   SOLARMAN_APP_SECRET?: string;
   SOLARMAN_EMAIL?: string;
   SOLARMAN_PASSWORD_SHA256?: string;
+  /** Web-session fallback (phase 3): tokens copied from a browser login. */
+  SOLARMAN_WEB_REFRESH_TOKEN?: string;
+  SOLARMAN_WEB_ACCESS_TOKEN?: string;
+  /** Comma-separated vendor plant ids to poll; unset = every plant the accounts can see. */
+  INCLUDE_PLANTS?: string;
   API_TOKEN?: string;
   INGEST_TOKEN?: string;
 }
