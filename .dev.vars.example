@@ -4,6 +4,12 @@
 SOLIS_KEY_ID=
 SOLIS_KEY_SECRET=
 
+# --- SolisCloud web-session fallback (used only when the keys above are absent) ---
+# Log in at https://www.soliscloud.com, DevTools -> Network -> any /api/ request ->
+# Request Headers: copy the auth header's value here and its name below. Unofficial; may break.
+SOLIS_WEB_TOKEN=
+SOLIS_WEB_TOKEN_HEADER=token
+
 # --- SolarMan official Business API: appId/appSecret from service@solarmanpv.com ---
 SOLARMAN_APP_ID=
 SOLARMAN_APP_SECRET=
