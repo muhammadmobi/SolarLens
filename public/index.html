@@ -214,7 +214,10 @@
     const gridText = gridV === null || gridV === undefined ? '—'
       : gridV >= 0 ? `↓ ${fmtWs(gridV)} import` : `↑ ${fmtWs(-gridV)} export`;
     const battV = inv.battery_power_w;
+    // A few tens of watts either way is BMS/meter drift, not real charge or discharge —
+    // SolarMan reports the same reading as batteryStatus "STATIC".
     const battText = battV === null || battV === undefined ? '—'
+      : Math.abs(battV) < 50 ? 'idle'
       : battV >= 0 ? `charging ${fmtWs(battV)}` : `discharging ${fmtWs(-battV)}`;
 
     return `<article class="panel" style="--accent:${color}">
@@ -222,7 +225,7 @@
         <div class="who">
           <div class="provider ${esc(inv.provider)}">${esc(inv.provider === 'soliscloud' ? 'SolisCloud' : inv.provider === 'solarman' ? 'SolarMan' : inv.provider)}</div>
           <div class="name">${esc(inv.name)}</div>
-          <div class="plant">${esc(inv.plant_name || '')}${inv.serial ? ` · ${esc(inv.serial)}` : ''}</div>
+          <div class="plant">${esc(inv.plant_name && inv.plant_name !== inv.name ? inv.plant_name : '')}${inv.serial ? ` · ${esc(inv.serial)}` : ''}</div>
         </div>
         <span class="badge ${statusClass}"><span class="dot"></span>${esc(statusText)}</span>
       </div>
