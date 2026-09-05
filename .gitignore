@@ -7,3 +7,9 @@ dist/
 *.log
 .DS_Store
 .env
+
+# Pasted portal/DevTools responses - may contain session tokens
+captures/
+
+# Playwright capture browser profile (holds portal sessions)
+.capture-profile/

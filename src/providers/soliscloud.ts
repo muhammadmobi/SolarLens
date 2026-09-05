@@ -108,6 +108,34 @@ function mapState(state: unknown): string | null {
   }
 }
 
+/** Ids of plant-level pseudo-inverters, used when a plant lists no inverters (see below). */
+const STATION_PREFIX = 'soliscloud:station:';
+
+/**
+ * Plant-level snapshot -> Reading. Field names confirmed on the live portal
+ * (docs/api-notes.md): `power`/`powerStr`, `dayEnergy`/`dayEnergyStr`,
+ * `allEnergy`/`allEnergyStr`, `psum` (positive = export), `dataTimestamp` (ms).
+ */
+export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Reading {
+  const psum = toWatts(pick(d, 'psum'), pick(d, 'psumStr'));
+  return {
+    inverterId: inv.id,
+    ts: toEpochSeconds(pick(d, 'dataTimestamp')),
+    source,
+    acPowerW: toWatts(pick(d, 'power'), pick(d, 'powerStr')),
+    dcPowerW: null,
+    todayKwh: toKwh(pick(d, 'dayEnergy'), pick(d, 'dayEnergyStr')),
+    totalKwh: toKwh(pick(d, 'allEnergy'), pick(d, 'allEnergyStr')),
+    batterySoc: num(pick(d, 'batteryCapacitySoc', 'batteryCapacitySoc2')),
+    batteryPowerW: toWatts(pick(d, 'batteryPower'), pick(d, 'batteryPowerStr')),
+    gridPowerW: psum === null ? null : -psum,
+    loadPowerW: toWatts(pick(d, 'familyLoadPower'), pick(d, 'familyLoadPowerStr')),
+    tempC: null,
+    status: mapState(pick(d, 'state')),
+    raw: d,
+  };
+}
+
 export class SolisCloudProvider implements Provider {
   readonly id = 'soliscloud' as const;
 
@@ -131,7 +159,7 @@ export class SolisCloudProvider implements Provider {
       pageSize: 50,
       stationId: plantId,
     });
-    return (data.page?.records ?? []).map((r) => {
+    const invs = (data.page?.records ?? []).map((r): Inverter => {
       const vendorId = String(r.id);
       const serial = pick(r, 'sn') as string | null;
       return {
@@ -145,19 +173,43 @@ export class SolisCloudProvider implements Provider {
         capacityW: toWatts(pick(r, 'power'), pick(r, 'powerStr')),
       };
     });
+    if (invs.length > 0) return invs;
+
+    // The portal's own inverter list came back empty for a plant that reports
+    // inverterCount=1, so treat the plant itself as the unit of monitoring:
+    // for a single-inverter plant the station snapshot is the same numbers.
+    return [
+      {
+        id: STATION_PREFIX + plantId,
+        provider: 'soliscloud',
+        vendorId: plantId,
+        serial: null,
+        name: '',
+        plantId,
+        plantName: '',
+        capacityW: null,
+      },
+    ];
   }
 
   async getReading(inv: Inverter): Promise<Reading | null> {
+    if (inv.id.startsWith(STATION_PREFIX)) {
+      const d = await call<Rec>(this.creds, '/v1/api/stationDetail', { id: inv.vendorId });
+      if (!d) return null;
+      if (!inv.name) inv.name = String(pick(d, 'stationName') ?? inv.vendorId);
+      if (!inv.serial) inv.serial = (pick(d, 'sno') as string | null) ?? null;
+      if (inv.capacityW === null) inv.capacityW = toWatts(pick(d, 'capacity'), pick(d, 'capacityStr'));
+      return stationReading(inv, d);
+    }
+
     const d = await call<Rec>(this.creds, '/v1/api/inverterDetail', {
       id: inv.vendorId,
       sn: inv.serial ?? undefined,
     });
     if (!d) return null;
 
-    // Sign conventions to confirm against the SolisCloud app on first real data:
-    //   psum         - grid; the app draws positive as export, so negate to get
-    //                  the SolarLens convention of "+ import / - export".
-    //   batteryPower - positive while charging, which is already our convention.
+    // psum: the portal draws positive as export, so negate for the SolarLens
+    // convention of "+ import / - export". batteryPower: positive = charging.
     const psum = toWatts(pick(d, 'psum'), pick(d, 'psumStr'));
 
     return {

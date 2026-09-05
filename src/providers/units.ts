@@ -5,10 +5,14 @@
  * rest of the app never has to think about it again.
  */
 
+// SolisCloud reports plant capacity as `capacity: 12.000, capacityStr: "kWp"`.
 const POWER_FACTORS: Record<string, number> = {
   w: 1,
+  wp: 1,
   kw: 1_000,
+  kwp: 1_000,
   mw: 1_000_000,
+  mwp: 1_000_000,
   gw: 1_000_000_000,
 };
 

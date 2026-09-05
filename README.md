@@ -50,6 +50,16 @@ API access (they enable it within ~24 h).
 node -e "console.log(require('crypto').createHash('sha256').update(process.argv[1]).digest('hex'))" 'your-password'
 ```
 
+**SolarMan web-session fallback (unofficial).** While the official keys are pending,
+log in to `home.solarmanpv.com` in a browser, open DevTools → Application → Local
+Storage and copy the refresh token into `SOLARMAN_WEB_REFRESH_TOKEN`. The Worker then
+renews the 24 h access token itself. Password login is *not* automated — the portal
+requires a Cloudflare Turnstile token with every password grant, and that is a
+human step. This route is used only when `SOLARMAN_APP_ID` is absent.
+
+**Which plants.** `INCLUDE_PLANTS` is a comma-separated list of vendor plant ids; unset
+polls every plant the accounts can see, including plants shared into them.
+
 **Own tokens.** `API_TOKEN` gates `/api/*` so a public `workers.dev` URL is not an
 open feed of your site. `INGEST_TOKEN` gates `/api/ingest` for the local agent.
 Any long random string works:
@@ -59,7 +69,12 @@ node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
 ```
 
 Production secrets go in via `npx wrangler secret put NAME` for each of:
-`SOLIS_KEY_ID SOLIS_KEY_SECRET SOLARMAN_APP_ID SOLARMAN_APP_SECRET SOLARMAN_EMAIL SOLARMAN_PASSWORD_SHA256 API_TOKEN INGEST_TOKEN`.
+`SOLIS_KEY_ID SOLIS_KEY_SECRET SOLARMAN_APP_ID SOLARMAN_APP_SECRET SOLARMAN_EMAIL SOLARMAN_PASSWORD_SHA256 API_TOKEN INGEST_TOKEN`
+(plus `SOLARMAN_WEB_REFRESH_TOKEN` if using the fallback; `INCLUDE_PLANTS` is a plain
+`vars` entry in `wrangler.jsonc`, not a secret).
+
+Real field names and sign conventions observed on the live accounts are recorded in
+[docs/api-notes.md](docs/api-notes.md).
 
 A provider is active purely when its secrets are present, so deploying with
 only the Solis keys works, and SolarMan lights up the moment its keys are added.
@@ -108,6 +123,6 @@ vendor payload in `raw`.
 
 - [x] Phase 1 — Worker, D1, SolisCloud adapter, cron, two-panel UI
 - [x] Phase 2 — SolarMan adapter with cached bearer token
-- [ ] Phase 3 — app-login fallback (unofficial; for when a key is still pending)
+- [x] Phase 3 — SolarMan web-session fallback (unofficial; refresh-token based, untested against the live server)
 - [ ] Phase 4 — local Modbus agent → `/api/ingest`
 - [ ] Phase 5 — day/month/year history, CSV export, alerts, PWA
