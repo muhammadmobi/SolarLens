@@ -6,6 +6,9 @@ export interface Env {
   ASSETS: Fetcher;
   SOLIS_KEY_ID?: string;
   SOLIS_KEY_SECRET?: string;
+  /** Web-session fallback: portal token copied from a browser login, and the header it goes in. */
+  SOLIS_WEB_TOKEN?: string;
+  SOLIS_WEB_TOKEN_HEADER?: string;
   SOLARMAN_APP_ID?: string;
   SOLARMAN_APP_SECRET?: string;
   SOLARMAN_EMAIL?: string;

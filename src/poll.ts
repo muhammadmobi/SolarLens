@@ -1,6 +1,7 @@
 import type { Env } from './db';
 import { insertReading, logPoll, tokenStore, upsertInverter } from './db';
 import { SolisCloudProvider } from './providers/soliscloud';
+import { SolisCloudWebProvider } from './providers/soliscloud-web';
 import { SolarmanProvider } from './providers/solarman';
 import { SolarmanWebProvider } from './providers/solarman-web';
 import type { Provider } from './providers/types';
@@ -14,6 +15,8 @@ export function buildProviders(env: Env): Provider[] {
   const providers: Provider[] = [];
   if (env.SOLIS_KEY_ID && env.SOLIS_KEY_SECRET) {
     providers.push(new SolisCloudProvider({ keyId: env.SOLIS_KEY_ID, keySecret: env.SOLIS_KEY_SECRET }));
+  } else if (env.SOLIS_WEB_TOKEN) {
+    providers.push(new SolisCloudWebProvider({ token: env.SOLIS_WEB_TOKEN, headerName: env.SOLIS_WEB_TOKEN_HEADER }));
   }
   if (env.SOLARMAN_APP_ID && env.SOLARMAN_APP_SECRET && env.SOLARMAN_EMAIL && env.SOLARMAN_PASSWORD_SHA256) {
     providers.push(

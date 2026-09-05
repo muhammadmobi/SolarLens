@@ -50,6 +50,12 @@ API access (they enable it within ~24 h).
 node -e "console.log(require('crypto').createHash('sha256').update(process.argv[1]).digest('hex'))" 'your-password'
 ```
 
+**SolisCloud web-session fallback (unofficial).** While the API ticket is pending, log in
+at `www.soliscloud.com`, open DevTools → Network, click any `/api/` request and copy the
+auth request header into `SOLIS_WEB_TOKEN` (its name into `SOLIS_WEB_TOKEN_HEADER`, default
+`token`). No refresh grant exists — when it stops working, copy a fresh one. Used only when
+`SOLIS_KEY_ID` is absent.
+
 **SolarMan web-session fallback (unofficial).** While the official keys are pending,
 log in to `home.solarmanpv.com` in a browser, open DevTools → Application → Local
 Storage and copy the refresh token into `SOLARMAN_WEB_REFRESH_TOKEN`. The Worker then
