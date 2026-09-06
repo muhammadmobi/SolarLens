@@ -1,4 +1,4 @@
-import type { Inverter, Metrics, Plant, Provider, Reading } from './types';
+import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toEpochSeconds, toKwh, toWatts } from './units';
@@ -104,6 +104,56 @@ export function stationReading(inv: Inverter, s: Rec, source = 'solarman'): Read
     status,
     metrics,
     raw: s,
+  };
+}
+
+/**
+ * A device record from `/maintain-s/fast/device/{stationId}/device-list`.
+ *
+ * `featureData` is a JSON *string* of raw register key/values - the collector
+ * carries its firmware there as `MDUv1` (e.g. "LSW3_15_FFFF_1.0.78"), which is
+ * the only place it appears. `signalIntensity` is a 0-100 percentage here, not
+ * the dBm SolisCloud reports, so it is kept in its own field.
+ */
+export function deviceFromRecord(d: Rec, plantId: string | null = null): Device {
+  const kind: Device['kind'] = String(pick(d, 'deviceType') ?? '').toUpperCase() === 'COLLECTOR'
+    ? 'datalogger'
+    : 'inverter';
+  const sn = (pick(d, 'deviceSn') as string | null) ?? null;
+
+  let feature: Rec = {};
+  try {
+    const raw = pick(d, 'featureData');
+    if (typeof raw === 'string' && raw.trim().startsWith('{')) feature = JSON.parse(raw) as Rec;
+  } catch { /* a malformed blob should not lose the rest of the device */ }
+
+  // deviceStatus: 1 online, 2 alarm, 3 offline (0/absent = unknown).
+  const firmware = (pick(feature, 'MDUv1') as string | null) ?? null;
+  const statusCode = String(pick(d, 'deviceStatus') ?? '');
+  const status = statusCode === '1' ? 'online' : statusCode === '2' ? 'alarm' : statusCode === '3' ? 'offline' : null;
+
+  return {
+    id: `solarman:${kind}:${sn ?? String(pick(d, 'deviceId') ?? 'unknown')}`,
+    provider: 'solarman',
+    plantId: plantId ?? (pick(d, 'stationId') !== undefined ? String(pick(d, 'stationId')) : null),
+    kind,
+    sn,
+    name: (pick(d, 'deviceName') as string | null) ?? (kind === 'datalogger' ? 'Datalogger' : null),
+    // MDUv1 is a firmware string like "LSW3_15_FFFF_1.0.78"; its first segment
+    // names the logger family, which is the closest thing to a model here.
+    model: firmware ? firmware.split('_')[0] : ((pick(d, 'productId') as string | null) ?? null),
+    firmware,
+    ratedPowerW: null,
+    status,
+    signalDbm: null,
+    signalPct: kind === 'datalogger' ? num(pick(d, 'signalIntensity')) : null,
+    uploadCycleS: null,
+    commissionedAt: null,
+    warrantyUntil: null,
+    lastSeen: toEpochSeconds(pick(d, 'collectionTime')),
+    // This hybrid reports only total DC input (DPi_t1); no per-string registers.
+    strings: null,
+    raw: { ...d, featureData: feature },
   };
 }
 

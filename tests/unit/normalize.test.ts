@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import solisFixture from '../fixtures/solis-station.json';
 import solarmanFixture from '../fixtures/solarman-station.json';
 import { stationReading as solisStation } from '../../src/providers/soliscloud';
-import { stationReading as solarmanStation, stationInverter } from '../../src/providers/solarman';
+import { stationReading as solarmanStation, stationInverter, deviceFromRecord as solarmanDevice } from '../../src/providers/solarman';
 import { plantFilter } from '../../src/poll';
 import type { Inverter } from '../../src/providers/types';
 
@@ -147,5 +147,45 @@ describe('battery presence is taken from the plant inventory, not zeroed fields'
     });
     expect(r.batterySoc).toBe(64);
     expect(r.batteryPowerW).toBe(1200);
+  });
+});
+
+describe('SolarMan device records', () => {
+  const collector = {
+    deviceId: 212008641, deviceSn: 'LOG-DEMO', deviceType: 'COLLECTOR', deviceStatus: 1,
+    stationId: 62000000, collectionTime: 1788706396, signalIntensity: 86,
+    featureData: '{"SGits1":"86","MDU_MAC_ADD1":"AABBCCDDEEFF","MDUv1":"LSW3_15_FFFF_1.0.78"}',
+  };
+  const inverter = {
+    deviceId: 233151400, deviceSn: 'INV-DEMO', deviceType: 'INVERTER', deviceStatus: 1,
+    stationId: 62000000, collectionTime: 1788706396, signalIntensity: 0, generationTotal: 7467.1,
+    featureData: '{"B_left_cap1":"100","B_P1":"-26","DPi_t1":"0.00"}',
+  };
+
+  it('reads the collector as a datalogger, with percent signal and firmware from featureData', () => {
+    const d = solarmanDevice(collector, '62000000');
+    expect(d.kind).toBe('datalogger');
+    expect(d.sn).toBe('LOG-DEMO');
+    expect(d.status).toBe('online');
+    // SolarMan reports a percentage; dBm stays null so the UI cannot mislabel it.
+    expect(d.signalPct).toBe(86);
+    expect(d.signalDbm).toBeNull();
+    expect(d.firmware).toBe('LSW3_15_FFFF_1.0.78');
+    expect(d.model).toBe('LSW3');
+    expect(d.lastSeen).toBe(1788706396);
+  });
+
+  it('reads the inverter without inventing a signal reading', () => {
+    const d = solarmanDevice(inverter, '62000000');
+    expect(d.kind).toBe('inverter');
+    expect(d.signalPct).toBeNull();
+    expect(d.strings).toBeNull(); // this hybrid exposes no per-string registers
+    expect(d.id).toBe('solarman:inverter:INV-DEMO');
+  });
+
+  it('survives a malformed featureData blob', () => {
+    const d = solarmanDevice({ ...collector, featureData: '{not json' }, '62000000');
+    expect(d.sn).toBe('LOG-DEMO');
+    expect(d.firmware).toBeNull();
   });
 });

@@ -32,8 +32,10 @@ export interface Device {
   firmware: string | null;
   ratedPowerW: number | null;
   status: string | null;
-  /** Datalogger signal strength, dBm (negative; closer to 0 is stronger). */
+  /** Datalogger signal, dBm (negative; closer to 0 is stronger) - SolisCloud. */
   signalDbm: number | null;
+  /** Datalogger signal as a 0-100 percentage - SolarMan. */
+  signalPct: number | null;
   uploadCycleS: number | null;
   commissionedAt: number | null;
   warrantyUntil: number | null;
@@ -105,6 +107,8 @@ export interface Reading {
 
 export interface Provider {
   readonly id: ProviderId;
+  /** Optional: hardware behind the readings, when the vendor exposes it. */
+  listDevices?(plantId: string): Promise<Device[]>;
   listPlants(): Promise<Plant[]>;
   listInverters(plantId: string): Promise<Inverter[]>;
   getReading(inv: Inverter): Promise<Reading | null>;

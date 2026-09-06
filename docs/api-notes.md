@@ -75,8 +75,20 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
 - `GET /maintain-s/fast/system/{stationId}` — same live + today + lifetime fields, no month/year.
 - `GET /maintain-s/station/{stationId}/detail` — static: `station.name`, `installedCapacity`, `hasBattery`, `region.timezone`.
 - `POST /maintain-s/operating/station/search` body `{}` — station list with the live fields inline.
-- Device-level endpoints (inverter SN, per-device temperature) are exposed on the station's
-  Device tab; not needed for single-inverter plants.
+- `GET /maintain-s/fast/device/{stationId}/device-types` → e.g. `["INVERTER","COLLECTOR"]`.
+- `GET /maintain-s/fast/device/{stationId}/device-list?deviceType=INVERTER|COLLECTOR` → array of
+  devices. The portal only ever asks for `INVERTER`, so the datalogger needs an explicit second
+  call with `COLLECTOR`. Fields used:
+  - `deviceSn`, `deviceType`, `deviceName`, `deviceStatus` (1 online, 2 alarm, 3 offline)
+  - `collectionTime` (epoch **s**), `gatewaySn` (the collector serving an inverter)
+  - `signalIntensity` — **0-100 percent** on the collector, *not* the dBm SolisCloud reports
+  - `generation` (today kWh), `generationTotal` (lifetime kWh), `generationPower` (W)
+  - `featureData` — a JSON **string** of raw registers. On the collector it carries `MDUv1`
+    (firmware, e.g. `LSW3_15_FFFF_1.0.78`; its first segment names the logger family) and
+    `MDU_MAC_ADD1`. On the inverter it carries `B_left_cap1` (SOC %), `B_P1` (battery W),
+    `DPi_t1` (total DC input W), `Etdy_ge1` / `Et_ge0` (today / lifetime generation kWh),
+    `Etdy_cg1` / `Etdy_dcg1` (charge / discharge today), `PG_Pt1` (grid W).
+  - No per-string (`DV*` / `DC*` / `DP*`) registers appear on this hybrid — only total DC input.
 
 ### Official Business API (`https://globalapi.solarmanpv.com`)
 
