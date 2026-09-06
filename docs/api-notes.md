@@ -49,6 +49,14 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   - `batteryChargeEnergy` / `batteryDischargeEnergy` (today), `…TotalEnergy`
   - `batteryPower`, `batteryCapacitySoc2`, `familyLoadPower` — zero on an on-grid plant
   - `inverterCount`, `inverterOnlineCount`, `alarmCount`, `capacity` / `capacityStr`, `sno`
+- `inverter/detail` body `{id, sn}` — reached at `/overview/device/details/inverter?id=&sn=`.
+  The **only** source of per-string voltage/current, per-phase AC and heatsink temperature;
+  none of it appears in the plant snapshot or the documented monitoring API:
+  - `uPv1…32` / `iPv1…32` / `pow1…32` — per-MPPT-string V / A / W (paired `…Str` units)
+  - `uAc1…3` / `iAc1…3` — per-phase V / A; `fac` (Hz), `powerFactor`
+  - `inverterTemperature` (+ `inverterTemperatureUnit`), `dcBus`, `insulationResistance`
+  - A wired but unlit string still reports volts with zero watts, so string presence is
+    decided by any of V/A/W being non-zero.
 - `inverter/listV2` returned 0 records for a plant that reports `inverterCount: 1`, and
   `chart/station/day/v2` returned all-zero series while `power[]` in the same response held
   the real curve. Plant-level `detailMix` is therefore the source of truth.
