@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { insertReading, latest, nowSec, recentPolls, series, upsertInverter } from './db';
-import { pollAll } from './poll';
+import { plantFilter, pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
 import { stationReading as solisStationReading } from './providers/soliscloud';
 import { stationReading as solarmanStationReading } from './providers/solarman';
@@ -45,7 +45,8 @@ app.get('/auth', (c) => {
 
 // Read endpoints: gated by API_TOKEN when it is set; open (local dev) when it is not.
 app.use('/api/*', async (c, next) => {
-  if (c.req.path === '/api/ingest') return next();
+  // Push endpoints carry their own INGEST_TOKEN check; everything under /api/ingest/ is theirs.
+  if (c.req.path === '/api/ingest' || c.req.path.startsWith('/api/ingest/')) return next();
   const token = c.env.API_TOKEN;
   if (!token) return next();
   const given = bearer(c.req.header('Authorization')) ?? getCookie(c, COOKIE) ?? '';
@@ -123,6 +124,9 @@ app.post('/api/ingest/station', async (c) => {
     return c.json({ error: 'provider, plantId and raw required' }, 400);
   }
   const plantId = String(body.plantId);
+  // Same INCLUDE_PLANTS rule as the cloud poller, so a relay cannot sneak in a
+  // plant (e.g. one shared into the account) that the dashboard should ignore.
+  if (!plantFilter(c.env)(plantId)) return c.json({ stored: false, skipped: 'not in INCLUDE_PLANTS' });
   const inv: Inverter = {
     id: `${body.provider}:station:${plantId}`,
     provider: body.provider,
