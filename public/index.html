@@ -99,6 +99,21 @@
   .batt .k { color: var(--muted); font-size: 12px; }
   .batt .v { font-weight: 600; font-variant-numeric: tabular-nums; }
 
+  /* Expandable per-inverter energy breakdown (what the vendor apps show on their detail pages). */
+  details.more { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  details.more summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; user-select: none; }
+  details.more summary::-webkit-details-marker { display: none; }
+  details.more summary::before { content: '▸ '; }
+  details.more[open] summary::before { content: '▾ '; }
+  .energy { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .energy th { text-align: right; color: var(--muted); font-weight: 500; font-size: 11px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  .energy th:first-child, .energy td:first-child { text-align: left; }
+  .energy td { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--soft); }
+  .energy tr:last-child td { border-bottom: 0; }
+  .energy td.dim { color: var(--muted); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); color: var(--muted); }
+
   section.chart { margin-top: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
   section.chart h2 { font-size: 14px; margin: 0 0 8px; font-weight: 600; color: var(--muted); }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
@@ -200,6 +215,33 @@
     </svg>`;
   }
 
+  // ---- energy breakdown table from the reading's `metrics` JSON ----
+  function detailsBlock(inv) {
+    let m = null;
+    try { m = typeof inv.metrics === 'string' ? JSON.parse(inv.metrics) : inv.metrics; } catch { m = null; }
+    if (!m) return '';
+    const cell = (v) => v === null || v === undefined ? '<td class="dim">—</td>' : `<td>${fmtKwh(v)}</td>`;
+    const rows = [
+      ['Generation', inv.today_kwh, m.genMonthKwh, m.genYearKwh, m.genTotalKwh ?? inv.total_kwh],
+      ['Consumption', m.loadTodayKwh, null, null, m.loadTotalKwh],
+      ['Self-consumed', m.selfUseTodayKwh, null, null, null],
+      ['Grid import', m.gridImportTodayKwh, null, null, m.gridImportTotalKwh],
+      ['Grid export', m.gridExportTodayKwh, null, null, m.gridExportTotalKwh],
+      ['Battery charge', m.battChargeTodayKwh, null, null, m.battChargeTotalKwh],
+      ['Battery discharge', m.battDischargeTodayKwh, null, null, m.battDischargeTotalKwh],
+    ].filter((r) => r.slice(1).some((v) => v !== null && v !== undefined));
+    const chips = [
+      m.gridStatus ? `<span class="chip">grid: ${esc(String(m.gridStatus).toLowerCase())}</span>` : '',
+      m.batteryStatus ? `<span class="chip">battery: ${esc(String(m.batteryStatus).toLowerCase())}</span>` : '',
+    ].join('');
+    if (!rows.length && !chips) return '';
+    const table = rows.length ? `<table class="energy">
+        <thead><tr><th></th><th>Today</th><th>Month</th><th>Year</th><th>Lifetime</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr><td>${esc(r[0])}</td>${r.slice(1).map(cell).join('')}</tr>`).join('')}</tbody>
+      </table>` : '';
+    return `<details class="more"><summary>Energy breakdown</summary>${table}${chips ? `<div class="chips">${chips}</div>` : ''}</details>`;
+  }
+
   function panel(inv, pts) {
     const now = Math.floor(Date.now() / 1000);
     const age = inv.ts ? now - inv.ts : null;
@@ -248,6 +290,7 @@
         ${ring(inv.battery_soc)}
         <div><div class="k">Battery</div><div class="v">${battText}</div></div>
       </div>`}
+      ${detailsBlock(inv)}
     </article>`;
   }
 

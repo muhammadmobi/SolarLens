@@ -1,4 +1,5 @@
-import type { Inverter, Plant, Provider, Reading } from './types';
+import type { Inverter, Metrics, Plant, Provider, Reading } from './types';
+import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toEpochSeconds, toKwh, toWatts } from './units';
 
@@ -60,6 +61,26 @@ export function stationReading(inv: Inverter, s: Rec, source = 'solarman'): Read
   else if (batteryStatus === 'DISCHARGING') batteryPowerW = -Math.abs(rawBattery);
   else batteryPowerW = rawBattery; // STATIC: a few watts of idle drift, sign irrelevant
 
+  const metrics = emptyMetrics();
+  // Today values (kWh) and lifetime "Upload" totals present on fast/system and
+  // operating/system; month/year present only on operating/system.
+  metrics.genMonthKwh = num(pick(s, 'generationMonth'));
+  metrics.genYearKwh = num(pick(s, 'generationYear'));
+  metrics.genTotalKwh = num(pick(s, 'generationUploadTotal', 'generationTotal'));
+  metrics.loadTodayKwh = num(pick(s, 'useValue'));
+  metrics.loadTotalKwh = num(pick(s, 'useTotal', 'useUploadTotal'));
+  metrics.gridImportTodayKwh = num(pick(s, 'buyValue'));
+  metrics.gridExportTodayKwh = num(pick(s, 'gridValue'));
+  metrics.gridImportTotalKwh = num(pick(s, 'buyTotal', 'buyUploadTotal'));
+  metrics.gridExportTotalKwh = num(pick(s, 'gridTotal', 'gridUploadTotal'));
+  metrics.battChargeTodayKwh = num(pick(s, 'chargeValue'));
+  metrics.battDischargeTodayKwh = num(pick(s, 'dischargeValue'));
+  metrics.battChargeTotalKwh = num(pick(s, 'chargeTotal', 'chargeUploadTotal'));
+  metrics.battDischargeTotalKwh = num(pick(s, 'dischargeTotal', 'dischargeUploadTotal'));
+  metrics.selfUseTodayKwh = num(pick(s, 'selfGenAndUseValue'));
+  metrics.batteryStatus = (pick(s, 'batteryStatus') as string | null) ?? null;
+  metrics.gridStatus = (pick(s, 'wireStatus') as string | null) ?? null;
+
   const network = String(pick(s, 'networkStatus') ?? '').toUpperCase();
   const warning = String(pick(s, 'warningStatus') ?? '').toUpperCase();
   let status: string | null = null;
@@ -81,6 +102,7 @@ export function stationReading(inv: Inverter, s: Rec, source = 'solarman'): Read
     loadPowerW: num(pick(s, 'usePower')),
     tempC: num(pick(s, 'temperature')),
     status,
+    metrics,
     raw: s,
   };
 }
