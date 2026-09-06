@@ -1,7 +1,7 @@
 import type { Device, Inverter, Plant, Provider, Reading } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toWatts } from './units';
-import { STATION_PREFIX, deviceFromRecord, stationInverter, stationReading, type TokenStore } from './solarman';
+import { STATION_PREFIX, deviceFromRecord, deviceFromV3Detail, stationInverter, stationReading, type TokenStore } from './solarman';
 
 /**
  * UNOFFICIAL fallback: drives the same endpoints the SOLARMAN Smart web portal
@@ -125,6 +125,20 @@ export class SolarmanWebProvider implements Provider {
         .call<Rec[]>('GET', `/maintain-s/fast/device/${plantId}/device-list?deviceType=${type}`)
         .catch(() => [] as Rec[]);
       for (const r of rows ?? []) out.push(deviceFromRecord(r, plantId));
+    }
+
+    // device-list only summarises. The inverter's own page carries per-string
+    // DC, per-phase AC, BMS and temperatures, so fetch it per inverter and let
+    // the upsert merge the two views of the same device.
+    for (const d of out.filter((x) => x.kind === 'inverter')) {
+      const deviceId = (d.raw as Record<string, unknown> | null)?.deviceId;
+      if (deviceId === undefined || deviceId === null) continue;
+      try {
+        const detail = await this.call<Rec>('POST', '/device-s/device/v3/detail', {
+          deviceId, siteId: Number(plantId), language: 'en', needRealTimeDataFlag: true,
+        });
+        if (detail) out.push(deviceFromV3Detail(detail, plantId));
+      } catch { /* detail is a bonus; the list already carries the essentials */ }
     }
     return out;
   }
