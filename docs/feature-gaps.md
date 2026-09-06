@@ -22,7 +22,7 @@ station on SolarMan. No account identifiers appear in this document.
 | House load / consumption power | ● | ● | ● |
 | Grid import & export power | ● | ● | ● one signed figure, + import / − export |
 | Battery SOC and charge/discharge power | ● | ● | ● hybrid only; hidden for on-grid |
-| Animated PV → battery → load → grid flow | ● | ● | ○ numbers are all present, the drawing is not |
+| PV → battery → load → grid flow diagram | ● | ● | ● per system; the battery arm is omitted for on-grid |
 | Today's power curve | ● | ● | ● per system + fleet total |
 | Honest "last updated" when a feed goes quiet | ◐ | ◐ | ● amber staleness badge, never a stale zero |
 
@@ -41,15 +41,16 @@ station on SolarMan. No account identifiers appear in this document.
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Inverter serial, model, rated power | ● | ● | ● both (Solis rated power; SolarMan has no rating field) |
-| Inverter firmware version | ● | ◐ | ● Solis; SolarMan exposes none for the inverter |
+| Inverter serial, model, rated power | ● | ● | ● both |
+| Inverter firmware version | ● | ● | ● both |
 | Commissioning date, warranty expiry | ● | ○ | ● Solis |
 | **Datalogger status, model, firmware, signal** | ● | ● | ● both — Solis in dBm, SolarMan in percent |
-| Per-MPPT-string DC power | ● | ○ | ● Solis via relay; SolarMan reports only total DC input |
-| Per-string voltage & current | ● | ● | ● Solis via relay; SolarMan reports none |
-| Per-phase AC voltage, current, frequency | ● | ● | ● Solis via relay (plus power factor, DC bus) |
-| Inverter temperature | ● | ● | ● Solis via relay; SolarMan exposes none |
+| Per-MPPT-string DC power | ● | ● | ● both |
+| Per-string voltage & current | ● | ● | ● both |
+| Per-phase AC voltage, current, frequency | ● | ● | ● both (Solis adds power factor and DC bus) |
+| Inverter temperature | ● | ● | ● both |
 | Device types beyond the inverter (battery, meter, EPM, weather station) | ● | ◐ | ○ schema supports them, nothing populates them |
+| BMS detail (pack voltage, current, temperature, charge limits) | ○ | ● | ○ captured in the raw payload, not surfaced |
 | Raw register / telemetry dump | ○ | ○ | ● searchable table — neither app offers this |
 
 ### Alarms and events
@@ -131,10 +132,9 @@ station on SolarMan. No account identifiers appear in this document.
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | Energy-flow diagram | The centrepiece of both apps; every number is already in the database | M |
-| 2 | Self-sufficiency / self-consumption ratios | One derived figure from data already stored | S |
-| 3 | Plant-timezone-correct "today" | "Today" currently uses the *viewer's* midnight; plants carry their own timezone | S |
-| 4 | PWA install | Phone use without a browser tab | S |
+| 1 | Self-sufficiency / self-consumption ratios | One derived figure from data already stored | S |
+| 2 | Plant-timezone-correct "today" | "Today" currently uses the *viewer's* midnight; plants carry their own timezone | S |
+| 3 | PWA install | Phone use without a browser tab | S |
 
 ## 5. Out of scope, by decision
 

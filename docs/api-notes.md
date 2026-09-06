@@ -98,6 +98,21 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
     `Etdy_cg1` / `Etdy_dcg1` (charge / discharge today), `PG_Pt1` (grid W).
   - No per-string (`DV*` / `DC*` / `DP*`) registers appear on this hybrid — only total DC input.
 
+- `POST /device-s/device/v3/detail` body `{deviceId, siteId, language, needRealTimeDataFlag:true}`
+  — the inverter's own page, and the **only** place SolarMan exposes per-string and per-phase
+  detail. `device-list`'s `featureData` is merely a summary of it.
+  Returns `paramCategoryList[] -> fieldList[]` with `{storageName, key, value, unit}`; values are
+  strings, so parse rather than trust. Categories observed: Basic Information, Version
+  Information, Electricity Generation, Grid, Consumption, Battery, BMS, Temperature, State,
+  Smartload. Keys used:
+  - `DV1…n` / `DC1…n` / `DP1…n` — per-PV-string volts, amps, watts
+  - `AV1…3` / `AC1…3` — per-phase AC; `A_Fo1` (Hz), `PG_F1` (grid Hz)
+  - `AC_T` (inverter heatsink °C), `T_DC`, `B_T1` (battery pack)
+  - `Pr1` rated power (W), `INV_MOD1` inverter type, `MAIN_1`/`HMI` firmware, `SN1` serial
+  - `B_V1` / `B_C1` / `B_P1` battery V/A/W; `BMS_*` pack detail and charge limits
+  - Direct navigation to `/plant/infos/device` redirects to `/data`; the tab must be clicked,
+    which is why the endpoints only appear after a click-through.
+
 ### Official Business API (`https://globalapi.solarmanpv.com`)
 
 `POST /account/v1.0/token?appId=` with `appSecret`, `email`, `password` (sha256) → bearer, ~2 months.

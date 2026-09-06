@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import solisFixture from '../fixtures/solis-station.json';
 import solarmanFixture from '../fixtures/solarman-station.json';
 import { stationReading as solisStation, deviceFromInverterDetail as solisDetail } from '../../src/providers/soliscloud';
-import { stationReading as solarmanStation, stationInverter, deviceFromRecord as solarmanDevice } from '../../src/providers/solarman';
+import { stationReading as solarmanStation, stationInverter, deviceFromRecord as solarmanDevice, deviceFromV3Detail as solarmanV3 } from '../../src/providers/solarman';
 import { plantFilter } from '../../src/poll';
 import type { Inverter } from '../../src/providers/types';
 
@@ -247,5 +247,68 @@ describe('SolisCloud inverter detail (per-string V/A, per-phase AC)', () => {
     const dark = solisDetail({ ...detail, pow2: 0, iPv2: 0 }, null);
     expect(dark.strings).toHaveLength(2);
     expect(dark.strings?.[1]).toMatchObject({ index: 2, powerW: 0, voltageV: 154.7 });
+  });
+});
+
+describe('SolarMan v3 device detail (the richer per-device page)', () => {
+  const cat = (name: string, fields: [string, string, unknown, string | null][]) => ({
+    name, fieldList: fields.map(([storageName, key, value, unit], i) => ({ storageName, key, value, unit, serialNumber: i })),
+  });
+  const detail = {
+    deviceId: 233151400, deviceSn: 'INV-DEMO', siteId: 62000000, name: 'Inverter',
+    deviceState: 1, collectionTime: 1788709956,
+    paramCategoryList: [
+      cat('Basic Information', [
+        ['SN1', 'SN', 'INV-DEMO', null],
+        ['INV_MOD1', 'Inverter Type', 'Single phase LV Hybrid', null],
+        ['Pr1', 'Rated Power', '3600.00', 'W'],
+      ]),
+      cat('Version Information', [['MAIN_1', 'MAIN_1', 'V0.3.7.2', null], ['HMI', 'HMI', 'V4.3.5.6', null]]),
+      cat('Electricity Generation', [
+        ['DV1', 'DC Voltage PV1', '28.00', 'V'], ['DC1', 'DC Current PV1', '1.20', 'A'], ['DP1', 'DC Power PV1', '34', 'W'],
+        ['DV2', 'DC Voltage PV2', '0.60', 'V'], ['DC2', 'DC Current PV2', '0.00', 'A'], ['DP2', 'DC Power PV2', '0', 'W'],
+        ['DV3', 'DC Voltage PV3', '0.00', 'V'], ['DC3', 'DC Current PV3', '0.00', 'A'], ['DP3', 'DC Power PV3', '0', 'W'],
+        ['AV1', 'AC Voltage R', '235.30', 'V'], ['AC1', 'AC Current R', '0.20', 'A'],
+        ['A_Fo1', 'AC Output Frequency R', '50.23', 'Hz'],
+      ]),
+      cat('Temperature', [['B_T1', 'Battery', '31.40', '℃'], ['T_DC', 'DC Temperature', '44.90', '℃'], ['AC_T', 'AC Temperature', '47.70', '℃']]),
+    ],
+  };
+  const d = solarmanV3(detail, '62000000');
+
+  it('flattens paramCategoryList and reads per-string DC as V/A/W', () => {
+    // PV3 is absent entirely (all zero); PV2 is wired but dark, so it stays.
+    expect(d.strings).toEqual([
+      { index: 1, powerW: 34, voltageV: 28, currentA: 1.2 },
+      { index: 2, powerW: 0, voltageV: 0.6, currentA: 0 },
+    ]);
+  });
+
+  it('reads the single AC phase this hybrid reports, plus frequency', () => {
+    expect(d.acPhases).toEqual([{ index: 1, voltageV: 235.3, currentA: 0.2 }]);
+    expect(d.frequencyHz).toBe(50.23);
+  });
+
+  it('prefers the inverter heatsink temperature over the DC-side one', () => {
+    expect(d.tempC).toBe(47.7);
+  });
+
+  it('picks up model, firmware and rated power the device list lacks', () => {
+    expect(d.model).toBe('Single phase LV Hybrid');
+    expect(d.firmware).toBe('V0.3.7.2 / V4.3.5.6');
+    expect(d.ratedPowerW).toBe(3600);
+  });
+
+  it('shares the device-list id so both views merge into one device', () => {
+    expect(d.id).toBe('solarman:inverter:INV-DEMO');
+    expect(d.status).toBe('online');
+    expect(d.lastSeen).toBe(1788709956);
+  });
+
+  it('survives a payload with no categories at all', () => {
+    const bare = solarmanV3({ deviceId: 1, deviceSn: 'X', deviceState: 3 }, null);
+    expect(bare.strings).toEqual([]);
+    expect(bare.acPhases).toBeNull();
+    expect(bare.status).toBe('offline');
   });
 });
