@@ -1,4 +1,4 @@
-import type { Inverter, Reading } from './providers/types';
+import type { Device, Inverter, Reading } from './providers/types';
 import type { TokenStore } from './providers/solarman';
 
 export interface Env {
@@ -78,6 +78,7 @@ export interface LatestRow {
   provider: string;
   serial: string | null;
   name: string;
+  plant_id: string | null;
   plant_name: string | null;
   capacity_w: number | null;
   display_order: number;
@@ -101,10 +102,10 @@ export interface LatestRow {
 export async function latest(db: D1Database): Promise<LatestRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT i.id, i.provider, i.serial, i.name, i.plant_name, i.capacity_w, i.display_order,
+      `SELECT i.id, i.provider, i.serial, i.name, i.plant_id, i.plant_name, i.capacity_w, i.display_order,
               r.ts, r.source, r.ac_power_w, r.dc_power_w, r.today_kwh, r.total_kwh,
               r.battery_soc, r.battery_power_w, r.grid_power_w, r.load_power_w, r.temp_c, r.status,
-              r.metrics
+              r.metrics, r.raw
        FROM inverters i
        LEFT JOIN readings r
          ON r.rowid = (SELECT rowid FROM readings WHERE inverter_id = i.id ORDER BY ts DESC LIMIT 1)
@@ -114,6 +115,77 @@ export async function latest(db: D1Database): Promise<LatestRow[]> {
                 i.id`,
     )
     .all<LatestRow>();
+  return results;
+}
+
+export interface DeviceRow {
+  id: string;
+  provider: string;
+  plant_id: string | null;
+  kind: string;
+  sn: string | null;
+  name: string | null;
+  model: string | null;
+  firmware: string | null;
+  rated_power_w: number | null;
+  status: string | null;
+  signal_dbm: number | null;
+  upload_cycle_s: number | null;
+  commissioned_at: number | null;
+  warranty_until: number | null;
+  last_seen: number | null;
+  /** JSON [{index, powerW}] or null. */
+  strings: string | null;
+  updated_at: number;
+  raw: string | null;
+}
+
+/**
+ * Devices are re-pushed on every relay pass, so this is a full upsert rather
+ * than INSERT OR IGNORE: the point is to keep status, signal and last_seen fresh.
+ */
+export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO devices
+         (id, provider, plant_id, kind, sn, name, model, firmware, rated_power_w, status,
+          signal_dbm, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, updated_at, raw)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+       ON CONFLICT(id) DO UPDATE SET
+         plant_id        = COALESCE(excluded.plant_id, devices.plant_id),
+         name            = COALESCE(excluded.name, devices.name),
+         model           = COALESCE(excluded.model, devices.model),
+         firmware        = COALESCE(excluded.firmware, devices.firmware),
+         rated_power_w   = COALESCE(excluded.rated_power_w, devices.rated_power_w),
+         status          = excluded.status,
+         signal_dbm      = COALESCE(excluded.signal_dbm, devices.signal_dbm),
+         upload_cycle_s  = COALESCE(excluded.upload_cycle_s, devices.upload_cycle_s),
+         commissioned_at = COALESCE(excluded.commissioned_at, devices.commissioned_at),
+         warranty_until  = COALESCE(excluded.warranty_until, devices.warranty_until),
+         last_seen       = COALESCE(excluded.last_seen, devices.last_seen),
+         strings         = COALESCE(excluded.strings, devices.strings),
+         updated_at      = excluded.updated_at,
+         raw             = COALESCE(excluded.raw, devices.raw)`,
+    )
+    .bind(
+      d.id, d.provider, d.plantId, d.kind, d.sn, d.name, d.model, d.firmware, d.ratedPowerW,
+      d.status, d.signalDbm, d.uploadCycleS, d.commissionedAt, d.warrantyUntil, d.lastSeen,
+      d.strings ? JSON.stringify(d.strings) : null,
+      at,
+      d.raw ? JSON.stringify(d.raw) : null,
+    )
+    .run();
+}
+
+export async function listDevices(db: D1Database): Promise<DeviceRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT * FROM devices
+       ORDER BY CASE provider WHEN 'soliscloud' THEN 0 WHEN 'solarman' THEN 1 ELSE 2 END,
+                CASE kind WHEN 'inverter' THEN 0 WHEN 'datalogger' THEN 1 WHEN 'battery' THEN 2 ELSE 3 END,
+                sn`,
+    )
+    .all<DeviceRow>();
   return results;
 }
 

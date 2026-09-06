@@ -11,6 +11,7 @@
     --panel: #ffffff;
     --ink: #1c1c1a;
     --muted: #6b6a66;
+    --faint: #8d8c86;
     --line: #dedcd5;
     --soft: #efede7;
     --ok: #2e8b57;
@@ -23,15 +24,20 @@
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #121311;
       --panel: #1b1c19;
       --ink: #ecebe6;
       --muted: #9a9993;
+      --faint: #83827b;
       --line: #2c2d29;
       --soft: #232420;
       --total: #ecebe6;
     }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121311; --panel: #1b1c19; --ink: #ecebe6; --muted: #9a9993;
+    --faint: #83827b; --line: #2c2d29; --soft: #232420; --total: #ecebe6;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--ink); }
@@ -40,10 +46,13 @@
     -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 48px; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--solarman); outline-offset: 2px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
   header {
     display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-    padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
   }
   header h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; font-weight: 650; }
   header h1 span { color: var(--muted); font-weight: 400; }
@@ -51,12 +60,22 @@
   .fleet .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
   .fleet .sub { color: var(--muted); font-size: 13px; }
 
-  /* Two panels separated by a divider; the divider turns horizontal when stacked. */
+  nav { display: flex; gap: 4px; margin: 0 0 18px; border-bottom: 1px solid var(--line); }
+  nav a {
+    text-decoration: none; padding: 9px 14px; font-size: 14px; color: var(--muted);
+    border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500;
+  }
+  nav a:hover { color: var(--ink); }
+  nav a.on { color: var(--ink); border-bottom-color: var(--ink); }
+  .back { display: inline-block; font-size: 13px; color: var(--muted); text-decoration: none; margin-bottom: 12px; }
+  .back:hover { color: var(--ink); }
+
   .panels {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
     background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
   }
-  .panel { padding: 22px 24px 20px; min-width: 0; }
+  .panel { padding: 22px 24px 20px; min-width: 0; text-decoration: none; color: inherit; display: block; }
+  a.panel:hover { background: var(--soft); }
   @media (min-width: 720px) { .panel + .panel { border-left: 1px solid var(--line); } }
   @media (max-width: 719.98px) { .panel + .panel { border-top: 1px solid var(--line); } }
 
@@ -81,7 +100,6 @@
   .hero .unit { font-size: 18px; color: var(--muted); }
   .hero .cap { font-size: 13px; color: var(--muted); margin-left: auto; }
   .stale { color: var(--warn); font-size: 12px; margin-bottom: 8px; min-height: 1.2em; }
-
   .spark { width: 100%; height: 64px; display: block; margin: 8px 0 14px; }
 
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 14px; }
@@ -99,21 +117,6 @@
   .batt .k { color: var(--muted); font-size: 12px; }
   .batt .v { font-weight: 600; font-variant-numeric: tabular-nums; }
 
-  /* Expandable per-inverter energy breakdown (what the vendor apps show on their detail pages). */
-  details.more { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
-  details.more summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; user-select: none; }
-  details.more summary::-webkit-details-marker { display: none; }
-  details.more summary::before { content: '▸ '; }
-  details.more[open] summary::before { content: '▾ '; }
-  .energy { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
-  .energy th { text-align: right; color: var(--muted); font-weight: 500; font-size: 11px; padding: 4px 6px; border-bottom: 1px solid var(--line); }
-  .energy th:first-child, .energy td:first-child { text-align: left; }
-  .energy td { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--soft); }
-  .energy tr:last-child td { border-bottom: 0; }
-  .energy td.dim { color: var(--muted); }
-  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-  .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); color: var(--muted); }
-
   section.chart { margin-top: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
   section.chart h2 { font-size: 14px; margin: 0 0 8px; font-weight: 600; color: var(--muted); }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
@@ -121,6 +124,51 @@
   .combined { width: 100%; height: 220px; display: block; }
   .axis { fill: var(--muted); font-size: 11px; }
   .grid { stroke: var(--line); stroke-dasharray: 3 4; }
+
+  .blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; align-items: start; }
+  .block { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .block > h3 {
+    margin: 0; padding: 12px 16px; font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .07em; border-bottom: 1px solid var(--line); background: var(--soft);
+  }
+  .block .body { padding: 14px 16px 16px; }
+  .kv { display: grid; grid-template-columns: minmax(92px, auto) 1fr; gap: 7px 16px; font-size: 14px; margin: 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .kv dd.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+
+  .bars { display: flex; flex-direction: column; gap: 9px; }
+  .bar-row { display: grid; grid-template-columns: 62px 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
+  .bar-row .lbl { color: var(--muted); }
+  .bar-track { height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; }
+  .bar-row .num { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  table.devices { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.devices th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted); font-weight: 600; padding: 12px 12px 8px; border-bottom: 1px solid var(--line);
+  }
+  table.devices td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+  table.devices tr:last-child td { border-bottom: none; }
+  table.devices td.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  .tablewrap { overflow-x: auto; }
+
+  details.raw { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  details.raw summary { padding: 12px 16px; cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 500; }
+  details.raw summary:hover { color: var(--ink); }
+  details.raw .body { padding: 0 16px 16px; }
+  details.raw input {
+    width: 100%; padding: 8px 10px; margin-bottom: 10px; font: inherit; font-size: 13px;
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 7px;
+  }
+  .rawgrid {
+    display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: 4px 16px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px;
+    max-height: 340px; overflow: auto;
+  }
+  .rawgrid .rk { color: var(--muted); }
+  .rawgrid .rv { overflow-wrap: anywhere; }
 
   footer { margin-top: 18px; color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
   .empty { padding: 48px 24px; text-align: center; color: var(--muted); }
@@ -138,13 +186,12 @@
     </div>
   </header>
 
-  <div class="panels" id="panels"><div class="empty">Loading…</div></div>
+  <nav id="nav">
+    <a href="#/">Overview</a>
+    <a href="#/devices">Devices</a>
+  </nav>
 
-  <section class="chart">
-    <h2>Today · AC output</h2>
-    <div class="legend" id="legend"></div>
-    <svg class="combined" id="combined" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg>
-  </section>
+  <main id="view"><div class="empty">Loading…</div></main>
 
   <footer>
     <span id="poll-status">—</span>
@@ -158,9 +205,10 @@
   const REFRESH_MS = 30_000;
   const STALE_AFTER_S = 15 * 60;
 
-  const colorFor = (provider) => ({
-    soliscloud: 'var(--solis)', solarman: 'var(--solarman)', local: 'var(--local)',
-  }[provider] || 'var(--muted)');
+  const state = { latest: null, series: null, devices: [], health: null, error: null };
+
+  const colorFor = (p) => ({ soliscloud: 'var(--solis)', solarman: 'var(--solarman)', local: 'var(--local)' }[p] || 'var(--muted)');
+  const providerName = (p) => p === 'soliscloud' ? 'SolisCloud' : p === 'solarman' ? 'SolarMan' : p;
 
   const fmtW = (w) => {
     if (w === null || w === undefined) return ['—', ''];
@@ -169,6 +217,7 @@
   };
   const fmtWs = (w) => { const [v, u] = fmtW(w); return u ? `${v} ${u}` : v; };
   const fmtKwh = (k) => (k === null || k === undefined) ? '—' : `${k >= 100 ? k.toFixed(0) : k.toFixed(1)} kWh`;
+  const fmtDate = (s) => !s ? '—' : new Date(s * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   const ago = (s) => {
     if (!s) return 'never';
     const d = Math.max(0, Math.floor(Date.now() / 1000) - s);
@@ -177,6 +226,8 @@
     return `${Math.floor(d / 3600)} h ${Math.floor((d % 3600) / 60)} min ago`;
   };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000); };
+  const parse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
 
   async function api(path) {
     const r = await fetch(path, { credentials: 'same-origin' });
@@ -185,11 +236,39 @@
     return r.json();
   }
 
-  function startOfToday() {
-    const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000);
+  /** Bands are the datalogger's own: −58 dBm is a healthy WiFi stick, −85 is trouble. */
+  const rssiLabel = (dbm) => dbm === null || dbm === undefined ? '—'
+    : `${dbm} dBm · ${dbm >= -60 ? 'strong' : dbm >= -70 ? 'good' : dbm >= -80 ? 'weak' : 'very weak'}`;
+
+  const plantIdOf = (inv) => inv.plant_id || String(inv.id || '').split(':').pop();
+  const devicesFor = (inv) => state.devices.filter(
+    (d) => d.provider === inv.provider && (!d.plant_id || d.plant_id === plantIdOf(inv)));
+
+  // A hybrid has a battery; an on-grid inverter does not, so the block is hidden
+  // rather than rendered as a row of dashes.
+  const hasBattery = (inv, m) =>
+    (inv.battery_soc !== null && inv.battery_soc !== undefined) ||
+    !!(m && (m.battChargeTotalKwh || m.battDischargeTotalKwh || m.batteryStatus));
+
+  function statusOf(inv) {
+    const age = inv.ts ? Math.floor(Date.now() / 1000) - inv.ts : null;
+    const stale = age === null || age > STALE_AFTER_S;
+    return {
+      stale,
+      cls: !inv.ts ? '' : stale ? 'warn' : inv.status === 'alarm' ? 'bad' : inv.status === 'offline' ? 'warn' : 'ok',
+      text: !inv.ts ? 'no data yet' : (inv.status || 'reporting'),
+    };
   }
 
-  // ---- sparkline: today's AC power for one inverter ----
+  function ring(soc) {
+    const r = 22, c = 2 * Math.PI * r, off = c * (1 - Math.min(100, Math.max(0, soc)) / 100);
+    return `<svg class="ring" viewBox="0 0 56 56" aria-hidden="true">
+      <circle class="track" cx="28" cy="28" r="${r}"/>
+      <circle class="fill" cx="28" cy="28" r="${r}" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
+      <text x="28" y="32" text-anchor="middle">${Math.round(soc)}%</text>
+    </svg>`;
+  }
+
   function sparkline(points, color) {
     const W = 300, H = 64, P = 2;
     if (points.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"></svg>`;
@@ -200,127 +279,66 @@
     const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.ac_power_w).toFixed(1)}`).join(' ');
     const last = points[points.length - 1];
     const area = `${d} L${x(last.ts).toFixed(1)},${H - P} L${x(points[0].ts).toFixed(1)},${H - P} Z`;
-    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
       <path d="${area}" fill="${color}" opacity="0.12"/>
       <path d="${d}" fill="none" stroke="${color}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
     </svg>`;
   }
 
-  function ring(soc) {
-    const r = 22, c = 2 * Math.PI * r, off = c * (1 - Math.min(100, Math.max(0, soc)) / 100);
-    return `<svg class="ring" viewBox="0 0 56 56">
-      <circle class="track" cx="28" cy="28" r="${r}"/>
-      <circle class="fill" cx="28" cy="28" r="${r}" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
-      <text x="28" y="32" text-anchor="middle">${Math.round(soc)}%</text>
-    </svg>`;
-  }
+  const gridText = (v) => v === null || v === undefined ? '—'
+    : v >= 0 ? `↓ ${fmtWs(v)} import` : `↑ ${fmtWs(-v)} export`;
+  // A few tens of watts either way is BMS/meter drift, not real charge or
+  // discharge — SolarMan reports the same reading as batteryStatus "STATIC".
+  const battText = (v) => v === null || v === undefined ? '—'
+    : Math.abs(v) < 50 ? 'idle' : v >= 0 ? `charging ${fmtWs(v)}` : `discharging ${fmtWs(-v)}`;
 
-  // ---- energy breakdown table from the reading's `metrics` JSON ----
-  function detailsBlock(inv) {
-    let m = null;
-    try { m = typeof inv.metrics === 'string' ? JSON.parse(inv.metrics) : inv.metrics; } catch { m = null; }
-    if (!m) return '';
-    const cell = (v) => v === null || v === undefined ? '<td class="dim">—</td>' : `<td>${fmtKwh(v)}</td>`;
-    const rows = [
-      ['Generation', inv.today_kwh, m.genMonthKwh, m.genYearKwh, m.genTotalKwh ?? inv.total_kwh],
-      ['Consumption', m.loadTodayKwh, null, null, m.loadTotalKwh],
-      ['Self-consumed', m.selfUseTodayKwh, null, null, null],
-      ['Grid import', m.gridImportTodayKwh, null, null, m.gridImportTotalKwh],
-      ['Grid export', m.gridExportTodayKwh, null, null, m.gridExportTotalKwh],
-      ['Battery charge', m.battChargeTodayKwh, null, null, m.battChargeTotalKwh],
-      ['Battery discharge', m.battDischargeTodayKwh, null, null, m.battDischargeTotalKwh],
-    ].filter((r) => r.slice(1).some((v) => v !== null && v !== undefined));
-    const chips = [
-      m.gridStatus ? `<span class="chip">grid: ${esc(String(m.gridStatus).toLowerCase())}</span>` : '',
-      m.batteryStatus ? `<span class="chip">battery: ${esc(String(m.batteryStatus).toLowerCase())}</span>` : '',
-    ].join('');
-    if (!rows.length && !chips) return '';
-    const table = rows.length ? `<table class="energy">
-        <thead><tr><th></th><th>Today</th><th>Month</th><th>Year</th><th>Lifetime</th></tr></thead>
-        <tbody>${rows.map((r) => `<tr><td>${esc(r[0])}</td>${r.slice(1).map(cell).join('')}</tr>`).join('')}</tbody>
-      </table>` : '';
-    return `<details class="more"><summary>Energy breakdown</summary>${table}${chips ? `<div class="chips">${chips}</div>` : ''}</details>`;
-  }
-
-  function panel(inv, pts) {
-    const now = Math.floor(Date.now() / 1000);
-    const age = inv.ts ? now - inv.ts : null;
-    const stale = age === null || age > STALE_AFTER_S;
-    const statusClass = !inv.ts ? '' : stale ? 'warn' : (inv.status === 'alarm' ? 'bad' : (inv.status === 'offline' ? 'warn' : 'ok'));
-    const statusText = !inv.ts ? 'no data yet' : (inv.status || 'reporting');
+  // ---------- overview ----------
+  function panelHtml(inv, pts) {
+    const st = statusOf(inv);
     const [pv, pu] = fmtW(inv.ac_power_w);
-    const cap = inv.capacity_w ? `of ${fmtWs(inv.capacity_w)}` : '';
-    const color = colorFor(inv.provider);
-
-    const gridV = inv.grid_power_w;
-    const gridText = gridV === null || gridV === undefined ? '—'
-      : gridV >= 0 ? `↓ ${fmtWs(gridV)} import` : `↑ ${fmtWs(-gridV)} export`;
-    const battV = inv.battery_power_w;
-    // A few tens of watts either way is BMS/meter drift, not real charge or discharge —
-    // SolarMan reports the same reading as batteryStatus "STATIC".
-    const battText = battV === null || battV === undefined ? '—'
-      : Math.abs(battV) < 50 ? 'idle'
-      : battV >= 0 ? `charging ${fmtWs(battV)}` : `discharging ${fmtWs(-battV)}`;
-
-    return `<article class="panel" style="--accent:${color}">
+    const m = parse(inv.metrics);
+    return `<a class="panel" href="#/system/${encodeURIComponent(inv.id)}">
       <div class="panel-head">
         <div class="who">
-          <div class="provider ${esc(inv.provider)}">${esc(inv.provider === 'soliscloud' ? 'SolisCloud' : inv.provider === 'solarman' ? 'SolarMan' : inv.provider)}</div>
+          <div class="provider ${esc(inv.provider)}">${esc(providerName(inv.provider))}</div>
           <div class="name">${esc(inv.name)}</div>
-          <div class="plant">${esc(inv.plant_name && inv.plant_name !== inv.name ? inv.plant_name : '')}${inv.serial ? ` · ${esc(inv.serial)}` : ''}</div>
+          <div class="plant">${esc(inv.plant_name && inv.plant_name !== inv.name ? inv.plant_name : '')}</div>
         </div>
-        <span class="badge ${statusClass}"><span class="dot"></span>${esc(statusText)}</span>
+        <span class="badge ${st.cls}"><span class="dot"></span>${esc(st.text)}</span>
       </div>
       <div class="hero">
         <span class="val">${pv}</span><span class="unit">${pu}</span>
-        <span class="cap">${cap}</span>
+        <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)}` : ''}</span>
       </div>
-      <div class="stale">${inv.ts ? (stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}${inv.source && inv.source !== inv.provider ? ` via ${esc(inv.source)}` : ''}`) : ''}</div>
-      ${sparkline(pts, color)}
+      <div class="stale">${inv.ts ? (st.stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}${inv.source && inv.source !== inv.provider ? ` via ${esc(inv.source)}` : ''}`) : ''}</div>
+      ${sparkline(pts, colorFor(inv.provider))}
       <div class="stats">
         <div class="stat"><div class="k">Today</div><div class="v">${fmtKwh(inv.today_kwh)}</div></div>
         <div class="stat"><div class="k">Lifetime</div><div class="v">${fmtKwh(inv.total_kwh)}</div></div>
         <div class="stat"><div class="k">Load</div><div class="v">${fmtWs(inv.load_power_w)}</div></div>
-        <div class="stat"><div class="k">Grid</div><div class="v ${gridV > 0 ? 'neg' : gridV < 0 ? 'pos' : ''}">${gridText}</div></div>
-        <div class="stat"><div class="k">DC in</div><div class="v">${fmtWs(inv.dc_power_w)}</div></div>
-        <div class="stat"><div class="k">Temp</div><div class="v">${inv.temp_c === null || inv.temp_c === undefined ? '—' : `${inv.temp_c.toFixed(1)} °C`}</div></div>
+        <div class="stat"><div class="k">Grid</div><div class="v ${inv.grid_power_w > 0 ? 'neg' : inv.grid_power_w < 0 ? 'pos' : ''}">${gridText(inv.grid_power_w)}</div></div>
       </div>
-      ${inv.battery_soc === null || inv.battery_soc === undefined ? '' : `
-      <div class="batt">
-        ${ring(inv.battery_soc)}
-        <div><div class="k">Battery</div><div class="v">${battText}</div></div>
-      </div>`}
-      ${detailsBlock(inv)}
-    </article>`;
+      ${hasBattery(inv, m) ? `<div class="batt">${ring(inv.battery_soc ?? 0)}
+        <div><div class="k">Battery</div><div class="v">${battText(inv.battery_power_w)}</div></div></div>` : ''}
+    </a>`;
   }
 
-  // ---- combined chart: every inverter + fleet total ----
-  function combined(byInv, invs) {
-    const svg = $('combined');
+  function combinedChart(svg, byInv, invs) {
     const W = 1000, H = 220, L = 44, R = 10, T = 12, B = 24;
     const t0 = startOfToday(), t1 = t0 + 86400;
     const all = Object.values(byInv).flat();
-    if (!all.length) { svg.innerHTML = `<text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">No samples yet today</text>`; $('legend').innerHTML = ''; return; }
-
-    // Fleet total = sum of the latest value from each inverter at 5-min buckets.
-    const bucket = 300;
-    const totals = new Map();
-    for (const [id, pts] of Object.entries(byInv)) {
-      for (const p of pts) {
-        const b = Math.floor(p.ts / bucket) * bucket;
-        const m = totals.get(b) || {};
-        m[id] = p.ac_power_w || 0;
-        totals.set(b, m);
-      }
+    if (!all.length) { svg.innerHTML = `<text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">No samples yet today</text>`; return []; }
+    const bucket = 300, totals = new Map();
+    for (const [id, pts] of Object.entries(byInv)) for (const p of pts) {
+      const b = Math.floor(p.ts / bucket) * bucket;
+      const mm = totals.get(b) || {}; mm[id] = p.ac_power_w || 0; totals.set(b, mm);
     }
     const totalPts = [...totals.entries()].sort((a, b) => a[0] - b[0])
-      .map(([ts, m]) => ({ ts, ac_power_w: Object.values(m).reduce((a, v) => a + v, 0) }));
-
+      .map(([ts, mm]) => ({ ts, ac_power_w: Object.values(mm).reduce((a, v) => a + v, 0) }));
     const max = Math.max(500, ...all.map((p) => p.ac_power_w || 0), ...totalPts.map((p) => p.ac_power_w));
     const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
     const y = (v) => T + (1 - (v || 0) / max) * (H - T - B);
     const line = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.ac_power_w).toFixed(1)}`).join(' ');
-
     let out = '';
     for (let i = 0; i <= 4; i++) {
       const v = (max / 4) * i, yy = y(v);
@@ -344,33 +362,209 @@
       legend.push(`<span><i style="background:var(--total);opacity:.8"></i>Fleet total</span>`);
     }
     svg.innerHTML = out;
-    $('legend').innerHTML = legend.join('');
+    return legend;
+  }
+
+  function renderOverview() {
+    const invs = state.latest?.inverters ?? [];
+    const byInv = {};
+    for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
+    const panels = invs.length
+      ? invs.map((inv) => panelHtml(inv, byInv[inv.id] || [])).join('')
+      : `<div class="empty">No inverters yet. Trigger a poll with <code>POST /api/poll</code> or wait for the next cron run.</div>`;
+    $('view').innerHTML = `<div class="panels">${panels}</div>
+      <section class="chart"><h2>Today · AC output</h2><div class="legend" id="legend"></div>
+        <svg class="combined" id="combined" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg></section>`;
+    $('legend').innerHTML = combinedChart($('combined'), byInv, invs).join('');
+  }
+
+  // ---------- devices ----------
+  function renderDevices() {
+    if (!state.devices.length) {
+      $('view').innerHTML = `<div class="empty">No hardware recorded yet. The relay agent fills this in — run <code>npm run relay:solis</code>.</div>`;
+      return;
+    }
+    const row = (d) => {
+      const cls = d.status === 'online' ? 'ok' : d.status === 'alarm' ? 'bad' : 'warn';
+      const strings = parse(d.strings);
+      return `<tr>
+        <td><span class="badge ${cls}"><span class="dot"></span>${esc(d.status ?? 'unknown')}</span></td>
+        <td><div style="font-weight:600">${esc(d.name || d.kind)}</div>
+            <div style="color:var(--muted);font-size:12.5px">${esc(providerName(d.provider))} · ${esc(d.kind)}</div></td>
+        <td class="mono">${esc(d.sn ?? '—')}</td>
+        <td>${esc(d.model ?? '—')}</td>
+        <td class="mono">${esc(d.firmware ?? '—')}</td>
+        <td>${d.kind === 'datalogger' ? esc(rssiLabel(d.signal_dbm)) : (d.rated_power_w ? fmtWs(d.rated_power_w) : '—')}</td>
+        <td>${d.last_seen ? esc(ago(d.last_seen)) : '—'}</td>
+        <td>${strings && strings.length ? `${strings.length} producing` : (d.kind === 'inverter' ? 'none' : '—')}</td>
+      </tr>`;
+    };
+    $('view').innerHTML = `<div class="block"><h3>Hardware</h3><div class="tablewrap">
+      <table class="devices">
+        <thead><tr><th>Status</th><th>Device</th><th>Serial</th><th>Model</th><th>Firmware</th>
+          <th>Rated / signal</th><th>Last contact</th><th>PV strings</th></tr></thead>
+        <tbody>${state.devices.map(row).join('')}</tbody>
+      </table></div></div>`;
+  }
+
+  // ---------- system detail ----------
+  function kvBlock(title, rows) {
+    const body = rows.filter(Boolean).map(([k, v, mono]) => `<dt>${esc(k)}</dt><dd class="${mono ? 'mono' : ''}">${v}</dd>`).join('');
+    return body ? `<div class="block"><h3>${esc(title)}</h3><div class="body"><dl class="kv">${body}</dl></div></div>` : '';
+  }
+
+  function stringsBlock(invDev, accent) {
+    if (!invDev) return '';
+    const strings = parse(invDev.strings);
+    const body = !strings || !strings.length
+      ? `<p style="margin:0;color:var(--muted);font-size:13.5px">No string is producing in the latest sample.</p>`
+      : (() => {
+          const max = Math.max(...strings.map((s) => s.powerW));
+          return `<div class="bars">${strings.map((s) => `<div class="bar-row">
+            <span class="lbl">String ${s.index}</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, (s.powerW / max) * 100).toFixed(1)}%;background:${accent}"></span></span>
+            <span class="num">${fmtWs(s.powerW)}</span></div>`).join('')}</div>`;
+        })();
+    return `<div class="block"><h3>PV strings · MPPT</h3><div class="body">${body}</div></div>`;
+  }
+
+  function rawBlock(inv) {
+    const raw = parse(inv.raw);
+    if (!raw || typeof raw !== 'object') return '';
+    const rows = Object.entries(raw)
+      .filter(([, v]) => v === null || typeof v !== 'object')
+      .map(([k, v]) => {
+        const key = esc(k.toLowerCase());
+        return `<div class="rk" data-k="${key}">${esc(k)}</div><div class="rv" data-k="${key}">${esc(v === null ? 'null' : String(v))}</div>`;
+      });
+    if (!rows.length) return '';
+    return `<details class="raw"><summary>Raw telemetry · ${rows.length / 2 | 0} fields from ${esc(inv.source ?? inv.provider)}</summary>
+      <div class="body">
+        <input type="search" id="rawfilter" placeholder="Filter fields…" aria-label="Filter raw telemetry fields">
+        <div class="rawgrid" id="rawgrid">${rows.join('')}</div>
+      </div></details>`;
+  }
+
+  function renderSystem(id) {
+    const inv = (state.latest?.inverters ?? []).find((i) => i.id === id);
+    if (!inv) { $('view').innerHTML = `<a class="back" href="#/">← Overview</a><div class="empty">Unknown system.</div>`; return; }
+    const m = parse(inv.metrics) ?? {};
+    const st = statusOf(inv);
+    const devs = devicesFor(inv);
+    const invDev = devs.find((d) => d.kind === 'inverter');
+    const logger = devs.find((d) => d.kind === 'datalogger');
+    const accent = colorFor(inv.provider);
+    const [pv, pu] = fmtW(inv.ac_power_w);
+
+    const identity = kvBlock('Identity & hardware', [
+      ['System', esc(inv.name)],
+      inv.plant_name && inv.plant_name !== inv.name ? ['Plant', esc(inv.plant_name)] : null,
+      ['Feed', esc(inv.source ?? providerName(inv.provider))],
+      invDev?.model ? ['Model', esc(invDev.model)] : null,
+      invDev?.sn ? ['Serial', esc(invDev.sn), true] : null,
+      invDev?.firmware ? ['Firmware', esc(invDev.firmware), true] : null,
+      ['Rated', invDev?.rated_power_w ? fmtWs(invDev.rated_power_w) : (inv.capacity_w ? fmtWs(inv.capacity_w) : '—')],
+      invDev?.commissioned_at ? ['Commissioned', esc(fmtDate(invDev.commissioned_at))] : null,
+      invDev?.warranty_until ? ['Warranty to', esc(fmtDate(invDev.warranty_until))] : null,
+    ]);
+
+    const link = logger ? kvBlock('Datalogger & link', [
+      ['Status', `<span class="badge ${logger.status === 'online' ? 'ok' : 'warn'}"><span class="dot"></span>${esc(logger.status ?? 'unknown')}</span>`],
+      logger.sn ? ['Serial', esc(logger.sn), true] : null,
+      logger.model ? ['Model', esc(logger.model)] : null,
+      logger.firmware ? ['Firmware', esc(logger.firmware), true] : null,
+      ['Signal', esc(rssiLabel(logger.signal_dbm))],
+      logger.upload_cycle_s ? ['Uploads every', `${logger.upload_cycle_s}s`] : null,
+      ['Last contact', esc(logger.last_seen ? ago(logger.last_seen) : '—')],
+    ]) : '';
+
+    const live = kvBlock('Live power', [
+      ['AC output', fmtWs(inv.ac_power_w)],
+      inv.dc_power_w !== null && inv.dc_power_w !== undefined ? ['DC input', fmtWs(inv.dc_power_w)] : null,
+      ['House load', fmtWs(inv.load_power_w)],
+      ['Grid', gridText(inv.grid_power_w)],
+      ['Sample', esc(inv.ts ? ago(inv.ts) : 'never')],
+    ]);
+
+    const counters = kvBlock('Energy counters', [
+      ['Today', fmtKwh(inv.today_kwh)],
+      m.genMonthKwh != null ? ['This month', fmtKwh(m.genMonthKwh)] : null,
+      m.genYearKwh != null ? ['This year', fmtKwh(m.genYearKwh)] : null,
+      ['Lifetime', fmtKwh(inv.total_kwh)],
+      m.loadTodayKwh != null ? ['Consumed today', fmtKwh(m.loadTodayKwh)] : null,
+      m.gridImportTodayKwh != null ? ['Imported today', fmtKwh(m.gridImportTodayKwh)] : null,
+      m.gridExportTodayKwh != null ? ['Exported today', fmtKwh(m.gridExportTodayKwh)] : null,
+      m.gridImportTotalKwh != null ? ['Imported, lifetime', fmtKwh(m.gridImportTotalKwh)] : null,
+      m.gridExportTotalKwh != null ? ['Exported, lifetime', fmtKwh(m.gridExportTotalKwh)] : null,
+    ]);
+
+    const battery = hasBattery(inv, m) ? `<div class="block"><h3>Battery</h3><div class="body">
+      <div class="batt" style="margin-top:0;padding-top:0;border-top:none">
+        ${ring(inv.battery_soc ?? 0)}
+        <div><div class="k">State of charge</div><div class="v">${battText(inv.battery_power_w)}</div></div>
+      </div>
+      <dl class="kv" style="margin-top:14px">
+        ${m.batteryStatus ? `<dt>Status</dt><dd>${esc(String(m.batteryStatus).toLowerCase())}</dd>` : ''}
+        ${m.battChargeTodayKwh != null ? `<dt>Charged today</dt><dd>${fmtKwh(m.battChargeTodayKwh)}</dd>` : ''}
+        ${m.battDischargeTodayKwh != null ? `<dt>Discharged today</dt><dd>${fmtKwh(m.battDischargeTodayKwh)}</dd>` : ''}
+        ${m.battChargeTotalKwh != null ? `<dt>Charged, lifetime</dt><dd>${fmtKwh(m.battChargeTotalKwh)}</dd>` : ''}
+        ${m.battDischargeTotalKwh != null ? `<dt>Discharged, lifetime</dt><dd>${fmtKwh(m.battDischargeTotalKwh)}</dd>` : ''}
+      </dl></div></div>` : '';
+
+    const diagnostics = kvBlock('Status & diagnostics', [
+      ['Reported', `<span class="badge ${st.cls}"><span class="dot"></span>${esc(st.text)}</span>`],
+      inv.temp_c != null ? ['Temperature', `${inv.temp_c.toFixed(1)} °C`] : null,
+      m.gridStatus ? ['Grid', esc(String(m.gridStatus).toLowerCase())] : null,
+      ['Data age', esc(inv.ts ? ago(inv.ts) : 'never')],
+    ]);
+
+    $('view').innerHTML = `<a class="back" href="#/">← Overview</a>
+      <div class="panel-head" style="margin-bottom:16px">
+        <div class="who">
+          <div class="provider ${esc(inv.provider)}">${esc(providerName(inv.provider))}</div>
+          <div class="name" style="font-size:22px">${esc(inv.name)}</div>
+        </div>
+        <div class="hero" style="margin:0"><span class="val" style="font-size:38px">${pv}</span><span class="unit">${pu}</span></div>
+      </div>
+      <div class="blocks">${identity}${link}${live}${counters}${stringsBlock(invDev, accent)}${battery}${diagnostics}</div>
+      ${rawBlock(inv)}`;
+
+    const filter = $('rawfilter');
+    if (filter) filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      for (const el of $('rawgrid').children) el.hidden = !!q && !el.dataset.k.includes(q);
+    });
+  }
+
+  // ---------- routing ----------
+  function route() {
+    const hash = location.hash || '#/';
+    for (const a of $('nav').children) a.classList.toggle('on', a.getAttribute('href') === hash);
+    if (state.error === 'unauthorized') {
+      $('view').innerHTML = `<div class="empty">This dashboard is token-protected. Open <code>/auth?t=&lt;API_TOKEN&gt;</code> once on this device.</div>`;
+      return;
+    }
+    if (!state.latest) return; // first paint waits for data
+    const sys = hash.match(/^#\/system\/(.+)$/);
+    if (sys) return renderSystem(decodeURIComponent(sys[1]));
+    if (hash === '#/devices') return renderDevices();
+    renderOverview();
   }
 
   async function refresh() {
     try {
       const now = Math.floor(Date.now() / 1000);
-      const [lat, ser, health] = await Promise.all([
+      const [lat, ser, devs, health] = await Promise.all([
         api('/api/latest'),
         api(`/api/series?from=${startOfToday()}&to=${now}`),
+        api('/api/devices').catch(() => ({ devices: [] })),
         api('/api/health').catch(() => null),
       ]);
-      const invs = lat.inverters;
-      const byInv = {};
-      for (const p of ser.points) (byInv[p.inverter_id] ||= []).push(p);
+      state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.error = null;
 
-      if (!invs.length) {
-        $('panels').innerHTML = `<div class="empty">No inverters yet. Trigger a poll with <code>POST /api/poll</code> or wait for the next cron run.</div>`;
-      } else {
-        $('panels').innerHTML = invs.map((inv) => panel(inv, byInv[inv.id] || [])).join('');
-      }
-      combined(byInv, invs);
-
-      const withData = invs.filter((i) => i.ts);
-      const fleetW = withData.reduce((a, i) => a + (i.ac_power_w || 0), 0);
-      const fleetKwh = withData.reduce((a, i) => a + (i.today_kwh || 0), 0);
-      $('fleet-power').textContent = withData.length ? fmtWs(fleetW) : '—';
-      $('fleet-today').textContent = withData.length ? `${fmtKwh(fleetKwh)} today` : '';
+      const withData = lat.inverters.filter((i) => i.ts);
+      $('fleet-power').textContent = withData.length ? fmtWs(withData.reduce((a, i) => a + (i.ac_power_w || 0), 0)) : '—';
+      $('fleet-today').textContent = withData.length ? `${fmtKwh(withData.reduce((a, i) => a + (i.today_kwh || 0), 0))} today` : '';
       const newest = Math.max(0, ...withData.map((i) => i.ts));
       $('updated').textContent = newest ? `newest sample ${ago(newest)}` : 'no samples yet';
 
@@ -379,17 +573,16 @@
         $('poll-status').textContent = `last poll (${p.provider}) ${p.ok ? 'ok' : 'FAILED'} ${ago(p.ts)} — ${p.detail}`;
         $('poll-status').style.color = p.ok ? '' : 'var(--bad)';
       }
-      $('auth-note').textContent = '';
+      route();
     } catch (e) {
-      if (e.message === 'unauthorized') {
-        $('panels').innerHTML = `<div class="empty">This dashboard is token-protected. Open <code>/auth?t=&lt;API_TOKEN&gt;</code> once on this device.</div>`;
-        $('updated').textContent = 'unauthorized';
-      } else {
-        $('updated').textContent = `error: ${e.message}`;
-      }
+      state.error = e.message;
+      if (e.message === 'unauthorized') { $('updated').textContent = 'unauthorized'; route(); }
+      else $('updated').textContent = `error: ${e.message}`;
     }
   }
 
+  window.addEventListener('hashchange', route);
+  route();
   refresh();
   setInterval(refresh, REFRESH_MS);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

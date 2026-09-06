@@ -61,7 +61,10 @@ A single Cloudflare Worker does three jobs:
 
 1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1.
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
-3. **Static UI** — a dependency-free HTML page served from the same Worker: two panels split by a divider (stacking on phones), sparklines, a combined day chart, and an expandable energy breakdown per inverter.
+3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker, with three views:
+   - **Overview** (`#/`) — both systems split by a divider (stacking on phones), sparklines and a combined day chart.
+   - **Devices** (`#/devices`) — hardware inventory: inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
+   - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table.
 
 Every provider is an adapter behind one interface (`listPlants → listInverters → getReading`). A provider is active purely when its secrets are present, so the same deploy works with one vendor today and both tomorrow.
 
@@ -238,10 +241,11 @@ Signing itself (`crypto.subtle` MD5 + HMAC) runs only in the Workers runtime and
 
 ## Data model
 
-Three tables in D1 (`migrations/`):
+Four tables in D1 (`migrations/`):
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`.
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, and grid/battery status strings. Re-polling a vendor that has not produced a new sample is a no-op, not a duplicate.
+- **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, and `strings` — a JSON array of per-MPPT-string DC power. Filled by the relay agent; the vendor payload is stripped of address, coordinates and account identifiers before storage.
 - **`tokens`** — cached bearer/refresh tokens per provider. **`poll_log`** — one line per poll with success and detail, surfaced in the dashboard footer.
 
 Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**; `grid_power_w` is **+ import / − export**; `battery_power_w` is **+ charging / − discharging** (|x| < 50 W is shown as idle). Free-tier headroom is comfortable: two inverters every 5 minutes is ≈ 600 writes/day against D1's 100 000.
@@ -256,6 +260,8 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `POST /api/poll` | API_TOKEN | poll all providers now |
 | `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |
+| `GET /api/devices` | API_TOKEN | hardware inventory |
+| `POST /api/ingest/devices` | INGEST_TOKEN | push raw vendor device records (`{provider, plantId, inverters[], collectors[]}`); normalised server-side |
 | `GET /auth?t=` | — | set the dashboard cookie |
 
 Auth is a bearer header (`Authorization: Bearer …`) or the cookie set by `/auth`.
@@ -265,7 +271,7 @@ Auth is a bearer header (`Authorization: Bearer …`) or the cookie set by `/aut
 ```
 solar-lens/
 ├── wrangler.jsonc            Worker, D1 binding, cron, static assets
-├── migrations/               D1 schema (0001 base, 0002 metrics column)
+├── migrations/               D1 schema (0001 base, 0002 metrics, 0003 devices)
 ├── src/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
 │   ├── poll.ts               builds providers from present secrets; polls; plant filter
@@ -281,7 +287,8 @@ solar-lens/
 ├── agent/solis-relay.mjs     local Chrome relay for SolisCloud
 ├── scripts/                  probe, seed, capture, static server for e2e
 ├── tests/                    unit (vitest), e2e (playwright), fixtures
-└── docs/api-notes.md         observed vendor field names and conventions
+├── docs/api-notes.md         observed vendor field names and conventions
+└── docs/feature-gaps.md      what the vendor apps show that SolarLens does not
 ```
 
 ## Troubleshooting
@@ -312,11 +319,13 @@ solar-lens/
 - [x] SolisCloud and SolarMan official adapters fitted to real payloads
 - [x] SolarMan browser-session fallback (refresh-token based)
 - [x] SolisCloud local relay agent
-- [x] Extended metrics (month/year/lifetime, grid, battery, self-consumption) + energy breakdown UI
+- [x] Extended metrics (month/year/lifetime, grid, battery, self-consumption)
 - [x] Unit tests (Vitest) and e2e tests (Playwright, desktop + mobile)
+- [x] Hardware inventory: Devices view, datalogger status and RSSI, per-MPPT-string PV power
+- [x] Per-system detail view with searchable raw telemetry
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
-- [ ] History pages (day / month / year), CSV export, alerts on offline or fault, PWA install
-- [ ] Per-device (multi-inverter) drill-down for larger plants
+- [ ] SolarMan device endpoints — its datalogger and per-string data are not mapped yet
+- [ ] Per-string voltage and current, per-phase AC (needs the official SolisCloud API key)
 
 ## Contributing
 
