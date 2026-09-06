@@ -11,7 +11,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Honest about freshness.** A panel shows *when* its number was last updated and turns amber when a feed goes quiet — no confidently stale zeros.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
 
-> Not affiliated with Ginlong/Solis or IGEN Tech/SolarMan. Use of the unofficial routes is at your own risk and subject to those vendors' terms.
+> Not affiliated with Ginlong/Solis or IGEN Tech/SolarMan. 
 
 ---
 
