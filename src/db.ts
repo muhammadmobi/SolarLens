@@ -6,9 +6,6 @@ export interface Env {
   ASSETS: Fetcher;
   SOLIS_KEY_ID?: string;
   SOLIS_KEY_SECRET?: string;
-  /** Web-session fallback: portal token copied from a browser login, and the header it goes in. */
-  SOLIS_WEB_TOKEN?: string;
-  SOLIS_WEB_TOKEN_HEADER?: string;
   SOLARMAN_APP_ID?: string;
   SOLARMAN_APP_SECRET?: string;
   SOLARMAN_EMAIL?: string;
@@ -52,8 +49,8 @@ export async function insertReading(db: D1Database, r: Reading): Promise<boolean
     .prepare(
       `INSERT OR IGNORE INTO readings
          (inverter_id, ts, source, ac_power_w, dc_power_w, today_kwh, total_kwh,
-          battery_soc, battery_power_w, grid_power_w, load_power_w, temp_c, status, raw)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
+          battery_soc, battery_power_w, grid_power_w, load_power_w, temp_c, status, raw, metrics)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)`,
     )
     .bind(
       r.inverterId,
@@ -70,6 +67,7 @@ export async function insertReading(db: D1Database, r: Reading): Promise<boolean
       r.tempC,
       r.status,
       JSON.stringify(r.raw ?? null),
+      r.metrics ? JSON.stringify(r.metrics) : null,
     )
     .run();
   return (res.meta.changes ?? 0) > 0;
@@ -95,6 +93,8 @@ export interface LatestRow {
   load_power_w: number | null;
   temp_c: number | null;
   status: string | null;
+  /** JSON-encoded Metrics (see providers/types.ts), or null. */
+  metrics: string | null;
 }
 
 /** Newest reading per enabled inverter, whichever source produced it. */
@@ -103,7 +103,8 @@ export async function latest(db: D1Database): Promise<LatestRow[]> {
     .prepare(
       `SELECT i.id, i.provider, i.serial, i.name, i.plant_name, i.capacity_w, i.display_order,
               r.ts, r.source, r.ac_power_w, r.dc_power_w, r.today_kwh, r.total_kwh,
-              r.battery_soc, r.battery_power_w, r.grid_power_w, r.load_power_w, r.temp_c, r.status
+              r.battery_soc, r.battery_power_w, r.grid_power_w, r.load_power_w, r.temp_c, r.status,
+              r.metrics
        FROM inverters i
        LEFT JOIN readings r
          ON r.rowid = (SELECT rowid FROM readings WHERE inverter_id = i.id ORDER BY ts DESC LIMIT 1)

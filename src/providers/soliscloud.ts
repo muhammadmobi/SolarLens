@@ -1,4 +1,5 @@
-import type { Inverter, Plant, Provider, Reading } from './types';
+import type { Inverter, Metrics, Plant, Provider, Reading } from './types';
+import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toEpochSeconds, toKwh, toWatts } from './units';
 
@@ -116,6 +117,29 @@ const STATION_PREFIX = 'soliscloud:station:';
  * (docs/api-notes.md): `power`/`powerStr`, `dayEnergy`/`dayEnergyStr`,
  * `allEnergy`/`allEnergyStr`, `psum` (positive = export), `dataTimestamp` (ms).
  */
+/** Paired value+unit energy field -> kWh; SolisCloud names them `x` / `xStr`. */
+function kwhPair(d: Rec, key: string): number | null {
+  return toKwh(pick(d, key), pick(d, `${key}Str`));
+}
+
+function stationMetrics(d: Rec): Metrics {
+  const m = emptyMetrics();
+  m.genMonthKwh = kwhPair(d, 'monthEnergy');
+  m.genYearKwh = kwhPair(d, 'yearEnergy');
+  m.genTotalKwh = kwhPair(d, 'allEnergy');
+  m.loadTodayKwh = kwhPair(d, 'homeLoadEnergy') ?? kwhPair(d, 'homeLoadTodayEnergy');
+  m.loadTotalKwh = kwhPair(d, 'homeLoadTotalEnergy');
+  m.gridImportTodayKwh = kwhPair(d, 'gridPurchasedDayEnergy');
+  m.gridExportTodayKwh = kwhPair(d, 'gridSellDayEnergy');
+  m.gridImportTotalKwh = kwhPair(d, 'gridPurchasedTotalEnergy');
+  m.gridExportTotalKwh = kwhPair(d, 'gridSellTotalEnergy');
+  m.battChargeTodayKwh = kwhPair(d, 'batteryChargeEnergy');
+  m.battDischargeTodayKwh = kwhPair(d, 'batteryDischargeEnergy');
+  m.battChargeTotalKwh = kwhPair(d, 'batteryChargeTotalEnergy');
+  m.battDischargeTotalKwh = kwhPair(d, 'batteryDischargeTotalEnergy');
+  return m;
+}
+
 export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Reading {
   const psum = toWatts(pick(d, 'psum'), pick(d, 'psumStr'));
   return {
@@ -132,6 +156,7 @@ export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Re
     loadPowerW: toWatts(pick(d, 'familyLoadPower'), pick(d, 'familyLoadPowerStr')),
     tempC: null,
     status: mapState(pick(d, 'state')),
+    metrics: stationMetrics(d),
     raw: d,
   };
 }

@@ -18,6 +18,8 @@
     "binding": "ASSETS"
   },
 
+  // Your D1 database. `npx wrangler d1 create solar-lens` prints the id - paste
+  // it here. Keep the binding name "DB": the Worker code reads env.DB.
   "d1_databases": [
     {
       "binding": "DB",
@@ -26,11 +28,10 @@
     }
   ],
 
-  // Non-secret config. Secrets go in via `wrangler secret put`, never here.
-  "vars": {
-    // Solis "Solis Ongrid" + SolarMan "Nitrox Hybrid"; the shared Solis plant is skipped.
-    "INCLUDE_PLANTS": "1298491919449414894,62034057"
-  },
+  // Per-account config such as INCLUDE_PLANTS (which plant ids to poll) is
+  // deliberately NOT here so a fork carries nothing identifying. Set it with
+  //   npx wrangler secret put INCLUDE_PLANTS
+  // or as a variable in the Cloudflare dashboard; unset = every visible plant.
 
   "observability": {
     "enabled": true

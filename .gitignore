@@ -13,3 +13,10 @@ captures/
 
 # Playwright capture browser profile (holds portal sessions)
 .capture-profile/
+
+# Test output
+test-results/
+playwright-report/
+
+# Solis relay agent browser profile (holds your portal session)
+.relay-profile/

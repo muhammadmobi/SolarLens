@@ -4,11 +4,6 @@
 SOLIS_KEY_ID=
 SOLIS_KEY_SECRET=
 
-# --- SolisCloud web-session fallback (used only when the keys above are absent) ---
-# Log in at https://www.soliscloud.com, DevTools -> Network -> any /api/ request ->
-# Request Headers: copy the auth header's value here and its name below. Unofficial; may break.
-SOLIS_WEB_TOKEN=
-SOLIS_WEB_TOKEN_HEADER=token
 
 # --- SolarMan official Business API: appId/appSecret from service@solarmanpv.com ---
 SOLARMAN_APP_ID=
@@ -23,9 +18,10 @@ SOLARMAN_PASSWORD_SHA256=
 SOLARMAN_WEB_REFRESH_TOKEN=
 SOLARMAN_WEB_ACCESS_TOKEN=
 
-# --- Which plants to poll (vendor ids, comma-separated). Unset = all visible plants. ---
-# Solis "Solis Ongrid" = 1298491919449414894, SolarMan "Nitrox Hybrid" = 62034057
-INCLUDE_PLANTS=1298491919449414894,62034057
+# --- Which plants to poll (vendor plant/station ids, comma-separated). ---
+# Unset = every plant the accounts can see, including plants shared into them.
+# Find ids in the portal URL of a plant page (SolisCloud) or the station page (SolarMan).
+INCLUDE_PLANTS=
 
 # --- Shared secret gating /api/* and the local agent's /api/ingest ---
 API_TOKEN=

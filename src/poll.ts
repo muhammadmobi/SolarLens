@@ -1,7 +1,6 @@
 import type { Env } from './db';
 import { insertReading, logPoll, tokenStore, upsertInverter } from './db';
 import { SolisCloudProvider } from './providers/soliscloud';
-import { SolisCloudWebProvider } from './providers/soliscloud-web';
 import { SolarmanProvider } from './providers/solarman';
 import { SolarmanWebProvider } from './providers/solarman-web';
 import type { Provider } from './providers/types';
@@ -15,9 +14,9 @@ export function buildProviders(env: Env): Provider[] {
   const providers: Provider[] = [];
   if (env.SOLIS_KEY_ID && env.SOLIS_KEY_SECRET) {
     providers.push(new SolisCloudProvider({ keyId: env.SOLIS_KEY_ID, keySecret: env.SOLIS_KEY_SECRET }));
-  } else if (env.SOLIS_WEB_TOKEN) {
-    providers.push(new SolisCloudWebProvider({ token: env.SOLIS_WEB_TOKEN, headerName: env.SOLIS_WEB_TOKEN_HEADER }));
   }
+  // No SolisCloud key? The local relay agent (agent/solis-relay.mjs) pushes
+  // readings through /api/ingest/station instead - nothing to build here.
   if (env.SOLARMAN_APP_ID && env.SOLARMAN_APP_SECRET && env.SOLARMAN_EMAIL && env.SOLARMAN_PASSWORD_SHA256) {
     providers.push(
       new SolarmanProvider(
@@ -41,7 +40,7 @@ export function buildProviders(env: Env): Provider[] {
   return providers;
 }
 
-/** INCLUDE_PLANTS="1298491919449414894,62034057" limits polling to those vendor plant ids. */
+/** INCLUDE_PLANTS="<solis-plant-id>,<solarman-station-id>" limits polling to those vendor plant ids. */
 export function plantFilter(env: Env): (plantId: string) => boolean {
   const ids = (env.INCLUDE_PLANTS ?? '')
     .split(',')

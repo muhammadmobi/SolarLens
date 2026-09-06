@@ -115,7 +115,9 @@ export class SolarmanWebProvider implements Provider {
 
   async getReading(inv: Inverter): Promise<Reading | null> {
     if (!inv.id.startsWith(STATION_PREFIX)) return null;
-    const s = await this.call<Rec>('GET', `/maintain-s/fast/system/${inv.plantId}`);
+    // operating/system is the richest single snapshot: live power + battery +
+    // today/month/year/total energy in one call (fast/system lacks month/year).
+    const s = await this.call<Rec>('GET', `/maintain-s/operating/system/${inv.plantId}`);
     return s ? stationReading(inv, s, 'solarman-web') : null;
   }
 }
