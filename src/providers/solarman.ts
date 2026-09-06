@@ -158,6 +158,78 @@ export function deviceFromRecord(d: Rec, plantId: string | null = null): Device 
   };
 }
 
+
+/**
+ * A record from `POST /device-s/device/v3/detail` - the inverter's own page.
+ * Unlike `device-list`, whose `featureData` is only a summary, this returns
+ * `paramCategoryList` -> `fieldList` entries keyed by `storageName`, which is
+ * where SolarMan keeps per-string DC, per-phase AC, BMS and temperatures.
+ *
+ * Values arrive as strings with a separate `unit`, so everything is parsed
+ * rather than trusted, and fields the device-list push owns are left null so
+ * the upsert's COALESCE keeps them.
+ */
+export function deviceFromV3Detail(d: Rec, plantId: string | null = null): Device {
+  // Flatten every category into storageName -> { value, unit }.
+  const p = new Map<string, { value: unknown; unit: string | null }>();
+  for (const cat of (pick(d, 'paramCategoryList') as Rec[] | null) ?? []) {
+    for (const fl of (pick(cat, 'fieldList') as Rec[] | null) ?? []) {
+      const key = pick(fl, 'storageName') as string | null;
+      if (key) p.set(key, { value: pick(fl, 'value'), unit: (pick(fl, 'unit') as string | null) ?? null });
+    }
+  }
+  const val = (k: string) => (p.has(k) ? num(p.get(k)!.value) : null);
+  const str = (k: string) => (p.has(k) ? ((p.get(k)!.value as string | null) ?? null) : null);
+
+  // DV/DC/DP are per-PV-string volts, amps and watts. A string wired but dark
+  // still reports voltage, so any non-zero reading counts as "this string exists".
+  const strings: { index: number; powerW: number; voltageV: number | null; currentA: number | null }[] = [];
+  for (let i = 1; i <= 32; i++) {
+    const v = val(`DV${i}`), a = val(`DC${i}`), w = val(`DP${i}`);
+    if (v === null && a === null && w === null) continue;
+    if ((v ?? 0) > 0 || (a ?? 0) > 0 || (w ?? 0) > 0) strings.push({ index: i, powerW: w ?? 0, voltageV: v, currentA: a });
+  }
+
+  // AV/AC are per-phase; a single-phase hybrid reports only phase 1.
+  const acPhases: { index: number; voltageV: number | null; currentA: number | null }[] = [];
+  for (let i = 1; i <= 3; i++) {
+    const v = val(`AV${i}`), a = val(`AC${i}`);
+    if (v !== null || a !== null) acPhases.push({ index: i, voltageV: v, currentA: a });
+  }
+
+  const sn = (pick(d, 'deviceSn') as string | null) ?? str('SN1');
+  const state = String(pick(d, 'deviceState') ?? '');
+  const firmware = [str('MAIN_1'), str('HMI')].filter(Boolean).join(' / ') || null;
+
+  return {
+    id: `solarman:inverter:${sn ?? String(pick(d, 'deviceId') ?? 'unknown')}`,
+    provider: 'solarman',
+    plantId: plantId ?? (pick(d, 'siteId') !== undefined ? String(pick(d, 'siteId')) : null),
+    kind: 'inverter',
+    sn,
+    name: (pick(d, 'name') as string | null) ?? null,
+    // "Single phase LV Hybrid" is the closest thing to a model SolarMan gives.
+    model: str('INV_MOD1'),
+    firmware,
+    ratedPowerW: val('Pr1'),
+    status: state === '1' ? 'online' : state === '2' ? 'alarm' : state === '3' ? 'offline' : null,
+    signalDbm: null,
+    signalPct: null,
+    uploadCycleS: null,
+    commissionedAt: null,
+    warrantyUntil: null,
+    lastSeen: toEpochSeconds(pick(d, 'collectionTime')),
+    strings,
+    acPhases: acPhases.length ? acPhases : null,
+    frequencyHz: val('A_Fo1') ?? val('PG_F1'),
+    powerFactor: null,
+    // AC_T is the inverter's own heatsink; B_T1 is the battery pack's.
+    tempC: val('AC_T') ?? val('T_DC'),
+    dcBusV: null,
+    raw: d,
+  };
+}
+
 /** A plant treated as its own single monitoring unit. */
 export function stationInverter(plant: Plant): Inverter {
   return {

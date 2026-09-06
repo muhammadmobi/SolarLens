@@ -323,9 +323,10 @@ solar-lens/
 - [x] Unit tests (Vitest) and e2e tests (Playwright, desktop + mobile)
 - [x] Hardware inventory: Devices view, datalogger status and RSSI, per-MPPT-string PV power
 - [x] Per-system detail view with searchable raw telemetry
+- [x] Energy-flow diagram (PV / grid / battery / load), battery arm omitted for on-grid
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
-- [x] Per-string voltage & current, per-phase AC, heatsink temperature — via the relay, no API key needed
+- [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed
 
 ## Contributing
 
