@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:local": "wrangler d1 execute solar-lens --local --file=./migrations/0001_init.sql && wrangler d1 execute solar-lens --local --file=./migrations/0002_metrics.sql && wrangler d1 execute solar-lens --local --file=./migrations/0003_devices.sql",
-    "db:remote": "wrangler d1 execute solar-lens --remote --file=./migrations/0001_init.sql && wrangler d1 execute solar-lens --remote --file=./migrations/0002_metrics.sql && wrangler d1 execute solar-lens --remote --file=./migrations/0003_devices.sql",
+    "db:local": "wrangler d1 execute solar-lens --local --file=./migrations/0001_init.sql && wrangler d1 execute solar-lens --local --file=./migrations/0002_metrics.sql && wrangler d1 execute solar-lens --local --file=./migrations/0003_devices.sql && wrangler d1 execute solar-lens --local --file=./migrations/0004_signal_pct.sql",
+    "db:remote": "wrangler d1 execute solar-lens --remote --file=./migrations/0001_init.sql && wrangler d1 execute solar-lens --remote --file=./migrations/0002_metrics.sql && wrangler d1 execute solar-lens --remote --file=./migrations/0003_devices.sql && wrangler d1 execute solar-lens --remote --file=./migrations/0004_signal_pct.sql",
     "probe:solis": "node scripts/probe-solis.mjs",
     "seed:local": "node scripts/seed-local.mjs",
     "typecheck": "tsc --noEmit",

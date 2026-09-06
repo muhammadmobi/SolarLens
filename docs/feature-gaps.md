@@ -41,11 +41,11 @@ station on SolarMan. No account identifiers appear in this document.
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Inverter serial, model, rated power | ● | ● | ● Solis via relay; **SolarMan not mapped** |
-| Inverter firmware version | ● | ◐ | ● Solis |
+| Inverter serial, model, rated power | ● | ● | ● both (Solis rated power; SolarMan has no rating field) |
+| Inverter firmware version | ● | ◐ | ● Solis; SolarMan exposes none for the inverter |
 | Commissioning date, warranty expiry | ● | ○ | ● Solis |
-| **Datalogger status, type, signal (RSSI), upload interval** | ● | ◐ | ● Solis; **SolarMan not mapped** |
-| Per-MPPT-string DC power | ● | ● | ● Solis via relay; **SolarMan not mapped** |
+| **Datalogger status, model, firmware, signal** | ● | ● | ● both — Solis in dBm, SolarMan in percent |
+| Per-MPPT-string DC power | ● | ○ | ● Solis via relay; SolarMan reports only total DC input |
 | Per-string voltage & current | ● | ● | ○ needs the official API or the inverter detail page |
 | Per-phase AC voltage, current, frequency | ● | ● | ○ same |
 | Inverter temperature | ● | ● | ◐ column exists; value lives in per-device telemetry |
@@ -131,13 +131,12 @@ station on SolarMan. No account identifiers appear in this document.
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | **SolarMan device endpoints** — inverter SN, datalogger status/signal, per-string power | The only asymmetry left: Solis has these blocks, SolarMan does not. Needs one capture run with SolarMan's Device tab open | **S** once captured |
-| 2 | Per-string **voltage and current**, per-phase AC | Turns "string 2 is low" into "string 2 has a broken connection". Needs the official Solis API key, or teaching the relay to open the inverter detail page | M |
-| 3 | Energy-flow diagram | The centrepiece of both apps; every number is already in the database | M |
-| 4 | Self-sufficiency / self-consumption ratios | One derived figure from data already stored | S |
-| 5 | Inverter temperature | Column exists; the value lives in per-device telemetry, so it arrives with #2 | S |
-| 6 | Plant-timezone-correct "today" | "Today" currently uses the *viewer's* midnight; plants carry their own timezone | S |
-| 7 | PWA install | Phone use without a browser tab | S |
+| 1 | Per-string **voltage and current**, per-phase AC | Turns "string 2 is low" into "string 2 has a broken connection". Needs the official Solis API key, or teaching the relay to open the inverter detail page | M |
+| 2 | Energy-flow diagram | The centrepiece of both apps; every number is already in the database | M |
+| 3 | Self-sufficiency / self-consumption ratios | One derived figure from data already stored | S |
+| 4 | Inverter temperature | Column exists; the value lives in per-device telemetry, so it arrives with #1 | S |
+| 5 | Plant-timezone-correct "today" | "Today" currently uses the *viewer's* midnight; plants carry their own timezone | S |
+| 6 | PWA install | Phone use without a browser tab | S |
 
 ## 5. Out of scope, by decision
 

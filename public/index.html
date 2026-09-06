@@ -236,9 +236,16 @@
     return r.json();
   }
 
-  /** Bands are the datalogger's own: −58 dBm is a healthy WiFi stick, −85 is trouble. */
-  const rssiLabel = (dbm) => dbm === null || dbm === undefined ? '—'
-    : `${dbm} dBm · ${dbm >= -60 ? 'strong' : dbm >= -70 ? 'good' : dbm >= -80 ? 'weak' : 'very weak'}`;
+  // The two vendors report link quality on different scales: SolisCloud gives
+  // dBm (negative, closer to 0 is stronger), SolarMan gives a 0-100 percent.
+  // Rendering one as the other would be nonsense, so each keeps its own units.
+  const band = (q) => q >= 75 ? 'strong' : q >= 50 ? 'good' : q >= 25 ? 'weak' : 'very weak';
+  const signalLabel = (d) => {
+    if (!d) return '—';
+    if (d.signal_dbm !== null && d.signal_dbm !== undefined) return `${d.signal_dbm} dBm · ${band((d.signal_dbm + 100) * 2)}`;
+    if (d.signal_pct !== null && d.signal_pct !== undefined) return `${Math.round(d.signal_pct)}% · ${band(d.signal_pct)}`;
+    return '—';
+  };
 
   const plantIdOf = (inv) => inv.plant_id || String(inv.id || '').split(':').pop();
   const devicesFor = (inv) => state.devices.filter(
@@ -394,7 +401,7 @@
         <td class="mono">${esc(d.sn ?? '—')}</td>
         <td>${esc(d.model ?? '—')}</td>
         <td class="mono">${esc(d.firmware ?? '—')}</td>
-        <td>${d.kind === 'datalogger' ? esc(rssiLabel(d.signal_dbm)) : (d.rated_power_w ? fmtWs(d.rated_power_w) : '—')}</td>
+        <td>${d.kind === 'datalogger' ? esc(signalLabel(d)) : (d.rated_power_w ? fmtWs(d.rated_power_w) : '—')}</td>
         <td>${d.last_seen ? esc(ago(d.last_seen)) : '—'}</td>
         <td>${strings && strings.length ? `${strings.length} producing` : (d.kind === 'inverter' ? 'none' : '—')}</td>
       </tr>`;
@@ -414,7 +421,10 @@
   }
 
   function stringsBlock(invDev, accent) {
-    if (!invDev) return '';
+    // strings === null means the vendor reports no per-string registers at all
+    // (SolarMan); an empty array means it does, but none are producing (Solis
+    // at night). Only the second case deserves a block.
+    if (!invDev || invDev.strings === null || invDev.strings === undefined) return '';
     const strings = parse(invDev.strings);
     const body = !strings || !strings.length
       ? `<p style="margin:0;color:var(--muted);font-size:13.5px">No string is producing in the latest sample.</p>`
@@ -473,7 +483,7 @@
       logger.sn ? ['Serial', esc(logger.sn), true] : null,
       logger.model ? ['Model', esc(logger.model)] : null,
       logger.firmware ? ['Firmware', esc(logger.firmware), true] : null,
-      ['Signal', esc(rssiLabel(logger.signal_dbm))],
+      ['Signal', esc(signalLabel(logger))],
       logger.upload_cycle_s ? ['Uploads every', `${logger.upload_cycle_s}s`] : null,
       ['Last contact', esc(logger.last_seen ? ago(logger.last_seen) : '—')],
     ]) : '';

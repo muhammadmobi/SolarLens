@@ -1,7 +1,7 @@
-import type { Inverter, Plant, Provider, Reading } from './types';
+import type { Device, Inverter, Plant, Provider, Reading } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toWatts } from './units';
-import { STATION_PREFIX, stationInverter, stationReading, type TokenStore } from './solarman';
+import { STATION_PREFIX, deviceFromRecord, stationInverter, stationReading, type TokenStore } from './solarman';
 
 /**
  * UNOFFICIAL fallback: drives the same endpoints the SOLARMAN Smart web portal
@@ -111,6 +111,22 @@ export class SolarmanWebProvider implements Provider {
   async listInverters(plantId: string): Promise<Inverter[]> {
     const plant = this.plants.get(plantId) ?? { id: plantId, name: `Station ${plantId}` };
     return [stationInverter(plant)];
+  }
+
+  /**
+   * Hardware behind the station. The portal only ever asks for INVERTER, so
+   * the datalogger (COLLECTOR) - and with it the signal strength and logger
+   * firmware - needs an explicit second call.
+   */
+  async listDevices(plantId: string): Promise<Device[]> {
+    const out: Device[] = [];
+    for (const type of ['INVERTER', 'COLLECTOR'] as const) {
+      const rows = await this
+        .call<Rec[]>('GET', `/maintain-s/fast/device/${plantId}/device-list?deviceType=${type}`)
+        .catch(() => [] as Rec[]);
+      for (const r of rows ?? []) out.push(deviceFromRecord(r, plantId));
+    }
+    return out;
   }
 
   async getReading(inv: Inverter): Promise<Reading | null> {

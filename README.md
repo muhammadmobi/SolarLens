@@ -324,7 +324,7 @@ solar-lens/
 - [x] Hardware inventory: Devices view, datalogger status and RSSI, per-MPPT-string PV power
 - [x] Per-system detail view with searchable raw telemetry
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
-- [ ] SolarMan device endpoints — its datalogger and per-string data are not mapped yet
+- [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [ ] Per-string voltage and current, per-phase AC (needs the official SolisCloud API key)
 
 ## Contributing

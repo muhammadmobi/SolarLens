@@ -1,5 +1,5 @@
 import type { Env } from './db';
-import { insertReading, logPoll, tokenStore, upsertInverter } from './db';
+import { insertReading, logPoll, tokenStore, upsertDevice, upsertInverter } from './db';
 import { SolisCloudProvider } from './providers/soliscloud';
 import { SolarmanProvider } from './providers/solarman';
 import { SolarmanWebProvider } from './providers/solarman-web';
@@ -65,6 +65,13 @@ async function pollProvider(env: Env, p: Provider): Promise<PollSummary> {
     const plants = (await p.listPlants()).filter((plant) => wanted(plant.id));
     for (const plant of plants) {
       const invs = await p.listInverters(plant.id);
+      // Hardware inventory, where the provider exposes it. A failure here must
+      // not lose the readings, which are the point of the poll.
+      if (p.listDevices) {
+        try {
+          for (const d of await p.listDevices(plant.id)) await upsertDevice(env.DB, d);
+        } catch { /* devices are supplementary */ }
+      }
       for (const inv of invs) {
         if (!inv.plantName) inv.plantName = plant.name;
         if (inv.capacityW === null) inv.capacityW = plant.capacityW ?? null;
