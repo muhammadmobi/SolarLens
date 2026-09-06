@@ -282,6 +282,38 @@ test.describe('System detail', () => {
     await expect(page.locator('.block h3').filter({ hasText: 'PV strings' })).toHaveCount(0);
   });
 
+  test('energy flow: the hybrid draws all four arms, with directions from the signs', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(HYBRID));
+    const flow = page.locator('svg.flow');
+    await expect(flow).toBeVisible();
+    await expect(flow.locator('.nlabel')).toHaveText([/Production/, /Grid/, /Battery/, /Consumption/]);
+    // 91 W import, 278 W production, 307 W load, battery idle at -24 W.
+    await expect(flow).toContainText('278 W');
+    await expect(flow).toContainText('91 W');
+    await expect(flow).toContainText('307 W');
+    await expect(flow.locator('.wire')).toHaveCount(4);
+  });
+
+  test('energy flow: an on-grid system has no battery arm at all', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
+    const flow = page.locator('svg.flow');
+    await expect(flow.locator('.wire')).toHaveCount(3);
+    await expect(flow.locator('.nlabel')).toHaveText([/Production/, /Grid/, /Consumption/]);
+    await expect(flow).not.toContainText('Battery');
+    // Exporting 5.08 kW, so the grid arm is labelled as such.
+    await expect(flow).toContainText('exporting');
+  });
+
+  test('energy flow: an arm carrying no power is drawn dead, not live', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { ac_power_w: 0, grid_power_w: 0, load_power_w: 0 } }) });
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
+    // No arm is energised, so no wire is accented and no pip travels.
+    await expect(page.locator('svg.flow .wire.live')).toHaveCount(0);
+    await expect(page.locator('svg.flow .pip')).toHaveCount(0);
+  });
+
   test('an unknown system id does not break the page', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/nope');
