@@ -137,6 +137,15 @@
   .kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   .kv dd.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
 
+  .flow { width: 100%; height: auto; display: block; max-height: 460px; }
+  .flow .wire { stroke: var(--line); stroke-width: 2.5; fill: none; }
+  .flow .wire.live { stroke: var(--accent-flow); }
+  .flow .pip { fill: var(--accent-flow); }
+  .flow .nlabel { fill: var(--muted); font-size: 13px; }
+  .flow .nvalue { fill: var(--ink); font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .flow .nsub { fill: var(--faint); font-size: 11.5px; }
+  .flow .glyph { font-size: 30px; }
+  @media (prefers-reduced-motion: reduce) { .flow .pip { display: none; } }
   .bars { display: flex; flex-direction: column; gap: 9px; }
   .bar-row { display: grid; grid-template-columns: 62px 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
   .bar-row .lbl { color: var(--muted); }
@@ -442,6 +451,70 @@
     return `<div class="block"><h3>PV strings · MPPT</h3><div class="body">${body}</div></div>`;
   }
 
+  /**
+   * Energy-flow diagram. Each arm is drawn only when the system actually has
+   * it, and the direction of travel comes from the sign of the figure:
+   *   grid    + import  -> grid feeds the house;  - export -> house feeds grid
+   *   battery + charge  -> house feeds battery;   - discharge -> battery feeds house
+   * An arm carrying no power is drawn in the neutral line colour with no pips,
+   * so "nothing is flowing" reads differently from "this arm does not exist".
+   */
+  function flowDiagram(inv, m) {
+    const W = 1000, H = 520, CX = 500, CY = 260;
+    const battery = hasBattery(inv, m);
+    const accent = colorFor(inv.provider);
+
+    // corner, elbow-x, and which way the wire runs when power is positive
+    const nodes = [
+      { key: 'pv', x: 120, y: 120, glyph: '\u2600\uFE0F', label: 'Production',
+        value: inv.ac_power_w, toHouse: true, side: -1 },
+      { key: 'grid', x: 880, y: 120, glyph: '\u26A1', label: 'Grid',
+        value: inv.grid_power_w, toHouse: (inv.grid_power_w ?? 0) >= 0, side: 1,
+        sub: (inv.grid_power_w ?? 0) >= 0 ? 'importing' : 'exporting' },
+      battery ? { key: 'batt', x: 120, y: 420, glyph: '\uD83D\uDD0B', label: `Battery ${inv.battery_soc != null ? Math.round(inv.battery_soc) + '%' : ''}`.trim(),
+        value: inv.battery_power_w, toHouse: (inv.battery_power_w ?? 0) < 0, side: -1,
+        sub: battText(inv.battery_power_w) } : null,
+      { key: 'load', x: 880, y: 420, glyph: '\uD83C\uDFE0', label: 'Consumption',
+        value: inv.load_power_w, toHouse: false, side: 1 },
+    ].filter(Boolean);
+
+    let out = `<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>`;
+    out += `<marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${accent}"/></marker></defs>`;
+
+    for (const n of nodes) {
+      const w = Math.abs(n.value ?? 0);
+      const live = w >= 1;
+      // elbow: out from the node, then vertically to the house row, then in
+      // side is -1 for the left column, +1 for the right, so the elbow and the
+      // house-side end both sit on the node's own side of the centre.
+      const nx = n.x - n.side * 70;               // wire start, beside the glyph
+      const elbow = CX + n.side * 180;
+      const hx = CX + n.side * 70;                // wire end, beside the house
+      const d = `M${nx},${n.y} H${elbow} V${CY} H${hx}`;
+      // A path is drawn from source to sink so the arrowhead lands correctly.
+      const rev = !n.toHouse;
+      const marker = live ? (rev ? 'ahl' : 'ahl') : 'ah';
+      out += `<path class="wire${live ? ' live' : ''}" d="${d}" marker-${rev ? 'start' : 'end'}="url(#${marker})"/>`;
+      if (live) {
+        // one travelling pip; direction flips by reversing the keyframes
+        out += `<circle class="pip" r="5"><animateMotion dur="2.4s" repeatCount="indefinite" keyPoints="${rev ? '1;0' : '0;1'}" keyTimes="0;1" calcMode="linear" path="${d}"/></circle>`;
+      }
+      const anchor = n.side < 0 ? 'start' : 'end';
+      const tx = n.side < 0 ? n.x - 70 : n.x + 70;
+      const above = n.y < CY;
+      const ly = above ? n.y - 78 : n.y + 60;
+      out += `<text class="nlabel" x="${tx}" y="${ly}" text-anchor="${anchor}">${esc(n.label)}</text>`;
+      out += `<text class="nvalue" x="${tx}" y="${ly + 22}" text-anchor="${anchor}">${n.value == null ? '\u2014' : fmtWs(w)}</text>`;
+      if (n.sub) out += `<text class="nsub" x="${tx}" y="${ly + 40}" text-anchor="${anchor}">${esc(n.sub)}</text>`;
+      out += `<text class="glyph" x="${n.x}" y="${n.y + 11}" text-anchor="middle">${n.glyph}</text>`;
+    }
+    out += `<text class="glyph" style="font-size:44px" x="${CX}" y="${CY + 16}" text-anchor="middle">\uD83C\uDFE1</text>`;
+
+    return `<div class="block" style="--accent-flow:${accent}"><h3>Energy flow</h3><div class="body">
+      <svg class="flow" viewBox="0 0 ${W} ${H}" role="img" aria-label="Energy flow between production, grid, battery and consumption">${out}</svg>
+    </div></div>`;
+  }
+
   /** Per-phase AC, grid frequency and power factor - inverter detail only. */
   function acBlock(invDev) {
     if (!invDev) return '';
@@ -560,6 +633,7 @@
         </div>
         <div class="hero" style="margin:0"><span class="val" style="font-size:38px">${pv}</span><span class="unit">${pu}</span></div>
       </div>
+      ${flowDiagram(inv, m)}
       <div class="blocks">${identity}${link}${live}${counters}${stringsBlock(invDev, accent)}${acBlock(invDev)}${battery}${diagnostics}</div>
       ${rawBlock(inv)}`;
 
