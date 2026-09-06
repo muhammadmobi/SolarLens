@@ -130,6 +130,7 @@ export interface DeviceRow {
   rated_power_w: number | null;
   status: string | null;
   signal_dbm: number | null;
+  signal_pct: number | null;
   upload_cycle_s: number | null;
   commissioned_at: number | null;
   warranty_until: number | null;
@@ -149,8 +150,8 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
     .prepare(
       `INSERT INTO devices
          (id, provider, plant_id, kind, sn, name, model, firmware, rated_power_w, status,
-          signal_dbm, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, updated_at, raw)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, updated_at, raw)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
        ON CONFLICT(id) DO UPDATE SET
          plant_id        = COALESCE(excluded.plant_id, devices.plant_id),
          name            = COALESCE(excluded.name, devices.name),
@@ -159,6 +160,7 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
          rated_power_w   = COALESCE(excluded.rated_power_w, devices.rated_power_w),
          status          = excluded.status,
          signal_dbm      = COALESCE(excluded.signal_dbm, devices.signal_dbm),
+         signal_pct      = COALESCE(excluded.signal_pct, devices.signal_pct),
          upload_cycle_s  = COALESCE(excluded.upload_cycle_s, devices.upload_cycle_s),
          commissioned_at = COALESCE(excluded.commissioned_at, devices.commissioned_at),
          warranty_until  = COALESCE(excluded.warranty_until, devices.warranty_until),
@@ -169,7 +171,7 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
     )
     .bind(
       d.id, d.provider, d.plantId, d.kind, d.sn, d.name, d.model, d.firmware, d.ratedPowerW,
-      d.status, d.signalDbm, d.uploadCycleS, d.commissionedAt, d.warrantyUntil, d.lastSeen,
+      d.status, d.signalDbm, d.signalPct, d.uploadCycleS, d.commissionedAt, d.warrantyUntil, d.lastSeen,
       d.strings ? JSON.stringify(d.strings) : null,
       at,
       d.raw ? JSON.stringify(d.raw) : null,
