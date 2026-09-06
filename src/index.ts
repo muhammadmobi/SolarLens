@@ -1,10 +1,14 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { insertReading, latest, nowSec, recentPolls, series, upsertInverter } from './db';
+import { insertReading, latest, listDevices, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
 import { plantFilter, pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
-import { stationReading as solisStationReading } from './providers/soliscloud';
+import {
+  deviceFromCollector,
+  deviceFromInverter,
+  stationReading as solisStationReading,
+} from './providers/soliscloud';
 import { stationReading as solarmanStationReading } from './providers/solarman';
 
 const COOKIE = 'sl_token';
@@ -106,6 +110,39 @@ app.post('/api/ingest', async (c) => {
  * code path the cloud poller uses - so both routes always agree on field
  * mapping and sign conventions. Body: { provider, plantId, name?, capacityW?, raw }.
  */
+/**
+ * Hardware inventory pushed by the relay agent. Takes the vendor's own
+ * `inverter/listV2` / `collector/listV2` records untouched and normalises them
+ * here, so the agent stays a dumb pipe and the field mapping stays testable.
+ */
+app.post('/api/ingest/devices', async (c) => {
+  const token = c.env.INGEST_TOKEN;
+  if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);
+  const given = bearer(c.req.header('Authorization')) ?? '';
+  if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
+
+  const body = (await c.req.json()) as {
+    provider: 'soliscloud';
+    plantId: string;
+    inverters?: Record<string, unknown>[];
+    collectors?: Record<string, unknown>[];
+  };
+  if (body?.provider !== 'soliscloud' || !body?.plantId) {
+    return c.json({ error: 'provider=soliscloud and plantId required' }, 400);
+  }
+  const plantId = String(body.plantId);
+  if (!plantFilter(c.env)(plantId)) return c.json({ stored: 0, skipped: 'not in INCLUDE_PLANTS' });
+
+  const devices = [
+    ...(body.inverters ?? []).map((r) => deviceFromInverter(r, plantId)),
+    ...(body.collectors ?? []).map((r) => deviceFromCollector(r, plantId)),
+  ];
+  for (const d of devices) await upsertDevice(c.env.DB, d);
+  return c.json({ stored: devices.length, ids: devices.map((d) => d.id) });
+});
+
+app.get('/api/devices', async (c) => c.json({ now: nowSec(), devices: await listDevices(c.env.DB) }));
+
 app.post('/api/ingest/station', async (c) => {
   const token = c.env.INGEST_TOKEN;
   if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);

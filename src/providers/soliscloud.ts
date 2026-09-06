@@ -1,4 +1,4 @@
-import type { Inverter, Metrics, Plant, Provider, Reading } from './types';
+import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toEpochSeconds, toKwh, toWatts } from './units';
@@ -122,6 +122,18 @@ function kwhPair(d: Rec, key: string): number | null {
   return toKwh(pick(d, key), pick(d, `${key}Str`));
 }
 
+/**
+ * An on-grid plant still reports `batteryCapacitySoc2: 0` and zeroed battery
+ * counters. Taking those at face value invents a permanently-empty battery, so
+ * the plant's own inventory decides whether battery fields mean anything.
+ */
+function plantHasBattery(d: Rec): boolean {
+  const count = num(pick(d, 'batteryCount'));
+  if (count !== null && count > 0) return true;
+  const list = pick(d, 'batteries');
+  return Array.isArray(list) && list.length > 0;
+}
+
 function stationMetrics(d: Rec): Metrics {
   const m = emptyMetrics();
   m.genMonthKwh = kwhPair(d, 'monthEnergy');
@@ -133,15 +145,18 @@ function stationMetrics(d: Rec): Metrics {
   m.gridExportTodayKwh = kwhPair(d, 'gridSellDayEnergy');
   m.gridImportTotalKwh = kwhPair(d, 'gridPurchasedTotalEnergy');
   m.gridExportTotalKwh = kwhPair(d, 'gridSellTotalEnergy');
-  m.battChargeTodayKwh = kwhPair(d, 'batteryChargeEnergy');
-  m.battDischargeTodayKwh = kwhPair(d, 'batteryDischargeEnergy');
-  m.battChargeTotalKwh = kwhPair(d, 'batteryChargeTotalEnergy');
-  m.battDischargeTotalKwh = kwhPair(d, 'batteryDischargeTotalEnergy');
+  if (plantHasBattery(d)) {
+    m.battChargeTodayKwh = kwhPair(d, 'batteryChargeEnergy');
+    m.battDischargeTodayKwh = kwhPair(d, 'batteryDischargeEnergy');
+    m.battChargeTotalKwh = kwhPair(d, 'batteryChargeTotalEnergy');
+    m.battDischargeTotalKwh = kwhPair(d, 'batteryDischargeTotalEnergy');
+  }
   return m;
 }
 
 export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Reading {
   const psum = toWatts(pick(d, 'psum'), pick(d, 'psumStr'));
+  const battery = plantHasBattery(d);
   return {
     inverterId: inv.id,
     ts: toEpochSeconds(pick(d, 'dataTimestamp')),
@@ -150,14 +165,98 @@ export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Re
     dcPowerW: null,
     todayKwh: toKwh(pick(d, 'dayEnergy'), pick(d, 'dayEnergyStr')),
     totalKwh: toKwh(pick(d, 'allEnergy'), pick(d, 'allEnergyStr')),
-    batterySoc: num(pick(d, 'batteryCapacitySoc', 'batteryCapacitySoc2')),
-    batteryPowerW: toWatts(pick(d, 'batteryPower'), pick(d, 'batteryPowerStr')),
+    batterySoc: battery ? num(pick(d, 'batteryCapacitySoc', 'batteryCapacitySoc2')) : null,
+    batteryPowerW: battery ? toWatts(pick(d, 'batteryPower'), pick(d, 'batteryPowerStr')) : null,
     gridPowerW: psum === null ? null : -psum,
     loadPowerW: toWatts(pick(d, 'familyLoadPower'), pick(d, 'familyLoadPowerStr')),
     tempC: null,
     status: mapState(pick(d, 'state')),
     metrics: stationMetrics(d),
     raw: d,
+  };
+}
+
+/**
+ * The vendor device records carry the site's postal address, coordinates and
+ * account identifiers. None of that is needed to monitor an inverter, so it is
+ * dropped before the payload is stored rather than filtered at render time.
+ */
+const PII_KEY = /addr|latitude|longitude|iccid|userId|mobile|email|picUrl|position|region|city|county|country/i;
+
+export function stripPii<T>(rec: T): T {
+  if (Array.isArray(rec)) return rec.map(stripPii) as unknown as T;
+  if (rec && typeof rec === 'object') {
+    const out: Rec = {};
+    for (const [k, v] of Object.entries(rec as Rec)) {
+      if (PII_KEY.test(k)) continue;
+      out[k] = stripPii(v);
+    }
+    return out as unknown as T;
+  }
+  return rec;
+}
+
+/** Epoch ms (number or string, as SolisCloud mixes both) -> epoch seconds. */
+function msToSec(v: unknown): number | null {
+  const n = num(v);
+  return n === null || n === 0 ? null : Math.floor(n / 1000);
+}
+
+/** `pow1`…`pow32` are per-MPPT-string DC watts; only report strings that produce. */
+function pvStrings(d: Rec): { index: number; powerW: number }[] {
+  const out: { index: number; powerW: number }[] = [];
+  for (let i = 1; i <= 32; i++) {
+    const w = num(pick(d, `pow${i}`));
+    if (w !== null && w > 0) out.push({ index: i, powerW: w });
+  }
+  return out;
+}
+
+/** A record from `inverter/listV2` -> Device. */
+export function deviceFromInverter(d: Rec, plantId: string | null = null): Device {
+  const sn = (pick(d, 'sn', 'inverterSn') as string | null) ?? null;
+  return {
+    id: `soliscloud:inverter:${sn ?? String(pick(d, 'id') ?? 'unknown')}`,
+    provider: 'soliscloud',
+    plantId: plantId ?? (pick(d, 'stationId') as string | null) ?? null,
+    kind: 'inverter',
+    sn,
+    name: (pick(d, 'name') as string | null) ?? null,
+    model: (pick(d, 'machine', 'inverterSeries', 'productModel') as string | null) ?? null,
+    firmware: (pick(d, 'inverterSoftwareVersion') as string | null) ?? null,
+    ratedPowerW: toWatts(pick(d, 'power'), pick(d, 'powerStr')),
+    status: mapState(pick(d, 'state')),
+    signalDbm: null,
+    uploadCycleS: null,
+    commissionedAt: msToSec(pick(d, 'fisTime', 'fisGenerateTime')),
+    warrantyUntil: msToSec(pick(d, 'updateShelfEndTime')),
+    lastSeen: msToSec(pick(d, 'dataTimestamp')),
+    strings: pvStrings(d),
+    raw: stripPii(d),
+  };
+}
+
+/** A record from `collector/listV2` (the datalogger stick) -> Device. */
+export function deviceFromCollector(d: Rec, plantId: string | null = null): Device {
+  const sn = (pick(d, 'sn') as string | null) ?? null;
+  return {
+    id: `soliscloud:datalogger:${sn ?? String(pick(d, 'id') ?? 'unknown')}`,
+    provider: 'soliscloud',
+    plantId: plantId ?? (pick(d, 'stationId') as string | null) ?? null,
+    kind: 'datalogger',
+    sn,
+    name: (pick(d, 'machine', 'model') as string | null) ?? null,
+    model: (pick(d, 'machine') as string | null) ?? (pick(d, 'model') as string | null),
+    firmware: (pick(d, 'version') as string | null) ?? null,
+    ratedPowerW: null,
+    status: mapState(pick(d, 'state')),
+    signalDbm: num(pick(d, 'rssi')),
+    uploadCycleS: num(pick(d, 'dataUploadCycle')),
+    commissionedAt: msToSec(pick(d, 'collectorActiveDate')),
+    warrantyUntil: msToSec(pick(d, 'updateShelfEndTime')),
+    lastSeen: msToSec(pick(d, 'dataTimestamp')),
+    strings: null,
+    raw: stripPii(d),
   };
 }
 

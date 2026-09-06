@@ -127,6 +127,50 @@ async function snapshot(plantId) {
   return j.data;
 }
 
+/**
+ * The Device tab lists the inverter and the datalogger stick. Both come from
+ * ordinary portal calls, so opening the page is enough to collect them —
+ * including per-string DC power (`pow1`…`pow32`) and the logger's RSSI, which
+ * the official monitoring API does not expose at all.
+ */
+async function devices(plantId) {
+  const grab = (suffix) =>
+    page
+      .waitForResponse((r) => r.url().endsWith(suffix) && r.request().method() === 'POST', { timeout: 30_000 })
+      .then((r) => r.json())
+      .then((j) => j?.data?.page?.records ?? [])
+      .catch(() => []);
+
+  // The page opens on the Inverter tab, so only inverter/listV2 fires; the
+  // datalogger list is fetched lazily when its tab is selected - hence the click.
+  const inverters = grab('/api/inverter/listV2');
+  await page.goto(`${PORTAL}/overview/plantStation/details/device/${plantId}`, { waitUntil: 'domcontentloaded' });
+  const inv = await inverters;
+
+  let collectors = [];
+  try {
+    const wait = grab('/api/collector/listV2');
+    await page.getByRole('tab', { name: /datalogger/i }).first().click({ timeout: 15_000 });
+    collectors = await wait;
+  } catch { /* tab missing or renamed - the inverter data still counts */ }
+  return { inverters: inv, collectors };
+}
+
+async function pushDevices(plantId, { inverters, collectors }) {
+  if (!inverters.length && !collectors.length) return;
+  const res = await fetch(`${SOLARLENS_URL}/api/ingest/devices`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${INGEST_TOKEN}` },
+    body: JSON.stringify({ provider: 'soliscloud', plantId, inverters, collectors }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`devices -> HTTP ${res.status} ${JSON.stringify(j)}`);
+  if (j.skipped) return;
+  const rssi = collectors[0]?.rssi;
+  const strings = (inverters[0] ? Object.keys(inverters[0]).filter((k) => /^pow\d+$/.test(k) && inverters[0][k] > 0).length : 0);
+  log(`devices ${plantId}: ${j.stored} stored${rssi != null ? `, logger RSSI ${rssi} dBm` : ''}${strings ? `, ${strings} PV string(s) producing` : ''}`);
+}
+
 /** With no configured ids, make sure the portal's plant list has been seen at least once. */
 async function discoverPlants() {
   if (PLANTS.length || known.size) return;
@@ -147,6 +191,9 @@ async function cycle() {
     try { await push(id, await snapshot(id)); }
     catch (e) { log(`plant ${id}: ${e.message}`); }
     await sleep(2500); // stay well under Solis's 3 calls / 5 s
+    try { await pushDevices(id, await devices(id)); }
+    catch (e) { log(`devices ${id}: ${e.message}`); }
+    await sleep(2500);
   }
 }
 
