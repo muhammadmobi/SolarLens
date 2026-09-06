@@ -325,7 +325,7 @@ solar-lens/
 - [x] Per-system detail view with searchable raw telemetry
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
-- [ ] Per-string voltage and current, per-phase AC (needs the official SolisCloud API key)
+- [x] Per-string voltage & current, per-phase AC, heatsink temperature — via the relay, no API key needed
 
 ## Contributing
 

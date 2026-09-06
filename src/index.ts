@@ -7,6 +7,7 @@ import type { Inverter, Reading } from './providers/types';
 import {
   deviceFromCollector,
   deviceFromInverter,
+  deviceFromInverterDetail,
   stationReading as solisStationReading,
 } from './providers/soliscloud';
 import { stationReading as solarmanStationReading } from './providers/solarman';
@@ -126,6 +127,8 @@ app.post('/api/ingest/devices', async (c) => {
     plantId: string;
     inverters?: Record<string, unknown>[];
     collectors?: Record<string, unknown>[];
+    /** inverter/detail payloads: per-string V/A, per-phase AC, temperature. */
+    details?: Record<string, unknown>[];
   };
   if (body?.provider !== 'soliscloud' || !body?.plantId) {
     return c.json({ error: 'provider=soliscloud and plantId required' }, 400);
@@ -136,6 +139,7 @@ app.post('/api/ingest/devices', async (c) => {
   const devices = [
     ...(body.inverters ?? []).map((r) => deviceFromInverter(r, plantId)),
     ...(body.collectors ?? []).map((r) => deviceFromCollector(r, plantId)),
+    ...(body.details ?? []).map((r) => deviceFromInverterDetail(r, plantId)),
   ];
   for (const d of devices) await upsertDevice(c.env.DB, d);
   return c.json({ stored: devices.length, ids: devices.map((d) => d.id) });

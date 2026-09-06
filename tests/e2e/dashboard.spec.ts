@@ -50,7 +50,16 @@ function devices() {
       sn: 'DEMO01', name: 'Demo Solis Inverter', model: 'S5-GR3P10K', firmware: '87003E',
       rated_power_w: 10000, status: 'online', signal_dbm: null, upload_cycle_s: null,
       commissioned_at: 1709121876, warranty_until: 1866816000, last_seen: NOW - 120,
-      strings: JSON.stringify([{ index: 1, powerW: 33.58 }, { index: 2, powerW: 30.94 }]),
+      strings: JSON.stringify([
+        { index: 1, powerW: 33.58, voltageV: 167.9, currentA: 0.2 },
+        { index: 2, powerW: 30.94, voltageV: 154.7, currentA: 0.2 },
+      ]),
+      ac_phases: JSON.stringify([
+        { index: 1, voltageV: 228.4, currentA: 0.1 },
+        { index: 2, voltageV: 228.3, currentA: 0.1 },
+        { index: 3, voltageV: 232, currentA: 0.1 },
+      ]),
+      frequency_hz: 49.64, power_factor: 0.99, temp_c: 40.6, dc_bus_v: 589.9,
       updated_at: NOW, raw: null,
     },
     {
@@ -58,7 +67,8 @@ function devices() {
       sn: 'LOG01', name: 'S3-WIFI-ST', model: 'S3-WIFI-ST', firmware: '10186',
       rated_power_w: null, status: 'online', signal_dbm: -58, upload_cycle_s: 300,
       commissioned_at: null, warranty_until: null, last_seen: NOW - 120,
-      strings: null, updated_at: NOW, raw: null,
+      strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
+      temp_c: null, dc_bus_v: null, updated_at: NOW, raw: null,
     },
   ];
 }
@@ -220,6 +230,8 @@ test.describe('System detail', () => {
     await expect(page.locator('.blocks')).toContainText('dBm');
     await expect(page.locator('.bar-row')).toHaveCount(2);
     await expect(page.locator('.bar-row').nth(0)).toContainText('34 W');
+    await expect(page.locator('.bar-row').nth(0)).toContainText('167.9 V');
+    await expect(page.locator('.bar-row').nth(0)).toContainText('0.2 A');
   });
 
   test('hybrid system: battery block with charge and discharge counters', async ({ page }) => {
@@ -244,6 +256,30 @@ test.describe('System detail', () => {
     await page.locator('#rawfilter').fill('battery');
     await expect(page.locator('#rawgrid .rk').filter({ hasText: 'batterySoc' })).toBeVisible();
     await expect(page.locator('#rawgrid .rk').filter({ hasText: 'generationPower' })).toBeHidden();
+  });
+
+  test('on-grid system: per-phase AC, frequency, power factor and DC bus', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
+    const ac = page.locator('.block').filter({ has: page.locator('h3', { hasText: 'AC output' }) });
+    await expect(ac).toBeVisible();
+    await expect(ac).toContainText('228.4 V · 0.1 A');
+    await expect(ac).toContainText('49.64 Hz');
+    await expect(ac).toContainText('589.9 V');
+  });
+
+  test('heatsink temperature comes from the device when the reading has none', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
+    const diag = page.locator('.block').filter({ has: page.locator('h3', { hasText: 'Status' }) });
+    await expect(diag).toContainText('40.6 °C');
+  });
+
+  test('the hybrid shows no AC-phase block, because SolarMan reports none', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(HYBRID));
+    await expect(page.locator('.block h3').filter({ hasText: 'AC output' })).toHaveCount(0);
+    await expect(page.locator('.block h3').filter({ hasText: 'PV strings' })).toHaveCount(0);
   });
 
   test('an unknown system id does not break the page', async ({ page }) => {

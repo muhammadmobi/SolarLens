@@ -41,7 +41,14 @@ export interface Device {
   warrantyUntil: number | null;
   lastSeen: number | null;
   /** Per-MPPT-string DC power, only the strings actually producing. */
-  strings: { index: number; powerW: number }[] | null;
+  strings: { index: number; powerW: number; voltageV?: number | null; currentA?: number | null }[] | null;
+  /** Per-phase AC output, from the inverter's own detail page. */
+  acPhases: { index: number; voltageV: number | null; currentA: number | null }[] | null;
+  frequencyHz: number | null;
+  powerFactor: number | null;
+  /** Heatsink temperature in °C. */
+  tempC: number | null;
+  dcBusV: number | null;
   raw: unknown;
 }
 

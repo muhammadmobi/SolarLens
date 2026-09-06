@@ -143,6 +143,7 @@
   .bar-track { height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; }
   .bar-fill { height: 100%; border-radius: 4px; }
   .bar-row .num { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .bar-row .sub2 { grid-column: 2 / -1; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 
   table.devices { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.devices th {
@@ -404,12 +405,13 @@
         <td>${d.kind === 'datalogger' ? esc(signalLabel(d)) : (d.rated_power_w ? fmtWs(d.rated_power_w) : '—')}</td>
         <td>${d.last_seen ? esc(ago(d.last_seen)) : '—'}</td>
         <td>${strings && strings.length ? `${strings.length} producing` : (d.kind === 'inverter' ? 'none' : '—')}</td>
+        <td>${d.temp_c != null ? `${d.temp_c} °C` : '—'}</td>
       </tr>`;
     };
     $('view').innerHTML = `<div class="block"><h3>Hardware</h3><div class="tablewrap">
       <table class="devices">
         <thead><tr><th>Status</th><th>Device</th><th>Serial</th><th>Model</th><th>Firmware</th>
-          <th>Rated / signal</th><th>Last contact</th><th>PV strings</th></tr></thead>
+          <th>Rated / signal</th><th>Last contact</th><th>PV strings</th><th>Temp</th></tr></thead>
         <tbody>${state.devices.map(row).join('')}</tbody>
       </table></div></div>`;
   }
@@ -433,9 +435,29 @@
           return `<div class="bars">${strings.map((s) => `<div class="bar-row">
             <span class="lbl">String ${s.index}</span>
             <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, (s.powerW / max) * 100).toFixed(1)}%;background:${accent}"></span></span>
-            <span class="num">${fmtWs(s.powerW)}</span></div>`).join('')}</div>`;
+            <span class="num">${fmtWs(s.powerW)}</span>
+            ${s.voltageV != null || s.currentA != null ? `<span class="sub2">${s.voltageV != null ? `${s.voltageV} V` : ""}${s.voltageV != null && s.currentA != null ? " · " : ""}${s.currentA != null ? `${s.currentA} A` : ""}</span>` : ""}
+            </div>`).join('')}</div>`;
         })();
     return `<div class="block"><h3>PV strings · MPPT</h3><div class="body">${body}</div></div>`;
+  }
+
+  /** Per-phase AC, grid frequency and power factor - inverter detail only. */
+  function acBlock(invDev) {
+    if (!invDev) return '';
+    const phases = parse(invDev.ac_phases);
+    const extras = [
+      invDev.frequency_hz != null ? ['Frequency', `${invDev.frequency_hz} Hz`] : null,
+      invDev.power_factor != null ? ['Power factor', String(invDev.power_factor)] : null,
+      invDev.dc_bus_v != null ? ['DC bus', `${invDev.dc_bus_v} V`] : null,
+    ].filter(Boolean);
+    if ((!phases || !phases.length) && !extras.length) return '';
+    const rows = (phases ?? []).map((p) => `<dt>Phase ${p.index}</dt><dd>${
+      [p.voltageV != null ? `${p.voltageV} V` : null, p.currentA != null ? `${p.currentA} A` : null].filter(Boolean).join(' · ') || '—'
+    }</dd>`).join('');
+    const tail = extras.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+    return `<div class="block"><h3>AC output · per phase</h3><div class="body">
+      <dl class="kv">${rows}${tail}</dl></div></div>`;
   }
 
   function rawBlock(inv) {
@@ -465,6 +487,8 @@
     const logger = devs.find((d) => d.kind === 'datalogger');
     const accent = colorFor(inv.provider);
     const [pv, pu] = fmtW(inv.ac_power_w);
+    // Temperature is per-device telemetry, so the station snapshot rarely has it.
+    const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
 
     const identity = kvBlock('Identity & hardware', [
       ['System', esc(inv.name)],
@@ -523,7 +547,7 @@
 
     const diagnostics = kvBlock('Status & diagnostics', [
       ['Reported', `<span class="badge ${st.cls}"><span class="dot"></span>${esc(st.text)}</span>`],
-      inv.temp_c != null ? ['Temperature', `${inv.temp_c.toFixed(1)} °C`] : null,
+      tempC != null ? ['Temperature', `${tempC.toFixed(1)} °C`] : null,
       m.gridStatus ? ['Grid', esc(String(m.gridStatus).toLowerCase())] : null,
       ['Data age', esc(inv.ts ? ago(inv.ts) : 'never')],
     ]);
@@ -536,7 +560,7 @@
         </div>
         <div class="hero" style="margin:0"><span class="val" style="font-size:38px">${pv}</span><span class="unit">${pu}</span></div>
       </div>
-      <div class="blocks">${identity}${link}${live}${counters}${stringsBlock(invDev, accent)}${battery}${diagnostics}</div>
+      <div class="blocks">${identity}${link}${live}${counters}${stringsBlock(invDev, accent)}${acBlock(invDev)}${battery}${diagnostics}</div>
       ${rawBlock(inv)}`;
 
     const filter = $('rawfilter');

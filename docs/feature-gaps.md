@@ -46,9 +46,9 @@ station on SolarMan. No account identifiers appear in this document.
 | Commissioning date, warranty expiry | ● | ○ | ● Solis |
 | **Datalogger status, model, firmware, signal** | ● | ● | ● both — Solis in dBm, SolarMan in percent |
 | Per-MPPT-string DC power | ● | ○ | ● Solis via relay; SolarMan reports only total DC input |
-| Per-string voltage & current | ● | ● | ○ needs the official API or the inverter detail page |
-| Per-phase AC voltage, current, frequency | ● | ● | ○ same |
-| Inverter temperature | ● | ● | ◐ column exists; value lives in per-device telemetry |
+| Per-string voltage & current | ● | ● | ● Solis via relay; SolarMan reports none |
+| Per-phase AC voltage, current, frequency | ● | ● | ● Solis via relay (plus power factor, DC bus) |
+| Inverter temperature | ● | ● | ● Solis via relay; SolarMan exposes none |
 | Device types beyond the inverter (battery, meter, EPM, weather station) | ● | ◐ | ○ schema supports them, nothing populates them |
 | Raw register / telemetry dump | ○ | ○ | ● searchable table — neither app offers this |
 
@@ -131,12 +131,10 @@ station on SolarMan. No account identifiers appear in this document.
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | Per-string **voltage and current**, per-phase AC | Turns "string 2 is low" into "string 2 has a broken connection". Needs the official Solis API key, or teaching the relay to open the inverter detail page | M |
-| 2 | Energy-flow diagram | The centrepiece of both apps; every number is already in the database | M |
-| 3 | Self-sufficiency / self-consumption ratios | One derived figure from data already stored | S |
-| 4 | Inverter temperature | Column exists; the value lives in per-device telemetry, so it arrives with #1 | S |
-| 5 | Plant-timezone-correct "today" | "Today" currently uses the *viewer's* midnight; plants carry their own timezone | S |
-| 6 | PWA install | Phone use without a browser tab | S |
+| 1 | Energy-flow diagram | The centrepiece of both apps; every number is already in the database | M |
+| 2 | Self-sufficiency / self-consumption ratios | One derived figure from data already stored | S |
+| 3 | Plant-timezone-correct "today" | "Today" currently uses the *viewer's* midnight; plants carry their own timezone | S |
+| 4 | PWA install | Phone use without a browser tab | S |
 
 ## 5. Out of scope, by decision
 

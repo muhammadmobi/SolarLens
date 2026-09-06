@@ -137,6 +137,11 @@ export interface DeviceRow {
   last_seen: number | null;
   /** JSON [{index, powerW}] or null. */
   strings: string | null;
+  ac_phases: string | null;
+  frequency_hz: number | null;
+  power_factor: number | null;
+  temp_c: number | null;
+  dc_bus_v: number | null;
   updated_at: number;
   raw: string | null;
 }
@@ -150,15 +155,15 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
     .prepare(
       `INSERT INTO devices
          (id, provider, plant_id, kind, sn, name, model, firmware, rated_power_w, status,
-          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, updated_at, raw)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
+          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, ac_phases, frequency_hz, power_factor, temp_c, dc_bus_v, updated_at, raw)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)
        ON CONFLICT(id) DO UPDATE SET
          plant_id        = COALESCE(excluded.plant_id, devices.plant_id),
          name            = COALESCE(excluded.name, devices.name),
          model           = COALESCE(excluded.model, devices.model),
          firmware        = COALESCE(excluded.firmware, devices.firmware),
          rated_power_w   = COALESCE(excluded.rated_power_w, devices.rated_power_w),
-         status          = excluded.status,
+         status          = COALESCE(excluded.status, devices.status),
          signal_dbm      = COALESCE(excluded.signal_dbm, devices.signal_dbm),
          signal_pct      = COALESCE(excluded.signal_pct, devices.signal_pct),
          upload_cycle_s  = COALESCE(excluded.upload_cycle_s, devices.upload_cycle_s),
@@ -166,6 +171,11 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
          warranty_until  = COALESCE(excluded.warranty_until, devices.warranty_until),
          last_seen       = COALESCE(excluded.last_seen, devices.last_seen),
          strings         = COALESCE(excluded.strings, devices.strings),
+         ac_phases       = COALESCE(excluded.ac_phases, devices.ac_phases),
+         frequency_hz    = COALESCE(excluded.frequency_hz, devices.frequency_hz),
+         power_factor    = COALESCE(excluded.power_factor, devices.power_factor),
+         temp_c          = COALESCE(excluded.temp_c, devices.temp_c),
+         dc_bus_v        = COALESCE(excluded.dc_bus_v, devices.dc_bus_v),
          updated_at      = excluded.updated_at,
          raw             = COALESCE(excluded.raw, devices.raw)`,
     )
@@ -173,6 +183,8 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
       d.id, d.provider, d.plantId, d.kind, d.sn, d.name, d.model, d.firmware, d.ratedPowerW,
       d.status, d.signalDbm, d.signalPct, d.uploadCycleS, d.commissionedAt, d.warrantyUntil, d.lastSeen,
       d.strings ? JSON.stringify(d.strings) : null,
+      d.acPhases ? JSON.stringify(d.acPhases) : null,
+      d.frequencyHz, d.powerFactor, d.tempC, d.dcBusV,
       at,
       d.raw ? JSON.stringify(d.raw) : null,
     )

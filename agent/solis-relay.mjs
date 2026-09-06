@@ -134,6 +134,13 @@ async function snapshot(plantId) {
  * the official monitoring API does not expose at all.
  */
 async function devices(plantId) {
+  const grab2 = (suffix) =>
+    page
+      .waitForResponse((r) => r.url().endsWith(suffix) && r.request().method() === 'POST', { timeout: 30_000 })
+      .then((r) => r.json())
+      .then((j) => j?.data ?? null)
+      .catch(() => null);
+
   const grab = (suffix) =>
     page
       .waitForResponse((r) => r.url().endsWith(suffix) && r.request().method() === 'POST', { timeout: 30_000 })
@@ -153,15 +160,32 @@ async function devices(plantId) {
     await page.getByRole('tab', { name: /datalogger/i }).first().click({ timeout: 15_000 });
     collectors = await wait;
   } catch { /* tab missing or renamed - the inverter data still counts */ }
-  return { inverters: inv, collectors };
+
+  // The inverter's own page is the only source of per-string voltage and
+  // current, per-phase AC and heatsink temperature - none of which appear in
+  // the plant snapshot or the documented monitoring API. One extra navigation
+  // per inverter, paced like every other call.
+  const details = [];
+  for (const rec of inv) {
+    if (!rec?.id || !rec?.sn) continue;
+    try {
+      const wait = grab2('/api/inverter/detail');
+      await page.goto(`${PORTAL}/overview/device/details/inverter?id=${rec.id}&sn=${rec.sn}`, { waitUntil: 'domcontentloaded' });
+      const data = await wait;
+      if (data) details.push(data);
+    } catch { /* detail is a bonus; the list already carries the essentials */ }
+    await sleep(2500);
+  }
+
+  return { inverters: inv, collectors, details };
 }
 
-async function pushDevices(plantId, { inverters, collectors }) {
+async function pushDevices(plantId, { inverters, collectors, details }) {
   if (!inverters.length && !collectors.length) return;
   const res = await fetch(`${SOLARLENS_URL}/api/ingest/devices`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${INGEST_TOKEN}` },
-    body: JSON.stringify({ provider: 'soliscloud', plantId, inverters, collectors }),
+    body: JSON.stringify({ provider: 'soliscloud', plantId, inverters, collectors, details }),
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`devices -> HTTP ${res.status} ${JSON.stringify(j)}`);
