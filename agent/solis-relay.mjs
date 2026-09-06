@@ -51,17 +51,26 @@ if (HEADLESS && firstRun) {
   process.exit(2);
 }
 
-const ctx = await chromium.launchPersistentContext(PROFILE, {
-  headless: HEADLESS,
-  viewport: { width: 1280, height: 800 },
-  ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-  args: ['--disable-blink-features=AutomationControlled'],
-  ignoreDefaultArgs: ['--enable-automation'],
-});
-const page = ctx.pages()[0] ?? (await ctx.newPage());
-
 /** Plants seen on the portal's own plant list: id -> { name, capacityW }. */
 const known = new Map();
+
+let ctx = null;
+let page = null;
+
+/** Launch Chrome, or relaunch it if the window was closed since the last cycle. */
+async function ensureBrowser() {
+  if (page && !page.isClosed()) return;
+  if (ctx) { await ctx.close().catch(() => {}); log('browser was closed - relaunching'); }
+  ctx = await chromium.launchPersistentContext(PROFILE, {
+    headless: HEADLESS,
+    viewport: { width: 1280, height: 800 },
+    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
+    args: ['--disable-blink-features=AutomationControlled'],
+    ignoreDefaultArgs: ['--enable-automation'],
+  });
+  page = ctx.pages()[0] ?? (await ctx.newPage());
+  page.on('response', onResponse);
+}
 
 async function push(plantId, raw) {
   const meta = known.get(plantId) ?? {};
@@ -73,11 +82,12 @@ async function push(plantId, raw) {
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`ingest -> HTTP ${res.status} ${JSON.stringify(j)}`);
+  if (j.skipped) { log(`skipped ${body.name || plantId}: ${j.skipped}`); return; }
   log(`pushed ${body.name || plantId}: ${j.acPowerW ?? '?'} W (${j.stored ? 'new sample' : 'already had this sample'})`);
 }
 
 // The portal's own responses are the source of truth: nothing here is guessed.
-page.on('response', async (res) => {
+async function onResponse(res) {
   const url = res.url();
   if (!url.startsWith(PORTAL + '/api/')) return;
   try {
@@ -90,7 +100,7 @@ page.on('response', async (res) => {
       }
     }
   } catch { /* non-JSON or partial - ignore */ }
-});
+}
 
 async function ensureLoggedIn() {
   await page.goto(`${PORTAL}/overview/plantStation`, { waitUntil: 'domcontentloaded' }).catch(() => {});
@@ -117,10 +127,22 @@ async function snapshot(plantId) {
   return j.data;
 }
 
+/** With no configured ids, make sure the portal's plant list has been seen at least once. */
+async function discoverPlants() {
+  if (PLANTS.length || known.size) return;
+  const wait = page.waitForResponse((r) => r.url().endsWith('/api/station/list'), { timeout: 20_000 }).catch(() => null);
+  await page.goto(`${PORTAL}/overview/plantStation`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await wait;
+  await sleep(1000); // let the response listener finish parsing
+}
+
 async function cycle() {
+  await ensureBrowser();
   await ensureLoggedIn();
+  await discoverPlants();
   const ids = PLANTS.length ? PLANTS : [...known.keys()];
   if (!ids.length) { log('no plants discovered yet (set SOLIS_PLANT_IDS or wait for the plant list to load)'); return; }
+  log(`plants: ${ids.map((id) => known.get(id)?.name ?? id).join(', ')}`);
   for (const id of ids) {
     try { await push(id, await snapshot(id)); }
     catch (e) { log(`plant ${id}: ${e.message}`); }
@@ -128,7 +150,7 @@ async function cycle() {
   }
 }
 
-process.on('SIGINT', async () => { log('stopping'); await ctx.close(); process.exit(0); });
+process.on('SIGINT', async () => { log('stopping'); if (ctx) await ctx.close().catch(() => {}); process.exit(0); });
 
 log(`relay -> ${SOLARLENS_URL}  every ${INTERVAL_MS / 60000} min  plants=${PLANTS.length ? PLANTS.join(',') : 'auto'}  profile=${PROFILE}`);
 for (;;) {
