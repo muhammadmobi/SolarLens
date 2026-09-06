@@ -288,7 +288,7 @@ solar-lens/
 ├── scripts/                  probe, seed, capture, static server for e2e
 ├── tests/                    unit (vitest), e2e (playwright), fixtures
 ├── docs/api-notes.md         observed vendor field names and conventions
-└── docs/feature-gaps.md      what the vendor apps show that SolarLens does not
+└── docs/feature-gaps.md      SolisCloud vs SolarMan vs SolarLens, feature by feature
 ```
 
 ## Troubleshooting
