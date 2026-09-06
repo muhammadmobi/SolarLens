@@ -7,19 +7,27 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:local": "wrangler d1 execute solar-lens --local --file=./migrations/0001_init.sql",
-    "db:remote": "wrangler d1 execute solar-lens --remote --file=./migrations/0001_init.sql",
+    "db:local": "wrangler d1 execute solar-lens --local --file=./migrations/0001_init.sql && wrangler d1 execute solar-lens --local --file=./migrations/0002_metrics.sql",
+    "db:remote": "wrangler d1 execute solar-lens --remote --file=./migrations/0001_init.sql && wrangler d1 execute solar-lens --remote --file=./migrations/0002_metrics.sql",
     "probe:solis": "node scripts/probe-solis.mjs",
     "seed:local": "node scripts/seed-local.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run && playwright test",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "relay:solis": "node agent/solis-relay.mjs"
   },
   "dependencies": {
     "hono": "^4.13.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260905.1",
+    "@playwright/test": "^1.63.0",
     "playwright-core": "^1.63.0",
     "typescript": "^7.0.2",
+    "vitest": "^5.0.0",
     "wrangler": "^4.129.0"
   }
 }

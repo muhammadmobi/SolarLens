@@ -4,6 +4,8 @@ import type { Env } from './db';
 import { insertReading, latest, nowSec, recentPolls, series, upsertInverter } from './db';
 import { pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
+import { stationReading as solisStationReading } from './providers/soliscloud';
+import { stationReading as solarmanStationReading } from './providers/solarman';
 
 const COOKIE = 'sl_token';
 
@@ -95,6 +97,51 @@ app.post('/api/ingest', async (c) => {
     source: body.reading.source || 'local',
   });
   return c.json({ stored });
+});
+
+/**
+ * Raw push for the local relay agent: it hands over a vendor station payload
+ * exactly as the portal returned it, and the Worker normalises it with the same
+ * code path the cloud poller uses - so both routes always agree on field
+ * mapping and sign conventions. Body: { provider, plantId, name?, capacityW?, raw }.
+ */
+app.post('/api/ingest/station', async (c) => {
+  const token = c.env.INGEST_TOKEN;
+  if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);
+  const given = bearer(c.req.header('Authorization')) ?? '';
+  if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
+
+  const body = (await c.req.json()) as {
+    provider: 'soliscloud' | 'solarman';
+    plantId: string;
+    name?: string;
+    capacityW?: number | null;
+    source?: string;
+    raw: Record<string, unknown>;
+  };
+  if (!body?.provider || !body?.plantId || !body?.raw) {
+    return c.json({ error: 'provider, plantId and raw required' }, 400);
+  }
+  const plantId = String(body.plantId);
+  const inv: Inverter = {
+    id: `${body.provider}:station:${plantId}`,
+    provider: body.provider,
+    vendorId: plantId,
+    serial: null,
+    name: body.name ?? '',
+    plantId,
+    plantName: body.name ?? '',
+    capacityW: body.capacityW ?? null,
+  };
+  const source = body.source ?? `${body.provider}-relay`;
+  const reading =
+    body.provider === 'soliscloud'
+      ? solisStationReading(inv, body.raw, source)
+      : solarmanStationReading(inv, body.raw, source);
+  if (!inv.name) inv.name = inv.plantName = plantId;
+  await upsertInverter(c.env.DB, inv);
+  const stored = await insertReading(c.env.DB, reading);
+  return c.json({ stored, inverterId: inv.id, ts: reading.ts, acPowerW: reading.acPowerW });
 });
 
 // Everything else is the static UI.
