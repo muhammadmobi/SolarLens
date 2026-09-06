@@ -36,7 +36,9 @@ describe('SolisCloud station normaliser', () => {
     expect(r.metrics?.loadTodayKwh).toBe(49);
     expect(r.metrics?.loadTotalKwh).toBeCloseTo(48852, 6);
     expect(r.metrics?.gridImportTodayKwh).toBe(0);
-    expect(r.metrics?.battChargeTotalKwh).toBe(0);
+    // The fixture is an on-grid plant, so battery counters stay null rather
+    // than reporting a permanently-empty battery that does not exist.
+    expect(r.metrics?.battChargeTotalKwh).toBeNull();
   });
   it('keeps the untouched vendor payload in raw for later backfill', () => {
     expect(r.raw).toBe(solisFixture);
@@ -117,5 +119,33 @@ describe('plantFilter', () => {
     expect(f('111')).toBe(true);
     expect(f('222')).toBe(true);
     expect(f('333')).toBe(false);
+  });
+});
+
+describe('battery presence is taken from the plant inventory, not zeroed fields', () => {
+  it('reports no battery for an on-grid plant that lists none', () => {
+    const r = solisStation(solisInv, {
+      ...(solisFixture as Record<string, unknown>),
+      batteryCount: 0,
+      batteries: [],
+      batteryCapacitySoc2: 0,
+      batteryPower: 0,
+      batteryPowerStr: 'kW',
+    });
+    expect(r.batterySoc).toBeNull();
+    expect(r.batteryPowerW).toBeNull();
+    expect(r.metrics?.battChargeTotalKwh).toBeNull();
+  });
+
+  it('keeps battery fields when the plant actually has one', () => {
+    const r = solisStation(solisInv, {
+      ...(solisFixture as Record<string, unknown>),
+      batteryCount: 1,
+      batteryCapacitySoc2: 64,
+      batteryPower: 1.2,
+      batteryPowerStr: 'kW',
+    });
+    expect(r.batterySoc).toBe(64);
+    expect(r.batteryPowerW).toBe(1200);
   });
 });

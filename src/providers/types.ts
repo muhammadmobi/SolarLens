@@ -18,6 +18,31 @@ export interface Inverter {
   capacityW: number | null;
 }
 
+export type DeviceKind = 'inverter' | 'datalogger' | 'battery' | 'meter';
+
+/** One physical box behind a reading, as the vendors' Device pages describe it. */
+export interface Device {
+  id: string;
+  provider: string;
+  plantId: string | null;
+  kind: DeviceKind;
+  sn: string | null;
+  name: string | null;
+  model: string | null;
+  firmware: string | null;
+  ratedPowerW: number | null;
+  status: string | null;
+  /** Datalogger signal strength, dBm (negative; closer to 0 is stronger). */
+  signalDbm: number | null;
+  uploadCycleS: number | null;
+  commissionedAt: number | null;
+  warrantyUntil: number | null;
+  lastSeen: number | null;
+  /** Per-MPPT-string DC power, only the strings actually producing. */
+  strings: { index: number; powerW: number }[] | null;
+  raw: unknown;
+}
+
 /**
  * Extended, mostly-cumulative figures the vendor apps show on their detail
  * pages. All nullable: a provider/inverter exposes whatever subset it has, and
