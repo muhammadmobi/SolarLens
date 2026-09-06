@@ -153,6 +153,7 @@ export function deviceFromRecord(d: Rec, plantId: string | null = null): Device 
     lastSeen: toEpochSeconds(pick(d, 'collectionTime')),
     // This hybrid reports only total DC input (DPi_t1); no per-string registers.
     strings: null,
+    acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null,
     raw: { ...d, featureData: feature },
   };
 }

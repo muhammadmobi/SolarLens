@@ -233,6 +233,7 @@ export function deviceFromInverter(d: Rec, plantId: string | null = null): Devic
     warrantyUntil: msToSec(pick(d, 'updateShelfEndTime')),
     lastSeen: msToSec(pick(d, 'dataTimestamp')),
     strings: pvStrings(d),
+    acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null,
     raw: stripPii(d),
   };
 }
@@ -258,6 +259,7 @@ export function deviceFromCollector(d: Rec, plantId: string | null = null): Devi
     warrantyUntil: msToSec(pick(d, 'updateShelfEndTime')),
     lastSeen: msToSec(pick(d, 'dataTimestamp')),
     strings: null,
+    acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null,
     raw: stripPii(d),
   };
 }
@@ -355,4 +357,62 @@ export class SolisCloudProvider implements Provider {
       raw: d,
     };
   }
+}
+
+/**
+ * A record from `inverter/detail` — the inverter's own page, reachable via the
+ * relay at `/overview/device/details/inverter?id=&sn=`. This is the only place
+ * per-string voltage/current, per-phase AC and heatsink temperature appear;
+ * neither the plant snapshot nor the documented monitoring API carries them.
+ *
+ * Fields the list record owns (model, warranty, rated power) are left null so
+ * the upsert's COALESCE keeps whatever `inverter/listV2` already stored.
+ */
+export function deviceFromInverterDetail(d: Rec, plantId: string | null = null): Device {
+  const sn = (pick(d, 'sn', 'inverterSn') as string | null) ?? null;
+
+  const strings: { index: number; powerW: number; voltageV: number | null; currentA: number | null }[] = [];
+  for (let i = 1; i <= 32; i++) {
+    const w = num(pick(d, `pow${i}`));
+    const v = num(pick(d, `uPv${i}`));
+    const a = num(pick(d, `iPv${i}`));
+    // A string that is wired but dark still reports voltage, so treat any of
+    // the three being non-zero as "this string exists".
+    if ((w ?? 0) > 0 || (v ?? 0) > 0 || (a ?? 0) > 0) {
+      strings.push({ index: i, powerW: w ?? 0, voltageV: v, currentA: a });
+    }
+  }
+
+  const acPhases: { index: number; voltageV: number | null; currentA: number | null }[] = [];
+  for (let i = 1; i <= 3; i++) {
+    const v = num(pick(d, `uAc${i}`));
+    const a = num(pick(d, `iAc${i}`));
+    if (v !== null || a !== null) acPhases.push({ index: i, voltageV: v, currentA: a });
+  }
+
+  return {
+    id: `soliscloud:inverter:${sn ?? String(pick(d, 'id') ?? 'unknown')}`,
+    provider: 'soliscloud',
+    plantId: plantId ?? (pick(d, 'stationId') as string | null) ?? null,
+    kind: 'inverter',
+    sn,
+    name: null,
+    model: (pick(d, 'machine') as string | null) ?? null,
+    firmware: null,
+    ratedPowerW: null,
+    status: mapState(pick(d, 'state')),
+    signalDbm: null,
+    signalPct: null,
+    uploadCycleS: null,
+    commissionedAt: null,
+    warrantyUntil: null,
+    lastSeen: msToSec(pick(d, 'dataTimestamp')),
+    strings: strings.length ? strings : [],
+    acPhases: acPhases.length ? acPhases : null,
+    frequencyHz: num(pick(d, 'fac')),
+    powerFactor: num(pick(d, 'powerFactor')),
+    tempC: num(pick(d, 'inverterTemperature')),
+    dcBusV: num(pick(d, 'dcBus')),
+    raw: stripPii(d),
+  };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import solisFixture from '../fixtures/solis-station.json';
 import solarmanFixture from '../fixtures/solarman-station.json';
-import { stationReading as solisStation } from '../../src/providers/soliscloud';
+import { stationReading as solisStation, deviceFromInverterDetail as solisDetail } from '../../src/providers/soliscloud';
 import { stationReading as solarmanStation, stationInverter, deviceFromRecord as solarmanDevice } from '../../src/providers/solarman';
 import { plantFilter } from '../../src/poll';
 import type { Inverter } from '../../src/providers/types';
@@ -187,5 +187,65 @@ describe('SolarMan device records', () => {
     const d = solarmanDevice({ ...collector, featureData: '{not json' }, '62000000');
     expect(d.sn).toBe('LOG-DEMO');
     expect(d.firmware).toBeNull();
+  });
+});
+
+describe('SolisCloud inverter detail (per-string V/A, per-phase AC)', () => {
+  const detail = {
+    sn: 'INV-DEMO', id: '999', stationId: '1000000000000000001', state: 2, machine: 'S5-GR3P10K',
+    dataTimestamp: '1788616886959', fac: 49.64, powerFactor: 0, dcBus: 589.9,
+    inverterTemperature: 40.6, inverterTemperatureUnit: '℃',
+    uPv1: 167.9, iPv1: 0.2, pow1: 34,
+    uPv2: 154.7, iPv2: 0.2, pow2: 31,
+    uPv3: 0, iPv3: 0, pow3: 0,
+    uAc1: 228.4, iAc1: 0.1, uAc2: 228.3, iAc2: 0.1, uAc3: 232, iAc3: 0.1,
+    addr: 'SOME STREET', positionLatitude: '33.5',
+  };
+  const d = solisDetail(detail, '1000000000000000001');
+
+  it('pairs each producing string with its voltage and current', () => {
+    expect(d.strings).toEqual([
+      { index: 1, powerW: 34, voltageV: 167.9, currentA: 0.2 },
+      { index: 2, powerW: 31, voltageV: 154.7, currentA: 0.2 },
+    ]);
+  });
+
+  it('reads all three AC phases plus frequency, power factor and DC bus', () => {
+    expect(d.acPhases).toEqual([
+      { index: 1, voltageV: 228.4, currentA: 0.1 },
+      { index: 2, voltageV: 228.3, currentA: 0.1 },
+      { index: 3, voltageV: 232, currentA: 0.1 },
+    ]);
+    expect(d.frequencyHz).toBe(49.64);
+    expect(d.powerFactor).toBe(0);
+    expect(d.dcBusV).toBe(589.9);
+  });
+
+  it('carries the heatsink temperature the station snapshot never has', () => {
+    expect(d.tempC).toBe(40.6);
+  });
+
+  it('shares the list record id so the two pushes merge into one device', () => {
+    expect(d.id).toBe('soliscloud:inverter:INV-DEMO');
+    expect(d.kind).toBe('inverter');
+    expect(d.status).toBe('offline');
+  });
+
+  it('leaves list-owned fields null so the upsert does not blank them', () => {
+    expect(d.firmware).toBeNull();
+    expect(d.ratedPowerW).toBeNull();
+    expect(d.warrantyUntil).toBeNull();
+  });
+
+  it('strips address and coordinates before the payload is stored', () => {
+    const raw = JSON.stringify(d.raw);
+    expect(raw).not.toContain('SOME STREET');
+    expect(raw).not.toContain('positionLatitude');
+  });
+
+  it('counts a wired but dark string, which reports volts with no watts', () => {
+    const dark = solisDetail({ ...detail, pow2: 0, iPv2: 0 }, null);
+    expect(dark.strings).toHaveLength(2);
+    expect(dark.strings?.[1]).toMatchObject({ index: 2, powerW: 0, voltageV: 154.7 });
   });
 });
