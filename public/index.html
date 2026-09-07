@@ -7,6 +7,15 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e100f" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<script>
+  // Applied before first paint so a chosen theme never flashes the other one.
+  try {
+    var t = localStorage.getItem('sl-theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) { /* private mode: fall back to the OS preference */ }
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
@@ -95,12 +104,17 @@
     display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px;
   }
   .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 17px; letter-spacing: -0.02em; }
-  .brand .mark {
-    width: 26px; height: 26px; border-radius: 8px; flex: none;
-    background: linear-gradient(135deg, var(--solis), var(--solarman));
-  }
+  .brand .mark { width: 28px; height: 28px; border-radius: 8px; flex: none; display: block; }
   .fleet { display: flex; align-items: flex-end; gap: 12px; margin-left: auto; }
+  .battinfo { flex: 1; min-width: 0; }
+  .battgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 4px 14px; margin-top: 5px; }
+  .battgrid > div { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+  .battgrid span { color: var(--faint); }
+  .battgrid b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .derived { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
+             border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .fitem { display: flex; flex-direction: column; gap: 1px; }
+  [hidden] { display: none !important; }
   .flabel { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
   .fleet .num.small { font-size: 17px; }
   .fleet .num { font-size: 24px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
@@ -113,6 +127,12 @@
   }
   .livedot i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
   .livedot.stale i { background: var(--warn); }
+  .themebtn {
+    font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
+    background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 11px; transition: background .15s, border-color .15s;
+  }
+  .themebtn:hover { border-color: var(--muted); }
 
   nav { display: flex; gap: 2px; padding: 10px 0 0; }
   nav a {
@@ -173,6 +193,7 @@
   .pill.warn { background: var(--warn-bg); color: var(--warn); }
   .pill.bad { background: var(--bad-bg); color: var(--bad); }
 
+  .herolabel { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); margin-bottom: 2px; }
   .hero { display: flex; align-items: baseline; gap: 9px; }
   .hero .val { font-size: 50px; font-weight: 800; letter-spacing: -0.04em; line-height: .95; font-variant-numeric: tabular-nums; }
   .hero .unit { font-size: 19px; font-weight: 600; color: var(--muted); }
@@ -200,9 +221,11 @@
   /* ---------- chart ---------- */
   .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
   .legend i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 7px; }
-  .combined { width: 100%; height: 230px; display: block; }
-  .axis { fill: var(--faint); font-size: 11px; font-family: var(--font); font-weight: 600; }
-  .grid { stroke: var(--line-soft); }
+  .combined { width: 100%; height: 250px; display: block; }
+  .axis { fill: var(--muted); font-size: 12.5px; font-family: var(--font); font-weight: 600; }
+  .axis.unit { fill: var(--faint); font-size: 11px; }
+  .peaklab { fill: var(--ink); font-size: 12.5px; font-weight: 700; font-family: var(--font); }
+  .grid { stroke: var(--line); opacity: .7; }
 
   /* ---------- flow ---------- */
   .flow { width: 100%; height: auto; display: block; }
@@ -227,7 +250,7 @@
   .flowstats .v.export { color: var(--ok); }
   .chartgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px 22px; }
   .chartmini { min-width: 0; }
-  .chartmini .combined { height: 170px; }
+  .chartmini .combined { height: 200px; }
   .flowgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 4px 20px; }
   .flowmini { min-width: 0; }
   .flowmini .mini-name { font-size: 13.5px; font-weight: 700; margin-bottom: 2px; }
@@ -269,6 +292,22 @@
   .dev-name { font-weight: 700; }
   .dev-meta { color: var(--muted); font-size: 12.5px; }
 
+  details.syssec { margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+  details.syssec > summary {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 16px 20px; cursor: pointer; list-style: none;
+    border-bottom: 1px solid transparent;
+  }
+  details.syssec[open] > summary { border-bottom-color: var(--line-soft); }
+  details.syssec > summary::-webkit-details-marker { display: none; }
+  details.syssec > summary::before { content: "▸"; color: var(--faint); font-size: 13px; }
+  details.syssec[open] > summary::before { content: "▾"; }
+  details.syssec > summary:hover { background: var(--surface-2); }
+  details.syssec .sname { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+  details.syssec .snow { margin-left: auto; font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  details.syssec .snow small { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .secbody { padding: 18px 20px 22px; display: flex; flex-direction: column; gap: 16px; background: var(--bg); }
+  .secbody > .blocks { margin: 0; }
   details.raw { margin-top: 16px; }
   details.raw summary { padding: 15px 20px; cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 650; list-style: none; }
   details.raw summary::-webkit-details-marker { display: none; }
@@ -296,13 +335,18 @@
 <body>
 <div class="topbar">
   <div class="inner">
-    <div class="brand"><span class="mark"></span>SolarLens</div>
-    <div class="fleet" title="Both systems added together">
-      <div class="fitem"><span class="flabel">Both systems now</span><span class="num" id="fleet-power">—</span></div>
+    <a class="brand" href="#/"><img class="mark" src="/icon.svg" alt="" width="28" height="28">SolarLens</a>
+    <div class="fleet">
+      <div class="fitem" title="Both systems producing right now"><span class="flabel">Producing now</span><span class="num" id="fleet-power">—</span></div>
       <span class="sep"></span>
-      <div class="fitem"><span class="flabel">Generated today</span><span class="num small" id="fleet-today">—</span></div>
+      <div class="fitem" title="Both systems added together, since midnight"><span class="flabel">Produced today</span><span class="num small" id="fleet-today">—</span></div>
+      <span class="sep"></span>
+      <div class="fitem" title="What the houses used today"><span class="flabel">Consumed today</span><span class="num small" id="fleet-used">—</span></div>
+      <span class="sep" id="wx-sep" hidden></span>
+      <div class="fitem" id="wx-item" hidden><span class="flabel">Weather</span><span class="num small" id="fleet-wx">—</span></div>
     </div>
     <span class="livedot" id="updated"><i></i>loading…</span>
+    <button class="themebtn" id="theme" type="button" aria-label="Change theme">🖥️</button>
   </div>
   <div class="inner" style="padding-top:0">
     <nav id="nav">
@@ -376,6 +420,19 @@
   const hasBattery = (inv, m) =>
     (inv.battery_soc !== null && inv.battery_soc !== undefined) ||
     !!(m && (m.battChargeTotalKwh || m.battDischargeTotalKwh || m.batteryStatus));
+
+  // Neither cloud reports a cycle count, but both report cumulative charge and
+  // the pack's nameplate - and "energy in / usable capacity" is the equivalent
+  // full cycles a BMS would count. Labelled as derived wherever it is shown.
+  const packKwh = (bat) => {
+    if (!bat || bat.ratedCapacityAh == null || !bat.nominalVoltageV) return null;
+    const kwh = (bat.ratedCapacityAh * bat.nominalVoltageV) / 1000;
+    return kwh > 0 ? kwh : null;
+  };
+  const cycles = (m, bat) => {
+    const kwh = packKwh(bat);
+    return kwh && m?.battChargeTotalKwh != null ? m.battChargeTotalKwh / kwh : null;
+  };
 
   function statusOf(inv) {
     const age = inv.ts ? Math.floor(Date.now() / 1000) - inv.ts : null;
@@ -511,7 +568,7 @@
 
   /** One system's own day curve, drawn at chart size rather than sparkline size. */
   function systemChart(inv, pts, id) {
-    const W = 1000, H = 200, L = 46, R = 12, T = 12, B = 24;
+    const W = 1000, H = 230, L = 62, R = 16, T = 26, B = 30;
     const t0 = startOfToday(), t1 = t0 + 86400;
     const c = colorFor(inv.provider);
     if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">No samples yet today</text></svg>`;
@@ -527,28 +584,48 @@
       out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" vector-effect="non-scaling-stroke"/>`;
       out += `<text class="axis" x="${L - 8}" y="${yy + 4}" text-anchor="end">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>`;
     }
-    for (let h = 0; h <= 24; h += 6) {
+    for (let h = 0; h <= 24; h += 3) {
       const xx = x(t0 + h * 3600);
-      out += `<text class="axis" x="${xx}" y="${H - 6}" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${String(h).padStart(2, '0')}:00</text>`;
+      out += `<text class="axis" x="${xx}" y="${H - 8}" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${String(h).padStart(2, '0')}</text>`;
     }
     out += `<path d="${d} L${x(last.ts).toFixed(1)},${y(0)} L${x(pts[0].ts).toFixed(1)},${y(0)} Z" fill="url(#${id})"/>`;
-    out += `<path d="${d}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
-    out += `<circle cx="${x(last.ts).toFixed(1)}" cy="${y(last.ac_power_w).toFixed(1)}" r="3.5" fill="${c}"/>`;
-    return `<svg class="combined" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${out}</svg>`;
+    out += `<path d="${d}" fill="none" stroke="${c}" stroke-width="2.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+    // Mark the day's peak: on a solar curve it is the one number worth reading.
+    const peak = pts.reduce((a, p) => ((p.ac_power_w ?? 0) > (a.ac_power_w ?? 0) ? p : a), pts[0]);
+    if ((peak.ac_power_w ?? 0) > 0) {
+      const px = x(peak.ts), py = y(peak.ac_power_w);
+      out += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4" fill="${c}"/>`;
+      const flip = px > W * 0.75;
+      out += `<text class="peaklab" x="${(px + (flip ? -10 : 10)).toFixed(1)}" y="${Math.max(T + 12, py - 10).toFixed(1)}" text-anchor="${flip ? 'end' : 'start'}">peak ${fmtWs(peak.ac_power_w)} · ${new Date(peak.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>`;
+    }
+    out += `<circle cx="${x(last.ts).toFixed(1)}" cy="${y(last.ac_power_w).toFixed(1)}" r="3.5" fill="${c}" opacity=".55"/>`;
+    out += `<text class="axis unit" x="6" y="${T - 10}">watts</text>`;
+    return `<svg class="combined" viewBox="0 0 ${W} ${H}">${out}</svg>`;
   }
 
   function renderPower() {
     const invs = state.latest?.inverters ?? [];
     const byInv = {};
     for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
+    // Collapsible per system: with two full detail sets on one page, the
+    // second is otherwise a long scroll away.
     const per = invs.map((inv, i) => {
       const b = detailBlocks(inv);
-      return `<section class="card" style="margin-top:18px"><div class="body">
-        ${b.header}
-        ${systemChart(inv, byInv[inv.id] || [], 'pg' + i)}
-      </div></section>
-      ${b.blocks}
-      ${b.raw}`;
+      const st = statusOf(inv);
+      const [v, u] = fmtW(inv.ac_power_w);
+      return `<details class="syssec" open>
+        <summary>
+          <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="sname">${esc(inv.name)}</span>
+          <span class="snow">${v}<small> ${u}</small></span>
+          <span class="pill ${st.cls}"><i></i>${esc(st.text)}</span>
+        </summary>
+        <div class="secbody">
+          <section class="card"><div class="body">${systemChart(inv, byInv[inv.id] || [], 'pg' + i)}</div></section>
+          ${b.blocks}
+          ${b.raw}
+        </div>
+      </details>`;
     }).join('');
 
     $('view').innerHTML = `<section class="card"><h2>Today · AC output · all systems</h2><div class="body">
@@ -602,15 +679,44 @@
         </div>
         <span class="pill ${st.cls}"><i></i>${esc(st.text)}</span>
       </div>
+      <div class="herolabel">Producing now</div>
       <div class="hero">
         <span class="val">${pv}</span><span class="unit">${pu}</span>
-        <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)}` : ''}</span>
+        <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)} rated` : ''}</span>
       </div>
       <div class="freshness ${st.stale ? 'stale' : ''}">${inv.ts ? (st.stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}`) : ''}</div>
       ${flowStats(inv, true)}
-      ${hasBattery(inv, m) ? `<div class="batt">${ring(inv.battery_soc ?? 0)}
-        <div><div class="k">Battery</div><div class="v">${battText(inv.battery_power_w)}</div></div></div>` : ''}
+      ${battPanel(inv, m)}
     </a>`;
+  }
+
+  /**
+   * The battery at a glance: charge level, what it is doing right now, how warm
+   * it is, and today's two energy figures. A hybrid's pack is half the story of
+   * the system, so the overview card says more about it than a bare wattage.
+   */
+  function battPanel(inv, m) {
+    if (!hasBattery(inv, m)) return '';
+    const bat = parse(devicesFor(inv).find((d) => d.kind === 'inverter')?.battery);
+    const state = inv.battery_power_w == null ? null
+      : inv.battery_power_w > 50 ? 'charging'
+      : inv.battery_power_w < -50 ? 'discharging' : 'idle';
+    const rows = [
+      // The heading already says charging/discharging/idle, so this row carries
+      // the number: signed, + into the pack and - out of it.
+      ['Power', inv.battery_power_w == null ? '—'
+        : `${inv.battery_power_w > 0 ? '+' : '−'}${fmtWs(Math.abs(inv.battery_power_w))}`],
+      bat?.tempC != null ? ['Pack temperature', `${bat.tempC} °C`] : null,
+      m.battChargeTodayKwh != null ? ['Charged today', fmtKwh(m.battChargeTodayKwh)] : null,
+      m.battDischargeTodayKwh != null ? ['Discharged today', fmtKwh(m.battDischargeTodayKwh)] : null,
+    ].filter(Boolean);
+    return `<div class="batt">
+      ${ring(inv.battery_soc ?? 0)}
+      <div class="battinfo">
+        <div class="k">Battery${state ? ` · ${state}` : ''}</div>
+        <div class="battgrid">${rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${v}</b></div>`).join('')}</div>
+      </div>
+    </div>`;
   }
 
   function combinedChart(svg, byInv, invs) {
@@ -834,16 +940,20 @@
       m.gridExportTodayKwh != null ? ['Exported today', fmtKwh(m.gridExportTodayKwh)] : null,
       m.gridImportTotalKwh != null ? ['Imported, lifetime', fmtKwh(m.gridImportTotalKwh)] : null,
       m.gridExportTotalKwh != null ? ['Exported, lifetime', fmtKwh(m.gridExportTotalKwh)] : null,
+      m.loadTotalKwh != null ? ['Consumed, lifetime', fmtKwh(m.loadTotalKwh)] : null,
+      m.selfUseTodayKwh != null ? ['Self-consumed today', fmtKwh(m.selfUseTodayKwh)] : null,
+      m.fullLoadHours != null ? ['Full-load hours', `${m.fullLoadHours} h`] : null,
     ]);
 
     const bat = parse(invDev?.battery);
+    const cyc = cycles(m, bat);
     const battery = hasBattery(inv, m) ? `<section class="card"><h3>Battery</h3><div class="body">
       <div class="batt" style="margin-top:0;padding-top:0;border-top:none">
         ${ring(inv.battery_soc ?? 0)}
         <div><div class="k">State of charge</div><div class="v">${battText(inv.battery_power_w)}</div></div>
       </div>
       <dl class="kv" style="margin-top:16px">
-        ${m.batteryStatus ? `<dt>Status</dt><dd>${esc(String(m.batteryStatus).toLowerCase())}</dd>` : ''}
+        ${m.batteryStatus || bat?.status ? `<dt>Status</dt><dd>${esc(String(m.batteryStatus || bat.status).toLowerCase())}</dd>` : ''}
         ${inv.battery_soc != null ? `<dt>State of charge</dt><dd>${Math.round(inv.battery_soc)} %</dd>` : ''}
         ${inv.battery_power_w != null ? `<dt>Charge / discharge</dt><dd>${battText(inv.battery_power_w)}</dd>` : ''}
         ${bat?.tempC != null ? `<dt>Pack temperature</dt><dd>${bat.tempC} °C</dd>` : ''}
@@ -857,12 +967,20 @@
         ${bat?.bmsVoltageV != null ? `<dt>BMS voltage</dt><dd>${bat.bmsVoltageV} V</dd>` : ''}
         ${bat?.chargeLimitA != null ? `<dt>Charge limit</dt><dd>${bat.chargeLimitA} A</dd>` : ''}
         ${bat?.dischargeLimitA != null ? `<dt>Discharge limit</dt><dd>${bat.dischargeLimitA} A</dd>` : ''}
+        ${bat?.bmsSocPct != null ? `<dt>BMS state of charge</dt><dd>${Math.round(bat.bmsSocPct)} %</dd>` : ''}
+        ${bat?.bmsChargeVoltageV != null ? `<dt>BMS charge voltage</dt><dd>${bat.bmsChargeVoltageV} V</dd>` : ''}
+        ${bat?.bmsDischargeVoltageV != null ? `<dt>BMS discharge voltage</dt><dd>${bat.bmsDischargeVoltageV} V</dd>` : ''}
+        ${bat?.chemistry ? `<dt>Chemistry</dt><dd>${esc(bat.chemistry)}</dd>` : ''}
+        ${bat?.ratedCapacityAh != null ? `<dt>Rated capacity</dt><dd>${bat.ratedCapacityAh} Ah${bat.nominalVoltageV ? ` @ ${bat.nominalVoltageV} V · ${packKwh(bat).toFixed(2)} kWh` : ''}</dd>` : ''}
+        ${cyc != null ? `<dt title="Derived: lifetime energy charged divided by the pack's usable capacity. Neither cloud reports a counter.">Equivalent full cycles</dt><dd>${cyc.toFixed(0)} <span class="derived">derived</span></dd>` : ''}
       </dl></div></section>` : '';
 
     const diagnostics = kvCard('Status & diagnostics', [
       ['Reported', `<span class="pill ${st.cls}"><i></i>${esc(st.text)}</span>`],
       tempC != null ? ['Temperature', `${tempC.toFixed(1)} °C`] : null,
       m.gridStatus ? ['Grid', esc(String(m.gridStatus).toLowerCase())] : null,
+      m.weatherText ? ['Weather', `${esc(m.weatherText)}${m.tempNowC != null ? ` · ${Math.round(m.tempNowC)} °C now` : ''}${m.tempMinC != null && m.tempMaxC != null ? ` · ${Math.round(m.tempMinC)}–${Math.round(m.tempMaxC)} °C` : ''}`] : null,
+      m.sunrise && m.sunset ? ['Sun', `${esc(m.sunrise)} – ${esc(m.sunset)}`] : null,
       ['Data age', esc(inv.ts ? ago(inv.ts) : 'never')],
     ]);
 
@@ -872,7 +990,11 @@
           <div class="vendor" style="color:${accent}">${esc(providerName(inv.provider))}</div>
           <div class="sys-name" style="font-size:26px">${esc(inv.name)}</div>
         </div>
-        <div class="hero" style="margin:0"><span class="val" style="font-size:40px">${pv}</span><span class="unit">${pu}</span></div>
+        <div style="text-align:right">
+          <div class="herolabel">Producing now</div>
+          <div class="hero" style="margin:0"><span class="val" style="font-size:40px">${pv}</span><span class="unit">${pu}</span></div>
+          ${inv.capacity_w ? `<div class="cap" style="margin:0">of ${fmtWs(inv.capacity_w)} rated</div>` : ''}
+        </div>
       </div>`,
       flow: `<section class="card" style="margin-bottom:16px"><div class="body">${flowSvg(inv, m)}</div></section>`,
       blocks: `<div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent)}${acCard(invDev)}${battery}${diagnostics}</div>`,
@@ -933,6 +1055,20 @@
       const [fv, fu] = fmtW(withData.reduce((a, i) => a + (i.ac_power_w || 0), 0));
       $('fleet-power').innerHTML = withData.length ? `${fv}<span class="unit"> ${fu}</span>` : '—';
       $('fleet-today').textContent = withData.length ? fmtKwh(withData.reduce((a, i) => a + (i.today_kwh || 0), 0)) : '—';
+
+      const used = withData.reduce((a, i) => a + (parse(i.metrics)?.loadTodayKwh ?? 0), 0);
+      $('fleet-used').textContent = used > 0 ? fmtKwh(used) : '—';
+
+      // Only SolisCloud ships the forecast with its snapshot, so take the first
+      // system that has one rather than assuming which vendor it came from.
+      const wx = withData.map((i) => parse(i.metrics)).find((m) => m?.weatherText);
+      const hasWx = !!wx;
+      $('wx-item').hidden = !hasWx;
+      $('wx-sep').hidden = !hasWx;
+      if (hasWx) {
+        $('fleet-wx').textContent =
+          `${wx.weatherText}${wx.tempNowC != null ? ` · ${Math.round(wx.tempNowC)}°` : ''}${wx.tempMinC != null && wx.tempMaxC != null ? ` (${Math.round(wx.tempMinC)}–${Math.round(wx.tempMaxC)}°)` : ''}`;
+      }
       const newest = Math.max(0, ...withData.map((i) => i.ts));
       const stale = !newest || (now - newest) > STALE_AFTER_S;
       $('updated').className = 'livedot' + (stale ? ' stale' : '');
@@ -950,6 +1086,28 @@
       else $('updated').innerHTML = `<i></i>error: ${esc(e.message)}`;
     }
   }
+
+  // ---------- theme ----------
+  // Three states rather than two: "auto" is the default and follows the OS, so
+  // a viewer who never touches this still gets the right one at night.
+  const THEMES = ['auto', 'light', 'dark'];
+  const THEME_ICON = { auto: '🖥️', light: '☀️', dark: '🌙' };
+  let theme = 'auto';
+  try { const t = localStorage.getItem('sl-theme'); if (THEMES.includes(t)) theme = t; } catch { /* private mode */ }
+  function applyTheme() {
+    if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', theme);
+    const btn = $('theme');
+    btn.textContent = THEME_ICON[theme];
+    btn.title = `Theme: ${theme}`;
+    btn.setAttribute('aria-label', `Theme: ${theme}. Click to change.`);
+  }
+  $('theme').addEventListener('click', () => {
+    theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+    try { localStorage.setItem('sl-theme', theme); } catch { /* private mode */ }
+    applyTheme();
+  });
+  applyTheme();
 
   window.addEventListener('hashchange', route);
   route();
