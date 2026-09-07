@@ -332,9 +332,28 @@ describe('SolarMan battery and BMS detail', () => {
       tempC: 31.4, voltageV: 27.13, currentA: -1.04,
       bmsTempC: 31.4, bmsVoltageV: 26.93, bmsCurrentA: null,
       chargeLimitA: 0, dischargeLimitA: 130,
+      ratedCapacityAh: null, nominalVoltageV: null, chemistry: null, status: null,
+      bmsSocPct: null, bmsChargeVoltageV: null, bmsDischargeVoltageV: null,
     });
     // The heatsink figure stays separate from the pack's.
     expect(d.tempC).toBe(47.7);
+  });
+
+  it('reads the pack nameplate, so cumulative charge can become cycles', () => {
+    const d = solarmanV3({
+      deviceId: 3, deviceSn: 'INV-NAMEPLATE', deviceState: 1,
+      paramCategoryList: [
+        cat('Basic Information', [['SAFETY', 'Battery Voltage Type', 'LV-24V', null]]),
+        cat('Battery', [['BRC', 'Battery Rated Capacity', '100', 'Ah'], ['B_TYP1', 'Battery Type', 'lithium', null],
+          ['B_ST1', 'Battery Status', 'Static', null]]),
+        cat('BMS', [['C_CAP', 'BMS SOC', '100', '%'], ['BMS_C_V', 'BMS Charge Voltage', '28.50', 'V'],
+          ['BMS_D_V', 'BMS Discharge Voltage', '0.00', 'V']]),
+      ],
+    }, '62000000');
+    expect(d.battery).toMatchObject({
+      ratedCapacityAh: 100, nominalVoltageV: 24, chemistry: 'lithium', status: 'Static',
+      bmsSocPct: 100, bmsChargeVoltageV: 28.5, bmsDischargeVoltageV: 0,
+    });
   });
 
   it('leaves battery null for an inverter that reports no pack at all', () => {

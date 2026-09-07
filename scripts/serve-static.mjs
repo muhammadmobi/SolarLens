@@ -9,7 +9,7 @@ const ROOT = join(import.meta.dirname, '..', 'public');
 const PORT = Number(process.env.PORT ?? 4173);
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
 
-createServer(async (req, res) => {
+const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (url.pathname.startsWith('/api/')) { res.writeHead(404); res.end('no api in static mode'); return; }
   let file = normalize(url.pathname === '/' ? '/index.html' : url.pathname).replace(/^(\.\.[/\\])+/, '');
@@ -20,4 +20,13 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404); res.end('not found');
   }
-}).listen(PORT, '127.0.0.1', () => console.log(`static: http://127.0.0.1:${PORT}/  (serving ${ROOT})`));
+});
+
+// Two browser projects running 30-odd tests in parallel reuse keep-alive
+// sockets hard. Node's 5 s default closes an idle one just as the browser
+// sends its next request on it, which surfaces as a flaky
+// "net::ERR_ABORTED; maybe frame was detached?" on page.goto. Outliving the
+// whole suite removes the race; a generous backlog absorbs the burst at start.
+server.keepAliveTimeout = 120_000;
+server.headersTimeout = 125_000;
+server.listen(PORT, '127.0.0.1', 512, () => console.log(`static: http://127.0.0.1:${PORT}/  (serving ${ROOT})`));
