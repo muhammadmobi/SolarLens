@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="SolarLens">
+  <title>SolarLens</title>
+  <!--
+    A lens ring around a sun: the app is a lens onto two solar systems. The ring
+    is split into the two vendor accents (amber for SolisCloud, blue for
+    SolarMan) meeting at the top, which is the whole point of the product.
+  -->
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f0913f"/>
+      <stop offset="52%" stop-color="#e2701f"/>
+      <stop offset="53%" stop-color="#3d7ce6"/>
+      <stop offset="100%" stop-color="#2f6fde"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffd27a"/>
+      <stop offset="100%" stop-color="#f0913f"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="#12140f"/>
+  <!-- lens ring -->
+  <circle cx="32" cy="32" r="21" fill="none" stroke="url(#ring)" stroke-width="5"/>
+  <!-- aperture notch, so the ring reads as a lens rather than a plain circle -->
+  <path d="M32 8.5 a23.5 23.5 0 0 1 0 0" fill="none"/>
+  <circle cx="32" cy="10.5" r="3.6" fill="#12140f"/>
+  <!-- sun core -->
+  <circle cx="32" cy="32" r="10" fill="url(#core)"/>
+  <!-- rays, kept to four so the mark still reads at 16px -->
+  <g stroke="url(#core)" stroke-width="3" stroke-linecap="round">
+    <line x1="32" y1="15.5" x2="32" y2="19"/>
+    <line x1="32" y1="45" x2="32" y2="48.5"/>
+    <line x1="15.5" y1="32" x2="19" y2="32"/>
+    <line x1="45" y1="32" x2="48.5" y2="32"/>
+  </g>
+</svg>
