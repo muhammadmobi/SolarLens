@@ -186,7 +186,7 @@ test.describe('Energy flow page', () => {
     await stubApi(page);
     await page.goto('/');
     // Scoped to the nav: the overview's own flow card is a link named the same.
-    await page.locator('nav').getByRole('link', { name: 'Energy flow' }).click();
+    await page.locator('nav').getByRole('link', { name: 'Flow', exact: true }).click();
     await expect(page).toHaveURL(/#\/flow$/);
     await expect(page.locator('svg.flow')).toHaveCount(2);
     // Each card names its system, so the two diagrams are tellable apart.
@@ -242,7 +242,7 @@ test.describe('AC output page', () => {
     await page.goto('/');
     // The chart is no longer on the overview - it has a page of its own.
     await expect(page.locator('#combined')).toHaveCount(0);
-    await page.locator('nav').getByRole('link', { name: 'AC output' }).click();
+    await page.locator('nav').getByRole('link', { name: 'Power', exact: true }).click();
     await expect(page).toHaveURL(/#\/power$/);
     await expect(page.locator('#combined')).toBeVisible();
     await expect(page.locator('#legend span')).toContainText(['Demo Solis Plant', 'Demo Hybrid', 'Fleet total']);
