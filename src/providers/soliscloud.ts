@@ -145,6 +145,15 @@ function stationMetrics(d: Rec): Metrics {
   m.gridExportTodayKwh = kwhPair(d, 'gridSellDayEnergy');
   m.gridImportTotalKwh = kwhPair(d, 'gridPurchasedTotalEnergy');
   m.gridExportTotalKwh = kwhPair(d, 'gridSellTotalEnergy');
+  m.fullLoadHours = num(pick(d, 'fullHour'));
+  // condTxtD is the daytime description; the snapshot also carries sunrise and
+  // sunset, which is enough to say whether the sun is even up.
+  m.weatherText = (pick(d, 'condTxtD') as string | null) ?? null;
+  m.tempMinC = num(pick(d, 'tmpMin'));
+  m.tempMaxC = num(pick(d, 'tmpMax'));
+  m.sunrise = (pick(d, 'sr') as string | null) ?? null;
+  m.sunset = (pick(d, 'ss') as string | null) ?? null;
+
   if (plantHasBattery(d)) {
     m.battChargeTodayKwh = kwhPair(d, 'batteryChargeEnergy');
     m.battDischargeTodayKwh = kwhPair(d, 'batteryDischargeEnergy');
