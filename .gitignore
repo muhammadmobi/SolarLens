@@ -20,3 +20,7 @@ playwright-report/
 
 # Solis relay agent browser profile (holds your portal session)
 .relay-profile/
+
+# One-shot patch scripts used while developing; never part of the app
+patch-*.mjs
+.probe-*.mjs
