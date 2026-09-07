@@ -114,6 +114,7 @@
   .derived { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
              border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .fitem { display: flex; flex-direction: column; gap: 1px; }
+  .quiet { font-size: 10.5px; font-weight: 650; color: var(--warn); margin-top: 1px; }
   [hidden] { display: none !important; }
   .flabel { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
   .fleet .num.small { font-size: 17px; }
@@ -337,7 +338,7 @@
   <div class="inner">
     <a class="brand" href="#/"><img class="mark" src="/icon.svg" alt="" width="28" height="28">SolarLens</a>
     <div class="fleet">
-      <div class="fitem" title="Both systems producing right now"><span class="flabel">Producing now</span><span class="num" id="fleet-power">—</span></div>
+      <div class="fitem" title="Only systems that have reported in the last 15 minutes. A system that has gone quiet is left out and flagged instead."><span class="flabel">Producing now</span><span class="num" id="fleet-power">—</span><span class="quiet" id="fleet-quiet" hidden></span></div>
       <span class="sep"></span>
       <div class="fitem" title="Both systems added together, since midnight"><span class="flabel">Produced today</span><span class="num small" id="fleet-today">—</span></div>
       <span class="sep"></span>
@@ -440,7 +441,11 @@
     return {
       stale,
       cls: !inv.ts ? '' : stale ? 'warn' : inv.status === 'alarm' ? 'bad' : inv.status === 'offline' ? 'warn' : 'ok',
-      text: !inv.ts ? 'no data yet' : (inv.status || 'reporting'),
+      // The vendor's own word is only current if the sample is. Past the
+      // staleness cutoff the pill says what is actually true: nothing is
+      // arriving. The last vendor status is kept in the tooltip.
+      text: !inv.ts ? 'no data yet' : stale ? 'not reporting' : (inv.status || 'reporting'),
+      lastWord: inv.status || null,
     };
   }
 
@@ -618,7 +623,7 @@
           <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
           <span class="snow">${v}<small> ${u}</small></span>
-          <span class="pill ${st.cls}"><i></i>${esc(st.text)}</span>
+          <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
         </summary>
         <div class="secbody">
           <section class="card"><div class="body">${systemChart(inv, byInv[inv.id] || [], 'pg' + i)}</div></section>
@@ -677,7 +682,7 @@
           <div class="sys-name">${esc(inv.name)}</div>
           <div class="sys-plant">${esc(inv.plant_name && inv.plant_name !== inv.name ? inv.plant_name : '')}</div>
         </div>
-        <span class="pill ${st.cls}"><i></i>${esc(st.text)}</span>
+        <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
       </div>
       <div class="herolabel">Producing now</div>
       <div class="hero">
@@ -976,7 +981,7 @@
       </dl></div></section>` : '';
 
     const diagnostics = kvCard('Status & diagnostics', [
-      ['Reported', `<span class="pill ${st.cls}"><i></i>${esc(st.text)}</span>`],
+      ['Reported', `<span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>`],
       tempC != null ? ['Temperature', `${tempC.toFixed(1)} °C`] : null,
       m.gridStatus ? ['Grid', esc(String(m.gridStatus).toLowerCase())] : null,
       m.weatherText ? ['Weather', `${esc(m.weatherText)}${m.tempNowC != null ? ` · ${Math.round(m.tempNowC)} °C now` : ''}${m.tempMinC != null && m.tempMaxC != null ? ` · ${Math.round(m.tempMinC)}–${Math.round(m.tempMaxC)} °C` : ''}`] : null,
@@ -1052,8 +1057,17 @@
       state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.error = null;
 
       const withData = lat.inverters.filter((i) => i.ts);
-      const [fv, fu] = fmtW(withData.reduce((a, i) => a + (i.ac_power_w || 0), 0));
-      $('fleet-power').innerHTML = withData.length ? `${fv}<span class="unit"> ${fu}</span>` : '—';
+      // "Now" means now. A system whose newest sample is an hour old is not
+      // producing its last known wattage - nobody knows what it is producing -
+      // so it is left out of the total and named underneath instead.
+      const live = withData.filter((i) => now - i.ts <= STALE_AFTER_S);
+      const quiet = withData.filter((i) => now - i.ts > STALE_AFTER_S);
+      const [fv, fu] = fmtW(live.reduce((a, i) => a + (i.ac_power_w || 0), 0));
+      $('fleet-power').innerHTML = live.length ? `${fv}<span class="unit"> ${fu}</span>` : '—';
+      $('fleet-quiet').hidden = !quiet.length;
+      $('fleet-quiet').textContent = quiet.length
+        ? `${quiet.map((i) => i.name).join(', ')} not reporting`
+        : '';
       $('fleet-today').textContent = withData.length ? fmtKwh(withData.reduce((a, i) => a + (i.today_kwh || 0), 0)) : '—';
 
       const used = withData.reduce((a, i) => a + (parse(i.metrics)?.loadTodayKwh ?? 0), 0);

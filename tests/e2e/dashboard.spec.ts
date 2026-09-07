@@ -188,6 +188,29 @@ test.describe('Overview', () => {
     const solis = page.locator('a.sys').nth(0);
     await expect(solis.locator('.freshness')).toContainText('last sample');
     await expect(solis.locator('.pill')).toHaveClass(/warn/);
+    // The vendor's last word was "online", but that was an hour ago. Saying it
+    // now, beside an amber dot and a staleness warning, contradicts both.
+    await expect(solis.locator('.pill')).toHaveText('not reporting');
+    await expect(solis.locator('.pill')).toHaveAttribute('title', /online/);
+  });
+
+  test('a system that has gone quiet is dropped from "Producing now", not counted', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
+    await page.goto('/');
+    // 5.08 kW of it is an hour stale: whatever the plant is doing now, this is
+    // not it. Only the hybrid's 278 W is current.
+    await expect(page.locator('#fleet-power')).toHaveText('278 W');
+    await expect(page.locator('#fleet-quiet')).toBeVisible();
+    await expect(page.locator('#fleet-quiet')).toHaveText('Demo Solis Plant not reporting');
+    // Today's energy still counts it - those kWh were genuinely generated.
+    await expect(page.locator('#fleet-today')).toHaveText('62.7 kWh');
+  });
+
+  test('no flag, and both systems counted, while everything is fresh', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    await expect(page.locator('#fleet-power')).toHaveText('5.36 kW');
+    await expect(page.locator('#fleet-quiet')).toBeHidden();
   });
 
   test('surfaces a failed poll in the footer', async ({ page }) => {
