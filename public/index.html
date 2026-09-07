@@ -209,6 +209,11 @@
   .flow .lbl { fill: var(--faint); font-size: 12.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; font-family: var(--font); }
   .flow .val { fill: var(--ink); font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; font-family: var(--font); }
   .flow .sub { fill: var(--faint); font-size: 12px; font-weight: 600; font-family: var(--font); }
+  .flowstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 16px 18px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--line-soft); }
+  .flowstats .k { color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+  .flowstats .v { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .flowstats .v.import { color: var(--solarman); }
+  .flowstats .v.export { color: var(--ok); }
   .flowgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 4px 20px; }
   .flowmini { min-width: 0; }
   .flowmini .mini-name { font-size: 13.5px; font-weight: 700; margin-bottom: 2px; }
@@ -289,6 +294,7 @@
     <nav id="nav">
       <a href="#/">Overview</a>
       <a href="#/flow">Energy flow</a>
+      <a href="#/power">AC output</a>
       <a href="#/devices">Devices</a>
     </nav>
   </div>
@@ -476,21 +482,51 @@
       aria-label="Energy flow for ${esc(inv.name)}">${out}</svg>`;
   }
 
+  /**
+   * On the Energy flow page each system gets its diagram plus the figures that
+   * explain it, and the whole card opens that system's full detail view - the
+   * flow is a summary, not a dead end.
+   */
   function flowCard(inv) {
     const m = parse(inv.metrics) ?? {};
     const st = statusOf(inv);
-    return `<section class="card">
+    const devs = devicesFor(inv);
+    const invDev = devs.find((d) => d.kind === 'inverter');
+    const logger = devs.find((d) => d.kind === 'datalogger');
+    const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
+    const strings = parse(invDev?.strings);
+    const g = inv.grid_power_w;
+
+    const stat = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls ?? ''}">${v}</div></div>`;
+    const cells = [
+      stat('Today', fmtKwh(inv.today_kwh)),
+      m.genMonthKwh != null ? stat('This month', fmtKwh(m.genMonthKwh)) : '',
+      stat('Lifetime', fmtKwh(inv.total_kwh)),
+      stat('Grid', g == null ? '—' : (g >= 0 ? `↓ ${fmtWs(g)}` : `↑ ${fmtWs(-g)}`), g > 0 ? 'import' : g < 0 ? 'export' : ''),
+      stat('Load', fmtWs(inv.load_power_w)),
+      hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
+      strings && strings.length ? stat('PV strings', `${strings.length} producing`) : '',
+      tempC != null ? stat('Temperature', `${tempC.toFixed(1)} °C`) : '',
+      invDev?.model ? stat('Model', esc(invDev.model)) : '',
+      logger ? stat('Datalogger', esc(signalLabel(logger))) : '',
+    ].filter(Boolean).join('');
+
+    return `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}"><section class="card">
       <div class="body">
         <div class="flowhead">
           <div>
-            <div class="vendor" style="--accent:${colorFor(inv.provider)};color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</div>
+            <div class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</div>
             <div class="sys-name">${esc(inv.name)}</div>
           </div>
-          <span class="pill ${st.cls}"><i></i>${esc(st.text)}${inv.ts ? ' · ' + ago(inv.ts) : ''}</span>
+          <div style="display:flex;align-items:center;gap:12px">
+            <span class="pill ${st.cls}"><i></i>${esc(st.text)}${inv.ts ? ' · ' + ago(inv.ts) : ''}</span>
+            <span class="seemore">All details →</span>
+          </div>
         </div>
         ${flowSvg(inv, m)}
+        <div class="flowstats">${cells}</div>
       </div>
-    </section>`;
+    </section></a>`;
   }
 
   function renderFlow() {
@@ -498,6 +534,17 @@
     $('view').innerHTML = invs.length
       ? `<div class="stack">${invs.map(flowCard).join('')}</div>`
       : `<div class="card"><div class="empty">No systems yet.</div></div>`;
+  }
+
+  function renderPower() {
+    const invs = state.latest?.inverters ?? [];
+    const byInv = {};
+    for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
+    $('view').innerHTML = `<section class="card"><h2>Today · AC output</h2><div class="body">
+        <div class="legend" id="legend"></div>
+        <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
+      </div></section>`;
+    $('legend').innerHTML = combinedChart($('combined'), byInv, invs).join('');
   }
 
   // ---------- overview ----------
@@ -593,13 +640,7 @@
         </div>`).join('')}</div></div>
       </section></a>` : '';
 
-    $('view').innerHTML = `<div class="sysgrid">${cards}</div>
-      ${flow}
-      <section class="card" style="margin-top:18px"><h2>Today · AC output</h2><div class="body">
-        <div class="legend" id="legend"></div>
-        <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
-      </div></section>`;
-    $('legend').innerHTML = combinedChart($('combined'), byInv, invs).join('');
+    $('view').innerHTML = `<div class="sysgrid">${cards}</div>${flow}`;
   }
 
   // ---------- devices ----------
@@ -798,6 +839,7 @@
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
     if (hash === '#/devices') return renderDevices();
     if (hash === '#/flow') return renderFlow();
+    if (hash === '#/power') return renderPower();
     renderOverview();
   }
 
