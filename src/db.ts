@@ -15,6 +15,11 @@ export interface Env {
   SOLARMAN_WEB_ACCESS_TOKEN?: string;
   /** Comma-separated vendor plant ids to poll; unset = every plant the accounts can see. */
   INCLUDE_PLANTS?: string;
+  /** Google Maps Platform key with the Weather API enabled; unset = no lookup. */
+  GOOGLE_WEATHER_KEY?: string;
+  /** Site coordinates, for the vendor that ships none with its payload. */
+  SITE_LAT?: string;
+  SITE_LON?: string;
   API_TOKEN?: string;
   INGEST_TOKEN?: string;
 }
@@ -70,7 +75,24 @@ export async function insertReading(db: D1Database, r: Reading): Promise<boolean
       r.metrics ? JSON.stringify(r.metrics) : null,
     )
     .run();
-  return (res.meta.changes ?? 0) > 0;
+  if ((res.meta.changes ?? 0) > 0) return true;
+
+  // The sample already existed. That is not a no-op once the normaliser has
+  // learned to read more fields: refresh the derived columns in place, so a
+  // parser improvement reaches the newest row instead of waiting for the vendor
+  // to produce a fresh timestamp. Still reported as "not a new sample".
+  await db
+    .prepare(
+      `UPDATE readings SET metrics = ?4, raw = ?5
+       WHERE inverter_id = ?1 AND ts = ?2 AND source = ?3`,
+    )
+    .bind(
+      r.inverterId, r.ts, r.source,
+      r.metrics ? JSON.stringify(r.metrics) : null,
+      JSON.stringify(r.raw ?? null),
+    )
+    .run();
+  return false;
 }
 
 export interface LatestRow {
