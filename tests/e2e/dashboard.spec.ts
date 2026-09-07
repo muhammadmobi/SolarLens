@@ -24,7 +24,8 @@ function inverters(overrides: Partial<Record<'solis' | 'solarman', Record<string
       metrics: metrics({ genMonthKwh: 185, genYearKwh: 13677, genTotalKwh: 48852, loadTodayKwh: 49, loadTotalKwh: 48852,
         gridImportTodayKwh: 0, gridExportTodayKwh: 0, gridImportTotalKwh: 0, gridExportTotalKwh: 0,
         battChargeTodayKwh: null, battDischargeTodayKwh: null, battChargeTotalKwh: null, battDischargeTotalKwh: null,
-        selfUseTodayKwh: null, batteryStatus: null, gridStatus: null }),
+        selfUseTodayKwh: null, fullLoadHours: 4.94, batteryStatus: null, gridStatus: null,
+        weatherText: 'Clear', tempNowC: 29, tempMinC: 24, tempMaxC: 31, sunrise: '05:45', sunset: '18:25' }),
       raw: JSON.stringify({ power: 5.08, powerStr: 'kW', state: 1, sno: 'ABC123', fullHour: 4.94 }),
       ...(overrides.solis ?? {}),
     },
@@ -67,6 +68,32 @@ function devices() {
       sn: 'LOG01', name: 'S3-WIFI-ST', model: 'S3-WIFI-ST', firmware: '10186',
       rated_power_w: null, status: 'online', signal_dbm: -58, upload_cycle_s: 300,
       commissioned_at: null, warranty_until: null, last_seen: NOW - 120,
+      strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
+      temp_c: null, dc_bus_v: null, updated_at: NOW, raw: null,
+    },
+    {
+      id: 'solarman:inverter:HYB01', provider: 'solarman', plant_id: '62000000', kind: 'inverter',
+      sn: 'HYB01', name: 'Demo Hybrid Inverter', model: 'Single phase LV Hybrid', firmware: 'V1.0 / V2.0',
+      rated_power_w: 3500, status: 'online', signal_dbm: null, signal_pct: 84, upload_cycle_s: null,
+      commissioned_at: null, warranty_until: null, last_seen: NOW - 200,
+      strings: JSON.stringify([{ index: 1, powerW: 120, voltageV: 24.2, currentA: 5 }]),
+      ac_phases: JSON.stringify([{ index: 1, voltageV: 233.3, currentA: 0.2 }]),
+      frequency_hz: 50.01, power_factor: null,
+      temp_c: 49.4, dc_bus_v: null,
+      battery: JSON.stringify({
+        tempC: 32.5, voltageV: 27.29, currentA: -0.93,
+        bmsTempC: 32.5, bmsVoltageV: 26.98, bmsCurrentA: 0,
+        chargeLimitA: 0, dischargeLimitA: 130,
+        ratedCapacityAh: 100, nominalVoltageV: 24, chemistry: 'lithium', status: 'Static',
+        bmsSocPct: 100, bmsChargeVoltageV: 28.5, bmsDischargeVoltageV: 0,
+      }),
+      updated_at: NOW, raw: null,
+    },
+    {
+      id: 'solarman:datalogger:LOG02', provider: 'solarman', plant_id: '62000000', kind: 'datalogger',
+      sn: 'LOG02', name: 'Datalogger', model: 'LSW-3', firmware: 'MW3_15U_5406_1.20',
+      rated_power_w: null, status: 'online', signal_dbm: null, signal_pct: 84, upload_cycle_s: 300,
+      commissioned_at: null, warranty_until: null, last_seen: NOW - 200,
       strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
       temp_c: null, dc_bus_v: null, updated_at: NOW, raw: null,
     },
@@ -125,7 +152,11 @@ test.describe('Overview', () => {
     await expect(page.locator('#fleet-power')).toHaveText('5.36 kW');
     // The word "today" is now a label above the figure, not part of it.
     await expect(page.locator('#fleet-today')).toHaveText('62.7 kWh');
-    await expect(page.locator('.flabel')).toHaveText(['Both systems now', 'Generated today']);
+    // Every headline figure is labelled - a bare "20 W" told you nothing about
+    // whether it was one system, both, or something else entirely.
+    await expect(page.locator('.flabel')).toHaveText(['Producing now', 'Produced today', 'Consumed today', 'Weather']);
+    await expect(page.locator('#fleet-used')).toHaveText('53.8 kWh');
+    await expect(page.locator('#fleet-wx')).toContainText('Clear');
     await expect(page.locator('#poll-status')).toContainText('last poll (solarman) ok');
   });
 
@@ -180,6 +211,106 @@ test.describe('Overview', () => {
     // The chart moved to its own page; with no fleet it says so rather than drawing.
     await page.goto('/#/power');
     await expect(page.locator('#combined')).toContainText('No samples yet today');
+  });
+});
+
+test.describe('Theme', () => {
+  test('the toggle cycles auto - light - dark and the choice survives a reload', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    const btn = page.locator('.themebtn');
+    await expect(btn).toHaveCount(1);
+    // Nothing stamped on the root means "follow the system".
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', /light|dark/);
+
+    await btn.click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await btn.click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  });
+
+  test('the stored choice is applied before the page paints', async ({ page }) => {
+    await stubApi(page);
+    await page.addInitScript(() => localStorage.setItem('sl-theme', 'light'));
+    await page.goto('/');
+    // If this were applied by the render pass the attribute would arrive late
+    // and the page would flash the wrong theme first.
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  });
+});
+
+test.describe('Battery', () => {
+  test('the overview panel says charge level, what the pack is doing, and how warm it is', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    const batt = page.locator('a.sys').nth(1).locator('.batt');
+    await expect(batt.locator('.ring text')).toHaveText('100%');
+    // A pack drifting a few watts is idle, and the heading says so.
+    await expect(batt.locator('.k')).toHaveText('Battery · idle');
+    await expect(batt).toContainText('Pack temperature');
+    await expect(batt).toContainText('32.5 °C');
+    await expect(batt).toContainText('Charged today');
+    await expect(batt).toContainText('0.6 kWh');
+  });
+
+  test('derives equivalent full cycles and labels them as derived', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(HYBRID));
+    const card = page.locator('section.card', { has: page.locator('h3', { hasText: 'Battery' }) });
+    await expect(card).toContainText('Rated capacity');
+    await expect(card).toContainText('100 Ah @ 24 V · 2.40 kWh');
+    // 1100.1 kWh charged over a 2.4 kWh pack.
+    await expect(card).toContainText('Equivalent full cycles');
+    await expect(card.locator('dd', { hasText: 'derived' })).toContainText('458');
+    await expect(card).toContainText('BMS state of charge');
+  });
+
+  test('an on-grid plant gets no cycle count, because it has no pack', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
+    await expect(page.locator('body')).not.toContainText('Equivalent full cycles');
+  });
+});
+
+test.describe('Power page', () => {
+  test('gives each system its own collapsible section', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/power');
+    const secs = page.locator('details.syssec');
+    await expect(secs).toHaveCount(2);
+    // Open by default: the page is there to be read, not clicked open twice.
+    await expect(secs.nth(0)).toHaveAttribute('open', '');
+    await secs.nth(0).locator('> summary').click();
+    await expect(secs.nth(0)).not.toHaveAttribute('open', '');
+    // Collapsing one leaves the other alone.
+    await expect(secs.nth(1)).toHaveAttribute('open', '');
+  });
+});
+
+test.describe('Weather', () => {
+  test('shows the site conditions in the header and in the diagnostics', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    await expect(page.locator('#wx-item')).toBeVisible();
+    await expect(page.locator('#fleet-wx')).toHaveText('Clear · 29° (24–31°)');
+
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
+    const diag = page.locator('section.card', { has: page.locator('h3', { hasText: 'Status & diagnostics' }) });
+    await expect(diag).toContainText('29 °C now');
+    await expect(diag).toContainText('05:45 – 18:25');
+    await expect(page.locator('.card').filter({ has: page.locator('h3', { hasText: 'Energy' }) }))
+      .toContainText('Full-load hours');
+  });
+
+  test('hides the header slot entirely when no provider reported any', async ({ page }) => {
+    const invs = inverters({ solis: { metrics: metrics({ genMonthKwh: 185 }) } });
+    (invs[1] as { metrics: string }).metrics = metrics({ genMonthKwh: 70.9 });
+    await stubApi(page, { invs });
+    await page.goto('/');
+    await expect(page.locator('#wx-item')).toBeHidden();
   });
 });
 
@@ -252,7 +383,7 @@ test.describe('Devices', () => {
     await stubApi(page);
     await page.goto('/#/devices');
     const rows = page.locator('table.devices tbody tr');
-    await expect(rows).toHaveCount(2);
+    await expect(rows).toHaveCount(4);
     await expect(rows.nth(0)).toContainText('S5-GR3P10K');
     await expect(rows.nth(0)).toContainText('DEMO01');
     await expect(rows.nth(0)).toContainText('10.00 kW');
@@ -261,6 +392,12 @@ test.describe('Devices', () => {
     await expect(rows.nth(1)).toContainText('S3-WIFI-ST');
     await expect(rows.nth(1)).toContainText('dBm');
     await expect(rows.nth(1)).toContainText('strong');
+    // The two clouds report link quality on different scales - SolisCloud in
+    // dBm, SolarMan as a percentage - so each row is labelled in its own units
+    // rather than both being flattened onto one invented scale.
+    await expect(rows.nth(3)).toContainText('84%');
+    await expect(rows.nth(3)).toContainText('strong');
+    await expect(rows.nth(3)).not.toContainText('dBm');
   });
 
   test('says what to run when no hardware has been recorded', async ({ page }) => {
@@ -343,11 +480,12 @@ test.describe('System detail', () => {
     await expect(diag).toContainText('40.6 °C');
   });
 
-  test('the hybrid shows no AC-phase block, because SolarMan reports none', async ({ page }) => {
+  test('the single-phase hybrid shows one AC phase, not three', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/' + encodeURIComponent(HYBRID));
-    await expect(page.locator('.card h3').filter({ hasText: 'AC output' })).toHaveCount(0);
-    await expect(page.locator('.card h3').filter({ hasText: 'PV strings' })).toHaveCount(0);
+    const ac = page.locator('.card').filter({ has: page.locator('h3', { hasText: 'AC output' }) });
+    await expect(ac).toContainText('233.3');
+    await expect(ac).not.toContainText('Phase 2');
   });
 
   test('energy flow: the hybrid draws all four arms, with directions from the signs', async ({ page }) => {

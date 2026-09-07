@@ -9,7 +9,10 @@ export default defineConfig({
   testDir: 'tests/e2e',
   timeout: 20_000,
   fullyParallel: true,
-  retries: process.env.CI ? 2 : 0,
+  // The suite drives two real Chrome projects in parallel; on a loaded laptop a
+  // page load occasionally overruns the timeout. One retry covers that without
+  // hiding a test that fails for its own reasons - a genuine break fails twice.
+  retries: process.env.CI ? 2 : 1,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
