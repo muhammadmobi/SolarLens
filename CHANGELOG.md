@@ -51,6 +51,23 @@ the announcement.
 
 ### Changed
 
+- **The energy flow diagram redrawn.** The house is now the load itself —
+  before, the diagram drew a house in the middle *and* a separate
+  "Consumption" node with a house glyph, leaving you to work out they were the
+  same place. Solar and grid flank it on one line and a hybrid hangs its
+  battery below, so every arm is a straight run rather than an elbowed circuit
+  trace. Wire thickness tracks how much power an arm carries, so a 20 W trickle
+  no longer looks like a 5 kW flood. Idle arms are dashed as well as grey, and
+  a pack drifting under 50 W now reads idle here exactly as it does everywhere
+  else on the page — the diagram used to animate it as a live flow. Labels are
+  large enough to read at half-card width, and a bar underneath says how much
+  of the house's current draw is coming from its own kit rather than the meter.
+- **Nothing stale is presented as current.** "Producing now" counts only
+  systems that have reported inside the staleness window and names any that
+  have gone quiet; a stale headline figure is dimmed and relabelled "last known
+  output"; the status pill says "not reporting" instead of repeating the
+  vendor's hours-old "online"; and a dead feed's diagram drops its travelling
+  pips. Today's energy still counts a quiet system — those kWh were real.
 - **Charts are easier to read**: larger axis type, three-hourly time ticks, an
   explicit "watts" unit label, a marked daily peak with the time it happened,
   and a taller plot area.
