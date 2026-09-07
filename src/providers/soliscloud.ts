@@ -234,6 +234,7 @@ export function deviceFromInverter(d: Rec, plantId: string | null = null): Devic
     lastSeen: msToSec(pick(d, 'dataTimestamp')),
     strings: pvStrings(d),
     acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null,
+    battery: null,
     raw: stripPii(d),
   };
 }
@@ -260,6 +261,7 @@ export function deviceFromCollector(d: Rec, plantId: string | null = null): Devi
     lastSeen: msToSec(pick(d, 'dataTimestamp')),
     strings: null,
     acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null,
+    battery: null,
     raw: stripPii(d),
   };
 }
@@ -413,6 +415,7 @@ export function deviceFromInverterDetail(d: Rec, plantId: string | null = null):
     powerFactor: num(pick(d, 'powerFactor')),
     tempC: num(pick(d, 'inverterTemperature')),
     dcBusV: num(pick(d, 'dcBus')),
+    battery: null,
     raw: stripPii(d),
   };
 }

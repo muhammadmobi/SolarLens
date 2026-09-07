@@ -99,10 +99,13 @@
     width: 26px; height: 26px; border-radius: 8px; flex: none;
     background: linear-gradient(135deg, var(--solis), var(--solarman));
   }
-  .fleet { display: flex; align-items: baseline; gap: 8px; margin-left: auto; }
+  .fleet { display: flex; align-items: flex-end; gap: 12px; margin-left: auto; }
+  .fitem { display: flex; flex-direction: column; gap: 1px; }
+  .flabel { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
+  .fleet .num.small { font-size: 17px; }
   .fleet .num { font-size: 24px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
   .fleet .unit { font-size: 13px; color: var(--muted); font-weight: 600; }
-  .fleet .sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; }
+  .fleet .sep { width: 1px; height: 28px; background: var(--line); }
   .fleet .sub { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .livedot {
     display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted);
@@ -203,11 +206,14 @@
 
   /* ---------- flow ---------- */
   .flow { width: 100%; height: auto; display: block; }
-  .flow .wire { fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: round; }
-  .flow .wire.live { stroke: var(--accent); }
+  .flow .wire { fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .flow .wire.live { stroke: var(--accent); stroke-width: 3.5; }
   .flow .pip { fill: var(--accent); }
   .flow .nodebg { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
-  .flow .nodebg.live { stroke: var(--accent); }
+  .flow .nodebg.live { stroke: var(--accent); stroke-width: 2.5; }
+  .flow .halo { fill: var(--accent); opacity: .10; }
+  .flow .glyph.dim { opacity: .45; }
+  .flow .val.idle { fill: var(--muted); }
   .flow .house { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
   .flow .glyph { font-size: 26px; }
   .flow .glyph.big { font-size: 34px; }
@@ -291,10 +297,10 @@
 <div class="topbar">
   <div class="inner">
     <div class="brand"><span class="mark"></span>SolarLens</div>
-    <div class="fleet">
-      <span class="num" id="fleet-power">—</span>
+    <div class="fleet" title="Both systems added together">
+      <div class="fitem"><span class="flabel">Both systems now</span><span class="num" id="fleet-power">—</span></div>
       <span class="sep"></span>
-      <span class="sub" id="fleet-today"></span>
+      <div class="fitem"><span class="flabel">Generated today</span><span class="num small" id="fleet-today">—</span></div>
     </div>
     <span class="livedot" id="updated"><i></i>loading…</span>
   </div>
@@ -464,22 +470,36 @@
       const nx = n.x - n.side * 52;
       const elbow = CX + n.side * 175;
       const hx = CX + n.side * 78;
+      // Rounded corners: a right angle reads as a circuit trace, a curve reads
+      // as something flowing, which is what the diagram is about.
+      const R = 22;
       const d = n.y === CY
         ? `M${nx},${CY} H${hx}`
-        : `M${nx},${n.y} H${elbow} V${CY} H${hx}`;
+        : (() => {
+            const h1 = Math.sign(elbow - nx), vd = Math.sign(CY - n.y), h2 = Math.sign(hx - elbow);
+            return [
+              `M${nx},${n.y}`,
+              `L${elbow - h1 * R},${n.y}`,
+              `Q${elbow},${n.y} ${elbow},${n.y + vd * R}`,
+              `L${elbow},${CY - vd * R}`,
+              `Q${elbow},${CY} ${elbow + h2 * R},${CY}`,
+              `L${hx},${CY}`,
+            ].join(' ');
+          })();
       const rev = !n.toHouse;
       out += `<path class="wire${live ? ' live' : ''}" d="${d}" marker-${rev ? 'start' : 'end'}="url(#${live ? 'a-on' : 'a-off'})"/>`;
       if (live) {
         out += `<circle class="pip" r="5.5"><animateMotion dur="2.6s" repeatCount="indefinite" keyPoints="${rev ? '1;0' : '0;1'}" keyTimes="0;1" calcMode="linear" path="${d}"/></circle>`;
       }
+      if (live) out += `<circle class="halo" cx="${n.x}" cy="${n.y}" r="49"/>`;
       out += `<circle class="nodebg${live ? ' live' : ''}" cx="${n.x}" cy="${n.y}" r="40"/>`;
-      out += `<text class="glyph" x="${n.x}" y="${n.y + 10}" text-anchor="middle">${n.glyph}</text>`;
+      out += `<text class="glyph${live ? '' : ' dim'}" x="${n.x}" y="${n.y + 10}" text-anchor="middle">${n.glyph}</text>`;
 
       const anchor = n.side < 0 ? 'start' : 'end';
       const tx = n.side < 0 ? n.x - 56 : n.x + 56;
       const ly = n.y < CY ? n.y - 62 : n.y + 60;
       out += `<text class="lbl" x="${tx}" y="${ly}" text-anchor="${anchor}">${esc(n.label)}</text>`;
-      out += `<text class="val" x="${tx}" y="${ly + 25}" text-anchor="${anchor}">${n.value == null ? '—' : fmtWs(w)}</text>`;
+      out += `<text class="val${live ? '' : ' idle'}" x="${tx}" y="${ly + 25}" text-anchor="${anchor}">${n.value == null ? '—' : fmtWs(w)}</text>`;
       if (n.sub) out += `<text class="sub" x="${tx}" y="${ly + 44}" text-anchor="${anchor}">${esc(n.sub)}</text>`;
     }
     out += `<circle class="house" cx="${CX}" cy="${CY}" r="56"/>`;
@@ -560,6 +580,7 @@
       !omitBattery && hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
       strings && strings.length ? stat('PV strings', `${strings.length} producing`) : '',
       tempC != null ? stat('Temperature', `${tempC.toFixed(1)} °C`) : '',
+      (() => { const b = parse(invDev?.battery); return b?.tempC != null ? stat('Battery temp', `${b.tempC} °C`) : ''; })(),
       invDev?.model ? stat('Model', esc(invDev.model)) : '',
       logger ? stat('Datalogger', esc(signalLabel(logger))) : '',
     ].filter(Boolean).join('');
@@ -815,6 +836,7 @@
       m.gridExportTotalKwh != null ? ['Exported, lifetime', fmtKwh(m.gridExportTotalKwh)] : null,
     ]);
 
+    const bat = parse(invDev?.battery);
     const battery = hasBattery(inv, m) ? `<section class="card"><h3>Battery</h3><div class="body">
       <div class="batt" style="margin-top:0;padding-top:0;border-top:none">
         ${ring(inv.battery_soc ?? 0)}
@@ -822,10 +844,19 @@
       </div>
       <dl class="kv" style="margin-top:16px">
         ${m.batteryStatus ? `<dt>Status</dt><dd>${esc(String(m.batteryStatus).toLowerCase())}</dd>` : ''}
+        ${inv.battery_soc != null ? `<dt>State of charge</dt><dd>${Math.round(inv.battery_soc)} %</dd>` : ''}
+        ${inv.battery_power_w != null ? `<dt>Charge / discharge</dt><dd>${battText(inv.battery_power_w)}</dd>` : ''}
+        ${bat?.tempC != null ? `<dt>Pack temperature</dt><dd>${bat.tempC} °C</dd>` : ''}
+        ${bat?.voltageV != null ? `<dt>Pack voltage</dt><dd>${bat.voltageV} V</dd>` : ''}
+        ${bat?.currentA != null ? `<dt>Pack current</dt><dd>${bat.currentA} A</dd>` : ''}
         ${m.battChargeTodayKwh != null ? `<dt>Charged today</dt><dd>${fmtKwh(m.battChargeTodayKwh)}</dd>` : ''}
         ${m.battDischargeTodayKwh != null ? `<dt>Discharged today</dt><dd>${fmtKwh(m.battDischargeTodayKwh)}</dd>` : ''}
         ${m.battChargeTotalKwh != null ? `<dt>Charged, lifetime</dt><dd>${fmtKwh(m.battChargeTotalKwh)}</dd>` : ''}
         ${m.battDischargeTotalKwh != null ? `<dt>Discharged, lifetime</dt><dd>${fmtKwh(m.battDischargeTotalKwh)}</dd>` : ''}
+        ${bat?.bmsTempC != null ? `<dt>BMS temperature</dt><dd>${bat.bmsTempC} °C</dd>` : ''}
+        ${bat?.bmsVoltageV != null ? `<dt>BMS voltage</dt><dd>${bat.bmsVoltageV} V</dd>` : ''}
+        ${bat?.chargeLimitA != null ? `<dt>Charge limit</dt><dd>${bat.chargeLimitA} A</dd>` : ''}
+        ${bat?.dischargeLimitA != null ? `<dt>Discharge limit</dt><dd>${bat.dischargeLimitA} A</dd>` : ''}
       </dl></div></section>` : '';
 
     const diagnostics = kvCard('Status & diagnostics', [
@@ -901,7 +932,7 @@
       const withData = lat.inverters.filter((i) => i.ts);
       const [fv, fu] = fmtW(withData.reduce((a, i) => a + (i.ac_power_w || 0), 0));
       $('fleet-power').innerHTML = withData.length ? `${fv}<span class="unit"> ${fu}</span>` : '—';
-      $('fleet-today').textContent = withData.length ? `${fmtKwh(withData.reduce((a, i) => a + (i.today_kwh || 0), 0))} today` : '';
+      $('fleet-today').textContent = withData.length ? fmtKwh(withData.reduce((a, i) => a + (i.today_kwh || 0), 0)) : '—';
       const newest = Math.max(0, ...withData.map((i) => i.ts));
       const stale = !newest || (now - newest) > STALE_AFTER_S;
       $('updated').className = 'livedot' + (stale ? ' stale' : '');

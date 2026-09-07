@@ -142,6 +142,8 @@ export interface DeviceRow {
   power_factor: number | null;
   temp_c: number | null;
   dc_bus_v: number | null;
+  /** JSON BatteryDetail (see providers/types.ts), or null. */
+  battery: string | null;
   updated_at: number;
   raw: string | null;
 }
@@ -155,8 +157,8 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
     .prepare(
       `INSERT INTO devices
          (id, provider, plant_id, kind, sn, name, model, firmware, rated_power_w, status,
-          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, ac_phases, frequency_hz, power_factor, temp_c, dc_bus_v, updated_at, raw)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)
+          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, ac_phases, frequency_hz, power_factor, temp_c, dc_bus_v, battery, updated_at, raw)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)
        ON CONFLICT(id) DO UPDATE SET
          plant_id        = COALESCE(excluded.plant_id, devices.plant_id),
          name            = COALESCE(excluded.name, devices.name),
@@ -176,6 +178,7 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
          power_factor    = COALESCE(excluded.power_factor, devices.power_factor),
          temp_c          = COALESCE(excluded.temp_c, devices.temp_c),
          dc_bus_v        = COALESCE(excluded.dc_bus_v, devices.dc_bus_v),
+         battery         = COALESCE(excluded.battery, devices.battery),
          updated_at      = excluded.updated_at,
          raw             = COALESCE(excluded.raw, devices.raw)`,
     )
@@ -185,6 +188,7 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
       d.strings ? JSON.stringify(d.strings) : null,
       d.acPhases ? JSON.stringify(d.acPhases) : null,
       d.frequencyHz, d.powerFactor, d.tempC, d.dcBusV,
+      d.battery ? JSON.stringify(d.battery) : null,
       at,
       d.raw ? JSON.stringify(d.raw) : null,
     )
