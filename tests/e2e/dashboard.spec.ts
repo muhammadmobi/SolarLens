@@ -181,81 +181,58 @@ test.describe('Overview', () => {
   });
 });
 
-test.describe('Energy flow page', () => {
-  test('has its own nav entry and draws one diagram per system', async ({ page }) => {
+test.describe('Energy flow on the overview', () => {
+  test('each system gets its own flow box, in its own band, before the figures', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    // Scoped to the nav: the overview's own flow card is a link named the same.
-    await page.locator('nav').getByRole('link', { name: 'Flow', exact: true }).click();
-    await expect(page).toHaveURL(/#\/flow$/);
+    const bands = page.locator('h2.band');
+    await expect(bands).toHaveText(['Energy flow', 'Systems', 'Today · AC output']);
+    // One diagram per system, each in its own card rather than sharing one.
     await expect(page.locator('svg.flow')).toHaveCount(2);
-    // Each card names its system, so the two diagrams are tellable apart.
-    await expect(page.locator('.card')).toContainText(['Demo Solis Plant', 'Demo Hybrid']);
   });
 
-  test('the overview carries the flow too, and links through to the full page', async ({ page }) => {
+  test('the flow tab is gone and an old #/flow link lands on the overview', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    // Both systems are drawn on the overview, not just on the dedicated page.
-    await expect(page.locator('svg.flow')).toHaveCount(2);
-    const link = page.locator('a.flowlink[href="#/flow"]');
-    await expect(link).toBeVisible();
-    // On the overview the flow block is only the drawing: the figures live in
-    // the system cards above it, so they are not repeated twice on one screen.
-    await expect(link.locator('.flowstats')).toHaveCount(0);
-    await expect(page.locator('a.sys').nth(0).locator('.flowstats')).toBeVisible();
-    await link.click();
-    await expect(page).toHaveURL(/#\/flow$/);
-  });
-
-  test('each flow card carries the figures and opens that system', async ({ page }) => {
-    await stubApi(page);
+    await expect(page.locator('nav a')).toHaveText(['Overview', 'Power', 'Devices']);
     await page.goto('/#/flow');
-    const solis = page.locator('a.flowlink').nth(0);
-    await expect(solis).toContainText('Today');
-    await expect(solis).toContainText('Lifetime');
-    await expect(solis).toContainText('Temperature');
-    await expect(solis).toContainText('All details');
-    // An on-grid system shows no Battery figure; the hybrid does.
-    await expect(solis).not.toContainText('Battery');
-    await expect(page.locator('a.flowlink').nth(1)).toContainText('Battery');
-    await solis.click();
+    await expect(page.locator('h2.band').first()).toHaveText('Energy flow');
+  });
+
+  test('a flow box opens that system detail', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    await page.locator('a.flowlink').first().click();
     await expect(page).toHaveURL(/#\/system\//);
     await expect(page.locator('.card h3')).toContainText(['Identity & hardware']);
   });
 
-  test('the on-grid diagram omits the battery arm the hybrid draws', async ({ page }) => {
-    await stubApi(page);
-    await page.goto('/#/flow');
-    const [solis, hybrid] = await page.locator('svg.flow').all();
-    await expect(solis.locator('.wire')).toHaveCount(3);
-    await expect(hybrid.locator('.wire')).toHaveCount(4);
-  });
-
-  test('clicking a system on the overview still opens its detail', async ({ page }) => {
+  test('clicking a system card still opens its detail', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
     await page.locator('a.sys').nth(0).click();
     await expect(page).toHaveURL(/#\/system\//);
   });
 });
-
 test.describe('AC output page', () => {
   test('the overview splits the chart per system instead of merging them', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    // Overlapping curves hide each other, so the overview draws one each.
-    await expect(page.locator('.chartmini')).toHaveCount(2);
+    // Overlapping curves hide each other, so each system gets its own box.
+    await expect(page.locator('svg.combined')).toHaveCount(2);
     await expect(page.locator('#combined')).toHaveCount(0);
-    await expect(page.locator('.chartmini').nth(0)).toContainText('Demo Solis Plant');
-    await expect(page.locator('.chartmini').nth(1)).toContainText('Demo Hybrid');
+    const charts = page.locator('h2.band').filter({ hasText: 'AC output' })
+      .locator('xpath=following-sibling::div[1]').locator('a.flowlink');
+    await expect(charts).toHaveCount(2);
+    await expect(charts.nth(0)).toContainText('Demo Solis Plant');
+    await expect(charts.nth(1)).toContainText('Demo Hybrid');
   });
 
   test('has its own nav entry and draws the combined day chart', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    // The overview carries a copy that links through to the full page.
-    await expect(page.locator('a.flowlink[href="#/power"]')).toBeVisible();
+    // The overview's chart boxes link through to the full page.
+    await expect(page.locator('a.flowlink[href="#/power"]').first()).toBeVisible();
     await page.locator('nav').getByRole('link', { name: 'Power', exact: true }).click();
     await expect(page).toHaveURL(/#\/power$/);
     await expect(page.locator('#legend span')).toContainText(['Demo Solis Plant', 'Demo Hybrid', 'Fleet total']);

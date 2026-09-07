@@ -137,6 +137,11 @@
   }
   .card .body { padding: 18px 20px 20px; }
 
+  h2.band {
+    margin: 26px 0 12px; font-size: 12px; font-weight: 700; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--faint);
+  }
+  h2.band:first-child { margin-top: 0; }
   .sysgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; }
 
   /* ---------- system card ---------- */
@@ -296,7 +301,6 @@
   <div class="inner" style="padding-top:0">
     <nav id="nav">
       <a href="#/">Overview</a>
-      <a href="#/flow">Flow</a>
       <a href="#/power">Power</a>
       <a href="#/devices">Devices</a>
     </nav>
@@ -485,64 +489,6 @@
       aria-label="Energy flow for ${esc(inv.name)}">${out}</svg>`;
   }
 
-  /**
-   * On the Energy flow page each system gets its diagram plus the figures that
-   * explain it, and the whole card opens that system's full detail view - the
-   * flow is a summary, not a dead end.
-   */
-  /** The figures that explain a flow diagram; shared by Flow and Overview. */
-  function flowStats(inv, omitBattery = false) {
-    const m = parse(inv.metrics) ?? {};
-    const devs = devicesFor(inv);
-    const invDev = devs.find((d) => d.kind === 'inverter');
-    const logger = devs.find((d) => d.kind === 'datalogger');
-    const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
-    const strings = parse(invDev?.strings);
-    const g = inv.grid_power_w;
-    const stat = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls ?? ''}">${v}</div></div>`;
-    const cells = [
-      stat('Today', fmtKwh(inv.today_kwh)),
-      m.genMonthKwh != null ? stat('This month', fmtKwh(m.genMonthKwh)) : '',
-      stat('Lifetime', fmtKwh(inv.total_kwh)),
-      stat('Grid', g == null ? '—' : (g >= 0 ? `↓ ${fmtWs(g)}` : `↑ ${fmtWs(-g)}`), g > 0 ? 'import' : g < 0 ? 'export' : ''),
-      stat('Load', fmtWs(inv.load_power_w)),
-      !omitBattery && hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
-      strings && strings.length ? stat('PV strings', `${strings.length} producing`) : '',
-      tempC != null ? stat('Temperature', `${tempC.toFixed(1)} °C`) : '',
-      invDev?.model ? stat('Model', esc(invDev.model)) : '',
-      logger ? stat('Datalogger', esc(signalLabel(logger))) : '',
-    ].filter(Boolean).join('');
-    return `<div class="flowstats">${cells}</div>`;
-  }
-
-  function flowCard(inv) {
-    const m = parse(inv.metrics) ?? {};
-    const st = statusOf(inv);
-    return `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}"><section class="card">
-      <div class="body">
-        <div class="flowhead">
-          <div>
-            <div class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</div>
-            <div class="sys-name">${esc(inv.name)}</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:12px">
-            <span class="pill ${st.cls}"><i></i>${esc(st.text)}${inv.ts ? ' · ' + ago(inv.ts) : ''}</span>
-            <span class="seemore">All details →</span>
-          </div>
-        </div>
-        ${flowSvg(inv, m)}
-        ${flowStats(inv)}
-      </div>
-    </section></a>`;
-  }
-
-  function renderFlow() {
-    const invs = state.latest?.inverters ?? [];
-    $('view').innerHTML = invs.length
-      ? `<div class="stack">${invs.map(flowCard).join('')}</div>`
-      : `<div class="card"><div class="empty">No systems yet.</div></div>`;
-  }
-
   /** One system's own day curve, drawn at chart size rather than sparkline size. */
   function systemChart(inv, pts, id) {
     const W = 1000, H = 200, L = 46, R = 12, T = 12, B = 24;
@@ -594,6 +540,32 @@
   }
 
   // ---------- overview ----------
+  /** The figure set shown inside each system card on the overview. */
+  function flowStats(inv, omitBattery = false) {
+    const m = parse(inv.metrics) ?? {};
+    const devs = devicesFor(inv);
+    const invDev = devs.find((d) => d.kind === 'inverter');
+    const logger = devs.find((d) => d.kind === 'datalogger');
+    const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
+    const strings = parse(invDev?.strings);
+    const g = inv.grid_power_w;
+    const stat = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls ?? ''}">${v}</div></div>`;
+    const cells = [
+      stat('Today', fmtKwh(inv.today_kwh)),
+      m.genMonthKwh != null ? stat('This month', fmtKwh(m.genMonthKwh)) : '',
+      stat('Lifetime', fmtKwh(inv.total_kwh)),
+      stat('Grid', g == null ? '—' : (g >= 0 ? `↓ ${fmtWs(g)}` : `↑ ${fmtWs(-g)}`), g > 0 ? 'import' : g < 0 ? 'export' : ''),
+      stat('Load', fmtWs(inv.load_power_w)),
+      // The card shows a battery ring already, so the figure would be a repeat.
+      !omitBattery && hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
+      strings && strings.length ? stat('PV strings', `${strings.length} producing`) : '',
+      tempC != null ? stat('Temperature', `${tempC.toFixed(1)} °C`) : '',
+      invDev?.model ? stat('Model', esc(invDev.model)) : '',
+      logger ? stat('Datalogger', esc(signalLabel(logger))) : '',
+    ].filter(Boolean).join('');
+    return `<div class="flowstats">${cells}</div>`;
+  }
+
   function sysCard(inv, pts) {
     const st = statusOf(inv);
     const [pv, pu] = fmtW(inv.ac_power_w);
@@ -614,7 +586,6 @@
         <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)}` : ''}</span>
       </div>
       <div class="freshness ${st.stale ? 'stale' : ''}">${inv.ts ? (st.stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}`) : ''}</div>
-      ${sparkline(pts, accent)}
       ${flowStats(inv, true)}
       ${hasBattery(inv, m) ? `<div class="batt">${ring(inv.battery_soc ?? 0)}
         <div><div class="k">Battery</div><div class="v">${battText(inv.battery_power_w)}</div></div></div>` : ''}
@@ -667,35 +638,35 @@
     const invs = state.latest?.inverters ?? [];
     const byInv = {};
     for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
-    const cards = invs.length
-      ? invs.map((inv) => sysCard(inv, byInv[inv.id] || [])).join('')
-      : `<div class="card"><div class="empty">No inverters yet. Trigger a poll with <code>POST /api/poll</code> or wait for the next cron run.</div></div>`;
-    // The same diagrams the Energy flow page shows, drawn small; the whole
-    // block links through to that page rather than repeating its detail here.
-    const flow = invs.length ? `<a class="flowlink" href="#/flow" style="margin-top:18px;display:block">
-      <section class="card">
-        <div class="cardhead"><h2>Energy flow</h2><span class="seemore">Open full view →</span></div>
-        <div class="body"><div class="flowgrid">${invs.map((inv) => `<div class="flowmini">
-          <div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>
-          ${flowSvg(inv, parse(inv.metrics) ?? {})}
-        </div>`).join('')}</div></div>
-      </section></a>` : '';
+    if (!invs.length) {
+      $('view').innerHTML = `<div class="card"><div class="empty">No inverters yet. Trigger a poll with <code>POST /api/poll</code> or wait for the next cron run.</div></div>`;
+      return;
+    }
 
-    // The chart lives in full on the Power page; the overview carries its own
-    // copy so the day's shape is visible without leaving the first screen.
-    // One curve per system rather than a single merged chart: overlapping
-    // lines hide each other, and each system's shape is what matters here.
-    // The Power page keeps the combined view for comparing them.
-    const chart = invs.length ? `<a class="flowlink" href="#/power" style="margin-top:18px;display:block">
-      <section class="card">
-        <div class="cardhead"><h2>Today · AC output</h2><span class="seemore">Open full view →</span></div>
-        <div class="body"><div class="chartgrid">${invs.map((inv, i) => `<div class="chartmini">
-          <div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>
-          ${systemChart(inv, byInv[inv.id] || [], 'ov' + i)}
-        </div>`).join('')}</div></div>
-      </section></a>` : '';
+    // Each system gets its own box in every band, so two systems are never
+    // squeezed into one card: flow first, then the figures, then the curve.
+    const band = (title, inner) =>
+      `<h2 class="band">${esc(title)}</h2><div class="sysgrid">${inner}</div>`;
 
-    $('view').innerHTML = `<div class="sysgrid">${cards}</div>${flow}${chart}`;
+    const boxTitle = (inv) =>
+      `<div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>`;
+
+    const flows = invs.map((inv) => `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}">
+      <section class="card"><div class="body">
+        ${boxTitle(inv)}${flowSvg(inv, parse(inv.metrics) ?? {})}
+      </div></section></a>`).join('');
+
+    const charts = invs.map((inv, i) => `<a class="flowlink" href="#/power">
+      <section class="card"><div class="body">
+        ${boxTitle(inv)}${systemChart(inv, byInv[inv.id] || [], 'ov' + i)}
+      </div></section></a>`).join('');
+
+    const cards = invs.map((inv) => sysCard(inv, byInv[inv.id] || [])).join('');
+
+    $('view').innerHTML =
+      band('Energy flow', flows) +
+      band('Systems', cards) +
+      band('Today · AC output', charts);
   }
 
   // ---------- devices ----------
@@ -909,7 +880,9 @@
     const sys = hash.match(/^#\/system\/(.+)$/);
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
     if (hash === '#/devices') return renderDevices();
-    if (hash === '#/flow') return renderFlow();
+    // The Flow tab is gone: its diagrams live on the overview now, but an
+    // old bookmark should still land somewhere sensible.
+    if (hash === '#/flow') { location.replace('#/'); return renderOverview(); }
     if (hash === '#/power') return renderPower();
     renderOverview();
   }
