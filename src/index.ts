@@ -3,6 +3,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { insertReading, latest, listDevices, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
 import { plantFilter, pollAll } from './poll';
+import { stampWeather } from './weather';
 import type { Inverter, Reading } from './providers/types';
 import {
   deviceFromCollector,
@@ -185,6 +186,7 @@ app.post('/api/ingest/station', async (c) => {
       : solarmanStationReading(inv, body.raw, source);
   if (!inv.name) inv.name = inv.plantName = plantId;
   await upsertInverter(c.env.DB, inv);
+  await stampWeather(c.env, reading);
   const stored = await insertReading(c.env.DB, reading);
   return c.json({ stored, inverterId: inv.id, ts: reading.ts, acPowerW: reading.acPowerW });
 });
