@@ -541,28 +541,78 @@ test.describe('System detail', () => {
     await expect(ac).not.toContainText('Phase 2');
   });
 
-  test('energy flow: the hybrid draws all four arms, with directions from the signs', async ({ page }) => {
+  test('energy flow: the house is the load, and the arms read off the signs', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/' + encodeURIComponent(HYBRID));
     const flow = page.locator('svg.flow');
     await expect(flow).toBeVisible();
-    await expect(flow.locator('.lbl')).toHaveText([/Production/, /Grid/, /Battery/, /Consumption/]);
-    // 91 W import, 278 W production, 307 W load, battery idle at -24 W.
+    // Three arms into one house, not four arms plus a separate house-shaped
+    // "Consumption" node standing next to the house it duplicated.
+    await expect(flow.locator('.wire')).toHaveCount(3);
+    await expect(flow.locator('.lbl')).toHaveText([/Solar/, /Grid/, /Battery/, /Home load/]);
+    // 278 W production, 91 W import, 307 W load - the load inside the house.
     await expect(flow).toContainText('278 W');
     await expect(flow).toContainText('91 W');
     await expect(flow).toContainText('307 W');
-    await expect(flow.locator('.wire')).toHaveCount(4);
+    await expect(flow).toContainText('importing');
+    // The pack's SOC rides on its label rather than needing a node of its own.
+    await expect(flow.locator('.lbl').nth(2)).toHaveText('Battery · 100%');
+  });
+
+  test('energy flow: a battery drifting a few watts is idle here too', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(HYBRID));
+    const flow = page.locator('svg.flow');
+    // -24 W is drift. Every figure on the page calls that idle, so the arm
+    // must not be drawn live with an arrow and a travelling pip.
+    await expect(flow).toContainText('idle');
+    // Solar and grid are both carrying real power; the battery arm is the one
+    // that must stay dead. Arms are drawn in node order: solar, grid, battery.
+    await expect(flow.locator('.wire').nth(2)).toHaveClass(/dead/);
+    await expect(flow.locator('.wire.live')).toHaveCount(2);
+    await expect(flow.locator('.pip')).toHaveCount(2);
   });
 
   test('energy flow: an on-grid system has no battery arm at all', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/' + encodeURIComponent(SOLIS));
     const flow = page.locator('svg.flow');
-    await expect(flow.locator('.wire')).toHaveCount(3);
-    await expect(flow.locator('.lbl')).toHaveText([/Production/, /Grid/, /Consumption/]);
+    await expect(flow.locator('.wire')).toHaveCount(2);
+    await expect(flow.locator('.lbl')).toHaveText([/Solar/, /Grid/, /Home load/]);
     await expect(flow).not.toContainText('Battery');
     // Exporting 5.08 kW, so the grid arm is labelled as such.
     await expect(flow).toContainText('exporting');
+  });
+
+  test('energy flow: wire thickness tracks how much power an arm carries', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
+    const wires = page.locator('svg.flow .wire');
+    // 5.08 kW of production against 0 W of load on a 12 kW array: the solar arm
+    // has to be visibly fatter than the idle one, or the picture says nothing
+    // the numbers did not already say.
+    const solar = Number(await wires.nth(0).getAttribute('stroke-width'));
+    const grid = Number(await wires.nth(1).getAttribute('stroke-width'));
+    expect(solar).toBeGreaterThan(4);
+    expect(solar).toBeCloseTo(grid, 1); // both carry the same 5.08 kW
+  });
+
+  test('energy flow: says how much of the load is being self-powered', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(HYBRID));
+    // 307 W of load, 91 W of it imported, so 70% is coming from the house's
+    // own kit. That is the question the diagram exists to answer.
+    const bar = page.locator('.flowbar');
+    await expect(bar).toContainText('Self-powered right now');
+    await expect(bar.locator('b')).toHaveText('70%');
+  });
+
+  test('energy flow: no self-powered claim when the load is unmeasured', async ({ page }) => {
+    // An on-grid plant with no CT clamp reports 0 W of household load; there is
+    // nothing to take a percentage of, so the bar stays away.
+    await stubApi(page);
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
+    await expect(page.locator('.flowbar')).toHaveCount(0);
   });
 
   test('energy flow: an arm carrying no power is drawn dead, not live', async ({ page }) => {
@@ -571,6 +621,9 @@ test.describe('System detail', () => {
     // No arm is energised, so no wire is accented and no pip travels.
     await expect(page.locator('svg.flow .wire.live')).toHaveCount(0);
     await expect(page.locator('svg.flow .pip')).toHaveCount(0);
+    // Dead arms are dashed as well as grey, so the state survives a screenshot
+    // and does not rest on colour alone.
+    await expect(page.locator('svg.flow .wire.dead')).toHaveCount(2);
   });
 
   test('an unknown system id does not break the page', async ({ page }) => {
