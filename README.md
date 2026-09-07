@@ -64,7 +64,7 @@ A single Cloudflare Worker does three jobs:
 3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker, with three views:
    - **Overview** (`#/`) — both systems as cards (stacking on phones), sparklines and a combined day chart.
    - **Flow** (`#/flow`) — a PV / grid / battery / load diagram per system with its full figure set; direction is taken from the sign of each value, and the card opens that system detail. A compact copy also sits on the Overview.
-   - **Power** (`#/power`) — today's power curve per system plus the fleet total.
+   - **Power** (`#/power`) — the combined day curve, then each system's own curve followed by its full detail set (identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics, raw telemetry).
    - **Devices** (`#/devices`) — hardware inventory: inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
    - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table.
 
