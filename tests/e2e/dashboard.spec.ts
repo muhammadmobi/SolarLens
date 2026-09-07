@@ -183,11 +183,23 @@ test.describe('Energy flow page', () => {
   test('has its own nav entry and draws one diagram per system', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await page.getByRole('link', { name: 'Energy flow' }).click();
+    // Scoped to the nav: the overview's own flow card is a link named the same.
+    await page.locator('nav').getByRole('link', { name: 'Energy flow' }).click();
     await expect(page).toHaveURL(/#\/flow$/);
     await expect(page.locator('svg.flow')).toHaveCount(2);
     // Each card names its system, so the two diagrams are tellable apart.
     await expect(page.locator('.card')).toContainText(['Demo Solis Plant', 'Demo Hybrid']);
+  });
+
+  test('the overview carries the flow too, and links through to the full page', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    // Both systems are drawn on the overview, not just on the dedicated page.
+    await expect(page.locator('svg.flow')).toHaveCount(2);
+    const link = page.locator('a.flowlink');
+    await expect(link).toHaveAttribute('href', '#/flow');
+    await link.click();
+    await expect(page).toHaveURL(/#\/flow$/);
   });
 
   test('the on-grid diagram omits the battery arm the hybrid draws', async ({ page }) => {

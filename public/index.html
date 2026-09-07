@@ -209,6 +209,16 @@
   .flow .lbl { fill: var(--faint); font-size: 12.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; font-family: var(--font); }
   .flow .val { fill: var(--ink); font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; font-family: var(--font); }
   .flow .sub { fill: var(--faint); font-size: 12px; font-weight: 600; font-family: var(--font); }
+  .flowgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 4px 20px; }
+  .flowmini { min-width: 0; }
+  .flowmini .mini-name { font-size: 13.5px; font-weight: 700; margin-bottom: 2px; }
+  .flowmini .flow { max-height: 230px; }
+  a.flowlink { display: block; color: inherit; }
+  a.flowlink:hover .card { box-shadow: var(--shadow-lift); }
+  .seemore { font-size: 12.5px; font-weight: 700; color: var(--muted); }
+  a.flowlink:hover .seemore { color: var(--ink); }
+  .cardhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--line-soft); }
+  .cardhead h2 { margin: 0; padding: 0; border: none; font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
   .flowhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
 
   /* ---------- blocks (detail) ---------- */
@@ -572,7 +582,19 @@
     const cards = invs.length
       ? invs.map((inv) => sysCard(inv, byInv[inv.id] || [])).join('')
       : `<div class="card"><div class="empty">No inverters yet. Trigger a poll with <code>POST /api/poll</code> or wait for the next cron run.</div></div>`;
+    // The same diagrams the Energy flow page shows, drawn small; the whole
+    // block links through to that page rather than repeating its detail here.
+    const flow = invs.length ? `<a class="flowlink" href="#/flow" style="margin-top:18px;display:block">
+      <section class="card">
+        <div class="cardhead"><h2>Energy flow</h2><span class="seemore">Open full view →</span></div>
+        <div class="body"><div class="flowgrid">${invs.map((inv) => `<div class="flowmini">
+          <div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>
+          ${flowSvg(inv, parse(inv.metrics) ?? {})}
+        </div>`).join('')}</div></div>
+      </section></a>` : '';
+
     $('view').innerHTML = `<div class="sysgrid">${cards}</div>
+      ${flow}
       <section class="card" style="margin-top:18px"><h2>Today · AC output</h2><div class="body">
         <div class="legend" id="legend"></div>
         <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
