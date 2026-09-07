@@ -236,9 +236,15 @@
   .grid { stroke: var(--line); opacity: .7; }
 
   /* ---------- flow ---------- */
-  .flow { width: 100%; height: auto; display: block; }
-  .flow .wire { fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
-  .flow .wire.live { stroke: var(--accent); stroke-width: 3.5; }
+  /* The same drawing serves a half-width overview card and a full-width detail
+     page. Capping the width stops the detail page blowing the type up to
+     poster size, and the viewBox does the shrinking at the other end. */
+  .flow { width: 100%; max-width: 760px; height: auto; display: block; margin: 0 auto; }
+  .flow .wire { fill: none; stroke: var(--line); stroke-linecap: round; stroke-linejoin: round; }
+  /* An arm carrying nothing is dashed as well as grey, so it still reads as
+     "no power here" in a screenshot, in print, or to a colour-blind eye. */
+  .flow .wire.dead { stroke-dasharray: 2 9; opacity: .8; }
+  .flow .wire.live { stroke: var(--accent); }
   .flow .pip { fill: var(--accent); }
   .flow .nodebg { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
   .flow .nodebg.live { stroke: var(--accent); stroke-width: 2.5; }
@@ -246,11 +252,15 @@
   .flow .glyph.dim { opacity: .45; }
   .flow .val.idle { fill: var(--muted); }
   .flow .house { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
-  .flow .glyph { font-size: 26px; }
-  .flow .glyph.big { font-size: 34px; }
-  .flow .lbl { fill: var(--faint); font-size: 12.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; font-family: var(--font); }
-  .flow .val { fill: var(--ink); font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; font-family: var(--font); }
-  .flow .sub { fill: var(--faint); font-size: 12px; font-weight: 600; font-family: var(--font); }
+  .flow .glyph { font-size: 34px; }
+  .flow .glyph.big { font-size: 46px; }
+  .flow .lbl { fill: var(--muted); font-size: 22px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; font-family: var(--font); }
+  .flow .val { fill: var(--ink); font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; font-family: var(--font); }
+  .flow .sub { fill: var(--faint); font-size: 20px; font-weight: 600; font-family: var(--font); }
+  .flowbar { margin-top: 10px; max-width: 760px; margin-inline: auto; }
+  .flowbar-t { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px;
+               font-weight: 650; color: var(--muted); margin-bottom: 5px; }
+  .flowbar-t b { font-size: 15px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
   .flowstats { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 16px 18px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--line-soft); }
   .flowstats .k { color: var(--faint); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
   .flowstats .v { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 2px; }
@@ -503,79 +513,126 @@
    * An arm carrying no power is drawn in the neutral line colour with no pip,
    * so "nothing is flowing" reads differently from "this arm does not exist".
    */
+  /**
+   * Where the power is going, right now.
+   *
+   * The house is the hub and it carries the load figure itself - the old
+   * version drew a house in the middle AND a separate "Consumption" node with
+   * a house glyph, which asked you to work out that they were the same place.
+   *
+   * Solar and grid always flank the house on one line, and a hybrid hangs its
+   * battery below - which is how the pack actually sits in the system, taking
+   * the surplus and giving it back later. Every arm is therefore a straight
+   * line: elbows made the picture look like a circuit diagram and pushed solar
+   * and grid off the house's own line, which left one corner of the box empty
+   * and the whole thing leaning.
+   */
   function flowSvg(inv, m) {
-    const W = 1000, H = 520, CX = 500, CY = 260;
+    const CX = 500;
     const battery = hasBattery(inv, m);
     const accent = colorFor(inv.provider);
+    // A hybrid needs room under the house for the pack. An on-grid system has
+    // nothing to put there, so its box is simply shorter rather than carrying
+    // an empty third of a diagram around.
+    const H = battery ? 580 : 430;
+    const CY = battery ? 196 : 200;
+    const HR = 66, NR = 52, W = 1000;
 
-    // With no battery there is nothing in the bottom-left, so production moves
-    // to the middle of the left column instead of leaving a hole.
+    const g = inv.grid_power_w, b = inv.battery_power_w;
+    const dir = (v, dead, pos, neg) => v == null ? null : Math.abs(v) < dead ? 'idle' : v > 0 ? pos : neg;
+
     const nodes = [
-      { key: 'pv', x: 155, y: battery ? 128 : CY, glyph: '☀️', label: 'Production',
-        value: inv.ac_power_w, toHouse: true, side: -1 },
-      { key: 'grid', x: 845, y: 128, glyph: '⚡', label: 'Grid',
-        value: inv.grid_power_w, toHouse: (inv.grid_power_w ?? 0) >= 0, side: 1,
-        sub: (inv.grid_power_w ?? 0) >= 0 ? 'importing' : 'exporting' },
-      battery ? { key: 'batt', x: 155, y: 392, glyph: '🔋',
-        label: `Battery${inv.battery_soc != null ? ' ' + Math.round(inv.battery_soc) + '%' : ''}`,
-        value: inv.battery_power_w, toHouse: (inv.battery_power_w ?? 0) < 0, side: -1,
-        sub: battText(inv.battery_power_w) } : null,
-      { key: 'load', x: 845, y: 392, glyph: '🏠', label: 'Consumption',
-        value: inv.load_power_w, toHouse: false, side: 1 },
+      {
+        key: 'pv', x: 152, y: CY, glyph: '☀️', label: 'Solar',
+        value: inv.ac_power_w, into: true,
+        // The single most common question about a small number is "small
+        // compared to what?", so the array's rating sits under it.
+        sub: inv.capacity_w ? `of ${fmtWs(inv.capacity_w)} rated` : null,
+      },
+      {
+        key: 'grid', x: 848, y: CY, glyph: '⚡', label: 'Grid',
+        value: g, into: (g ?? 0) >= 0,
+        sub: dir(g, 1, 'importing', 'exporting'),
+      },
+      battery ? {
+        key: 'batt', x: CX, y: 392, glyph: '🔋', dead: 50,
+        label: `Battery${inv.battery_soc != null ? ' · ' + Math.round(inv.battery_soc) + '%' : ''}`,
+        // Charging (+) draws from the house side; discharging (-) feeds it.
+        value: b, into: (b ?? 0) < 0,
+        sub: dir(b, 50, 'charging', 'discharging'),
+      } : null,
     ].filter(Boolean);
 
+    // A 20 W trickle and a 5 kW flood used to be drawn with identical wire, so
+    // the picture said nothing the numbers did not. Width now tracks magnitude
+    // against the array's rating - square-rooted, or small flows vanish.
+    const ref = Math.max(1000, inv.capacity_w || 0);
+    const gauge = (v) => 3.5 + 8 * Math.sqrt(Math.min(1, Math.abs(v ?? 0) / ref));
+    // Each arm uses the same dead-band as the figure beside it: a pack drifting
+    // a few watts is idle here too, not a live flow with an arrow on it.
+    const flowing = (n) => Math.abs(n.value ?? 0) >= (n.dead ?? 1);
+
+    // Every path is drawn node -> house, so "reversed" always means the same
+    // thing and the arrow marker and the travelling pip agree on direction.
+    const pathFor = (n) => {
+      if (n.key === 'batt') return `M${CX},${n.y - NR - 12} L${CX},${CY + HR + 14}`;
+      const side = n.x < CX ? -1 : 1;
+      return `M${n.x - side * (NR + 12)},${CY} H${CX + side * (HR + 14)}`;
+    };
+
     let out = `<defs>
-      <marker id="a-off" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <marker id="a-off" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
         <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>
-      <marker id="a-on" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <marker id="a-on" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
         <path d="M0,0 L10,5 L0,10 z" fill="${accent}"/></marker>
     </defs>`;
 
+    // Wires first, so a node always sits on top of the line entering it.
     for (const n of nodes) {
-      const w = Math.abs(n.value ?? 0);
-      const live = w >= 1;
-      // side is -1 for the left column, +1 for the right, so the elbow and the
-      // house-side end both sit on the node's own side of the centre.
-      const nx = n.x - n.side * 52;
-      const elbow = CX + n.side * 175;
-      const hx = CX + n.side * 78;
-      // Rounded corners: a right angle reads as a circuit trace, a curve reads
-      // as something flowing, which is what the diagram is about.
-      const R = 22;
-      const d = n.y === CY
-        ? `M${nx},${CY} H${hx}`
-        : (() => {
-            const h1 = Math.sign(elbow - nx), vd = Math.sign(CY - n.y), h2 = Math.sign(hx - elbow);
-            return [
-              `M${nx},${n.y}`,
-              `L${elbow - h1 * R},${n.y}`,
-              `Q${elbow},${n.y} ${elbow},${n.y + vd * R}`,
-              `L${elbow},${CY - vd * R}`,
-              `Q${elbow},${CY} ${elbow + h2 * R},${CY}`,
-              `L${hx},${CY}`,
-            ].join(' ');
-          })();
-      const rev = !n.toHouse;
-      out += `<path class="wire${live ? ' live' : ''}" d="${d}" marker-${rev ? 'start' : 'end'}="url(#${live ? 'a-on' : 'a-off'})"/>`;
+      const live = flowing(n);
+      const d = pathFor(n);
+      const rev = !n.into;
+      out += `<path class="wire${live ? ' live' : ' dead'}" d="${d}" stroke-width="${gauge(n.value).toFixed(1)}"
+        marker-${rev ? 'start' : 'end'}="url(#${live ? 'a-on' : 'a-off'})"/>`;
       if (live) {
-        out += `<circle class="pip" r="5.5"><animateMotion dur="2.6s" repeatCount="indefinite" keyPoints="${rev ? '1;0' : '0;1'}" keyTimes="0;1" calcMode="linear" path="${d}"/></circle>`;
+        out += `<circle class="pip" r="${(2.6 + gauge(n.value) * 0.5).toFixed(1)}"><animateMotion dur="2.6s" repeatCount="indefinite"
+          keyPoints="${rev ? '1;0' : '0;1'}" keyTimes="0;1" calcMode="linear" path="${d}"/></circle>`;
       }
-      if (live) out += `<circle class="halo" cx="${n.x}" cy="${n.y}" r="49"/>`;
-      out += `<circle class="nodebg${live ? ' live' : ''}" cx="${n.x}" cy="${n.y}" r="40"/>`;
+    }
+
+    for (const n of nodes) {
+      const live = flowing(n);
+      if (live) out += `<circle class="halo" cx="${n.x}" cy="${n.y}" r="${NR + 9}"/>`;
+      out += `<circle class="nodebg${live ? ' live' : ''}" cx="${n.x}" cy="${n.y}" r="${NR}"/>`;
       out += `<text class="glyph${live ? '' : ' dim'}" x="${n.x}" y="${n.y + 10}" text-anchor="middle">${n.glyph}</text>`;
 
-      const anchor = n.side < 0 ? 'start' : 'end';
-      const tx = n.side < 0 ? n.x - 56 : n.x + 56;
-      const ly = n.y < CY ? n.y - 62 : n.y + 60;
-      out += `<text class="lbl" x="${tx}" y="${ly}" text-anchor="${anchor}">${esc(n.label)}</text>`;
-      out += `<text class="val${live ? '' : ' idle'}" x="${tx}" y="${ly + 25}" text-anchor="${anchor}">${n.value == null ? '—' : fmtWs(w)}</text>`;
-      if (n.sub) out += `<text class="sub" x="${tx}" y="${ly + 44}" text-anchor="${anchor}">${esc(n.sub)}</text>`;
+      // Centred underneath, every node the same: nothing to clip against the
+      // edge of the box, and nothing to collide with the house.
+      const ty = n.y + NR + 34;
+      out += `<text class="lbl" x="${n.x}" y="${ty}" text-anchor="middle">${esc(n.label)}</text>`;
+      out += `<text class="val${live ? '' : ' idle'}" x="${n.x}" y="${ty + 38}" text-anchor="middle">${n.value == null ? '—' : fmtWs(Math.abs(n.value))}</text>`;
+      if (n.sub) out += `<text class="sub" x="${n.x}" y="${ty + 64}" text-anchor="middle">${esc(n.sub)}</text>`;
     }
-    out += `<circle class="house" cx="${CX}" cy="${CY}" r="56"/>`;
-    out += `<text class="glyph big" x="${CX}" y="${CY + 13}" text-anchor="middle">🏡</text>`;
 
-    return `<svg class="flow" viewBox="0 0 ${W} ${H}" style="--accent:${accent}" role="img"
+    // The house is the hub and the load at the same time.
+    const load = inv.load_power_w;
+    out += `<circle class="house" cx="${CX}" cy="${CY}" r="${HR}"/>`;
+    out += `<text class="lbl" x="${CX}" y="${CY - HR - 22}" text-anchor="middle">Home load</text>`;
+    out += `<text class="glyph big" x="${CX}" y="${CY - 6}" text-anchor="middle">🏡</text>`;
+    out += `<text class="val${load ? '' : ' idle'}" x="${CX}" y="${CY + 42}" text-anchor="middle">${load == null ? '—' : fmtWs(load)}</text>`;
+
+    const svg = `<svg class="flow" viewBox="0 0 ${W} ${H}" style="--accent:${accent}" role="img"
       aria-label="Energy flow for ${esc(inv.name)}">${out}</svg>`;
+
+    // How much of what the house used came from the house's own kit rather than
+    // the meter. It is the question the diagram is really answering, and it is
+    // only honest when both figures are present.
+    if (load == null || load <= 0 || g == null) return svg;
+    const selfPct = Math.max(0, Math.min(100, ((load - Math.max(0, g)) / load) * 100));
+    return `${svg}<div class="flowbar" title="Share of the house's current draw that is coming from solar or the battery rather than the grid">
+      <div class="flowbar-t"><span>Self-powered right now</span><b>${Math.round(selfPct)}%</b></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${selfPct.toFixed(1)}%;background:${accent}"></div></div>
+    </div>`;
   }
 
   /** One system's own day curve, drawn at chart size rather than sparkline size. */
