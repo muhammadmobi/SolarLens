@@ -366,6 +366,17 @@ test.describe('Energy flow on the overview', () => {
     await expect(page.locator('svg.flow')).toHaveCount(2);
   });
 
+  test('a stale system’s diagram stops reading as live', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
+    await page.goto('/');
+    const box = page.locator('a.flowlink').nth(0);
+    await expect(box.locator('.flowstale')).toContainText('not reporting');
+    // The travelling pips are what make a diagram look live; a dead feed's
+    // are hidden rather than left circulating power that is not flowing.
+    await expect(box.locator('svg.flow .pip').first()).toBeHidden();
+    await expect(page.locator('a.flowlink').nth(1).locator('svg.flow .pip').first()).toBeVisible();
+  });
+
   test('the flow tab is gone and an old #/flow link lands on the overview', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
