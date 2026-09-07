@@ -18,6 +18,18 @@ export interface Inverter {
   capacityW: number | null;
 }
 
+/** Pack-level battery figures the inverter reports alongside SOC. */
+export interface BatteryDetail {
+  tempC: number | null;
+  voltageV: number | null;
+  currentA: number | null;
+  bmsTempC: number | null;
+  bmsVoltageV: number | null;
+  bmsCurrentA: number | null;
+  chargeLimitA: number | null;
+  dischargeLimitA: number | null;
+}
+
 export type DeviceKind = 'inverter' | 'datalogger' | 'battery' | 'meter';
 
 /** One physical box behind a reading, as the vendors' Device pages describe it. */
@@ -49,6 +61,8 @@ export interface Device {
   /** Heatsink temperature in °C. */
   tempC: number | null;
   dcBusV: number | null;
+  /** Battery and BMS detail; hybrids only, and the field set differs by vendor. */
+  battery: BatteryDetail | null;
   raw: unknown;
 }
 

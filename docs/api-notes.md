@@ -109,7 +109,9 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   - `AV1…3` / `AC1…3` — per-phase AC; `A_Fo1` (Hz), `PG_F1` (grid Hz)
   - `AC_T` (inverter heatsink °C), `T_DC`, `B_T1` (battery pack)
   - `Pr1` rated power (W), `INV_MOD1` inverter type, `MAIN_1`/`HMI` firmware, `SN1` serial
-  - `B_V1` / `B_C1` / `B_P1` battery V/A/W; `BMS_*` pack detail and charge limits
+  - `B_V1` / `B_C1` / `B_P1` pack volts / amps / watts; `B_T1` pack temperature
+  - `BMST` BMS temperature, `BMS_B_V1` / `BMS_B_C1` BMS volts / amps,
+    `C_C_L` / `D_C_L` charge and discharge current limits — stored in the device `battery` column
   - Direct navigation to `/plant/infos/device` redirects to `/data`; the tab must be clicked,
     which is why the endpoints only appear after a click-through.
 

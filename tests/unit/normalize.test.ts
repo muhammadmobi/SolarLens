@@ -312,3 +312,36 @@ describe('SolarMan v3 device detail (the richer per-device page)', () => {
     expect(bare.status).toBe('offline');
   });
 });
+
+describe('SolarMan battery and BMS detail', () => {
+  const cat = (name: string, fields: [string, string, unknown, string | null][]) => ({
+    name, fieldList: fields.map(([storageName, key, value, unit], i) => ({ storageName, key, value, unit, serialNumber: i })),
+  });
+
+  it('reads pack and BMS figures from the register categories', () => {
+    const d = solarmanV3({
+      deviceId: 1, deviceSn: 'INV-DEMO', deviceState: 1, collectionTime: 1788709956,
+      paramCategoryList: [
+        cat('Battery', [['B_V1', 'Battery Voltage', '27.13', 'V'], ['B_C1', 'Battery Current', '-1.04', 'A'], ['B_P1', 'Battery Power', '-28', 'W']]),
+        cat('BMS', [['BMST', 'BMS Temperature', '31.40', '℃'], ['BMS_B_V1', 'BMS Voltage', '26.93', 'V'],
+          ['C_C_L', 'Charge current limit', '0', 'A'], ['D_C_L', 'Discharge Current Limit', '130', 'A']]),
+        cat('Temperature', [['B_T1', 'Temperature- Battery', '31.40', '℃'], ['AC_T', 'AC Temperature', '47.70', '℃']]),
+      ],
+    }, '62000000');
+    expect(d.battery).toEqual({
+      tempC: 31.4, voltageV: 27.13, currentA: -1.04,
+      bmsTempC: 31.4, bmsVoltageV: 26.93, bmsCurrentA: null,
+      chargeLimitA: 0, dischargeLimitA: 130,
+    });
+    // The heatsink figure stays separate from the pack's.
+    expect(d.tempC).toBe(47.7);
+  });
+
+  it('leaves battery null for an inverter that reports no pack at all', () => {
+    const d = solarmanV3({
+      deviceId: 2, deviceSn: 'STRING-ONLY', deviceState: 1,
+      paramCategoryList: [cat('Electricity Generation', [['DV1', 'DC Voltage PV1', '300', 'V']])],
+    }, null);
+    expect(d.battery).toBeNull();
+  });
+});

@@ -123,7 +123,9 @@ test.describe('Overview', () => {
     await expect(panels.nth(1).locator('.ring text')).toHaveText('100%');
 
     await expect(page.locator('#fleet-power')).toHaveText('5.36 kW');
-    await expect(page.locator('#fleet-today')).toContainText('62.7 kWh today');
+    // The word "today" is now a label above the figure, not part of it.
+    await expect(page.locator('#fleet-today')).toHaveText('62.7 kWh');
+    await expect(page.locator('.flabel')).toHaveText(['Both systems now', 'Generated today']);
     await expect(page.locator('#poll-status')).toContainText('last poll (solarman) ok');
   });
 

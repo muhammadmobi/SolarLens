@@ -154,6 +154,7 @@ export function deviceFromRecord(d: Rec, plantId: string | null = null): Device 
     // This hybrid reports only total DC input (DPi_t1); no per-string registers.
     strings: null,
     acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null,
+    battery: null,
     raw: { ...d, featureData: feature },
   };
 }
@@ -199,6 +200,20 @@ export function deviceFromV3Detail(d: Rec, plantId: string | null = null): Devic
 
   const sn = (pick(d, 'deviceSn') as string | null) ?? str('SN1');
   const state = String(pick(d, 'deviceState') ?? '');
+
+  // Only build a battery record when the pack actually reports something, so a
+  // string inverter never gains an all-null battery block.
+  const bat = {
+    tempC: val('B_T1'),
+    voltageV: val('B_V1'),
+    currentA: val('B_C1'),
+    bmsTempC: val('BMST'),
+    bmsVoltageV: val('BMS_B_V1'),
+    bmsCurrentA: val('BMS_B_C1'),
+    chargeLimitA: val('C_C_L'),
+    dischargeLimitA: val('D_C_L'),
+  };
+  const battery = Object.values(bat).some((v) => v !== null) ? bat : null;
   const firmware = [str('MAIN_1'), str('HMI')].filter(Boolean).join(' / ') || null;
 
   return {
@@ -226,6 +241,7 @@ export function deviceFromV3Detail(d: Rec, plantId: string | null = null): Devic
     // AC_T is the inverter's own heatsink; B_T1 is the battery pack's.
     tempC: val('AC_T') ?? val('T_DC'),
     dcBusV: null,
+    battery,
     raw: d,
   };
 }
