@@ -214,6 +214,9 @@
   .flowstats .v { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 2px; }
   .flowstats .v.import { color: var(--solarman); }
   .flowstats .v.export { color: var(--ok); }
+  .chartgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px 22px; }
+  .chartmini { min-width: 0; }
+  .chartmini .combined { height: 170px; }
   .flowgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 4px 20px; }
   .flowmini { min-width: 0; }
   .flowmini .mini-name { font-size: 13.5px; font-weight: 700; margin-bottom: 2px; }
@@ -488,7 +491,7 @@
    * flow is a summary, not a dead end.
    */
   /** The figures that explain a flow diagram; shared by Flow and Overview. */
-  function flowStats(inv) {
+  function flowStats(inv, omitBattery = false) {
     const m = parse(inv.metrics) ?? {};
     const devs = devicesFor(inv);
     const invDev = devs.find((d) => d.kind === 'inverter');
@@ -503,7 +506,7 @@
       stat('Lifetime', fmtKwh(inv.total_kwh)),
       stat('Grid', g == null ? '—' : (g >= 0 ? `↓ ${fmtWs(g)}` : `↑ ${fmtWs(-g)}`), g > 0 ? 'import' : g < 0 ? 'export' : ''),
       stat('Load', fmtWs(inv.load_power_w)),
-      hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
+      !omitBattery && hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
       strings && strings.length ? stat('PV strings', `${strings.length} producing`) : '',
       tempC != null ? stat('Temperature', `${tempC.toFixed(1)} °C`) : '',
       invDev?.model ? stat('Model', esc(invDev.model)) : '',
@@ -612,12 +615,7 @@
       </div>
       <div class="freshness ${st.stale ? 'stale' : ''}">${inv.ts ? (st.stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}`) : ''}</div>
       ${sparkline(pts, accent)}
-      <div class="stats">
-        <div class="stat"><div class="k">Today</div><div class="v">${fmtKwh(inv.today_kwh)}</div></div>
-        <div class="stat"><div class="k">Lifetime</div><div class="v">${fmtKwh(inv.total_kwh)}</div></div>
-        <div class="stat"><div class="k">Load</div><div class="v">${fmtWs(inv.load_power_w)}</div></div>
-        <div class="stat"><div class="k">Grid</div><div class="v ${g > 0 ? 'import' : g < 0 ? 'export' : ''}">${gridText(g)}</div></div>
-      </div>
+      ${flowStats(inv, true)}
       ${hasBattery(inv, m) ? `<div class="batt">${ring(inv.battery_soc ?? 0)}
         <div><div class="k">Battery</div><div class="v">${battText(inv.battery_power_w)}</div></div></div>` : ''}
     </a>`;
@@ -680,23 +678,24 @@
         <div class="body"><div class="flowgrid">${invs.map((inv) => `<div class="flowmini">
           <div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>
           ${flowSvg(inv, parse(inv.metrics) ?? {})}
-          ${flowStats(inv)}
         </div>`).join('')}</div></div>
       </section></a>` : '';
 
     // The chart lives in full on the Power page; the overview carries its own
     // copy so the day's shape is visible without leaving the first screen.
+    // One curve per system rather than a single merged chart: overlapping
+    // lines hide each other, and each system's shape is what matters here.
+    // The Power page keeps the combined view for comparing them.
     const chart = invs.length ? `<a class="flowlink" href="#/power" style="margin-top:18px;display:block">
       <section class="card">
         <div class="cardhead"><h2>Today · AC output</h2><span class="seemore">Open full view →</span></div>
-        <div class="body">
-          <div class="legend" id="legend"></div>
-          <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
-        </div>
+        <div class="body"><div class="chartgrid">${invs.map((inv, i) => `<div class="chartmini">
+          <div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>
+          ${systemChart(inv, byInv[inv.id] || [], 'ov' + i)}
+        </div>`).join('')}</div></div>
       </section></a>` : '';
 
     $('view').innerHTML = `<div class="sysgrid">${cards}</div>${flow}${chart}`;
-    if (invs.length) $('legend').innerHTML = combinedChart($('combined'), byInv, invs).join('');
   }
 
   // ---------- devices ----------
