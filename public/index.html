@@ -115,6 +115,9 @@
              border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .fitem { display: flex; flex-direction: column; gap: 1px; }
   .quiet { font-size: 10.5px; font-weight: 650; color: var(--warn); margin-top: 1px; }
+  /* A figure nobody can vouch for any more reads dimmer than a live one. */
+  .lastknown { opacity: .55; }
+  .lastknown .lk { color: var(--warn); font-weight: 650; opacity: 1; }
   [hidden] { display: none !important; }
   .flabel { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
   .fleet .num.small { font-size: 17px; }
@@ -622,7 +625,7 @@
         <summary>
           <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
-          <span class="snow">${v}<small> ${u}</small></span>
+          <span class="snow${st.stale ? ' lastknown' : ''}"${st.stale && inv.ts ? ` title="Last known output, ${esc(ago(inv.ts))}"` : ''}>${v}<small> ${u}</small>${st.stale ? '<small class="lk"> last known</small>' : ''}</span>
           <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
         </summary>
         <div class="secbody">
@@ -684,8 +687,8 @@
         </div>
         <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
       </div>
-      <div class="herolabel">Producing now</div>
-      <div class="hero">
+      <div class="herolabel">${st.stale ? 'Last known output' : 'Producing now'}</div>
+      <div class="hero${st.stale ? ' lastknown' : ''}">
         <span class="val">${pv}</span><span class="unit">${pu}</span>
         <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)} rated` : ''}</span>
       </div>

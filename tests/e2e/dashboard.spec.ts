@@ -192,6 +192,16 @@ test.describe('Overview', () => {
     // now, beside an amber dot and a staleness warning, contradicts both.
     await expect(solis.locator('.pill')).toHaveText('not reporting');
     await expect(solis.locator('.pill')).toHaveAttribute('title', /online/);
+    // The hero figure is an hour old, so it stops claiming to be "now".
+    await expect(solis.locator('.herolabel')).toHaveText('Last known output');
+    await expect(solis.locator('.hero')).toHaveClass(/lastknown/);
+  });
+
+  test('a fresh system keeps the live wording', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    await expect(page.locator('a.sys').nth(0).locator('.herolabel')).toHaveText('Producing now');
+    await expect(page.locator('a.sys').nth(0).locator('.hero')).not.toHaveClass(/lastknown/);
   });
 
   test('a system that has gone quiet is dropped from "Producing now", not counted', async ({ page }) => {
@@ -299,6 +309,15 @@ test.describe('Battery', () => {
 });
 
 test.describe('Power page', () => {
+  test('marks a stale headline figure as last known rather than current', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
+    await page.goto('/#/power');
+    const head = page.locator('details.syssec').nth(0).locator('summary');
+    await expect(head.locator('.snow')).toHaveClass(/lastknown/);
+    await expect(head.locator('.snow')).toContainText('last known');
+    await expect(page.locator('details.syssec').nth(1).locator('.snow')).not.toHaveClass(/lastknown/);
+  });
+
   test('gives each system its own collapsible section', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/power');
