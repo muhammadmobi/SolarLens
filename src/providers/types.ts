@@ -28,6 +28,16 @@ export interface BatteryDetail {
   bmsCurrentA: number | null;
   chargeLimitA: number | null;
   dischargeLimitA: number | null;
+  /** Nameplate, which is what turns cumulative charge into equivalent cycles. */
+  ratedCapacityAh: number | null;
+  nominalVoltageV: number | null;
+  chemistry: string | null;
+  /** The pack's own word for what it is doing ("Charging", "Static", ...). */
+  status: string | null;
+  /** The BMS's SOC, which can drift a little from the inverter's. */
+  bmsSocPct: number | null;
+  bmsChargeVoltageV: number | null;
+  bmsDischargeVoltageV: number | null;
 }
 
 export type DeviceKind = 'inverter' | 'datalogger' | 'battery' | 'meter';
@@ -86,6 +96,16 @@ export interface Metrics {
   battChargeTotalKwh: number | null;
   battDischargeTotalKwh: number | null;
   selfUseTodayKwh: number | null;
+  /** Hours the array would need at full rating to make today's energy. */
+  fullLoadHours: number | null;
+  /** Today's weather, where the vendor ships it with the plant snapshot. */
+  weatherText: string | null;
+  tempMinC: number | null;
+  tempMaxC: number | null;
+  /** Temperature right now, which only the weather lookup can supply. */
+  tempNowC: number | null;
+  sunrise: string | null;
+  sunset: string | null;
   batteryStatus: string | null;
   gridStatus: string | null;
 }
@@ -98,7 +118,9 @@ export function emptyMetrics(): Metrics {
     gridImportTotalKwh: null, gridExportTotalKwh: null,
     battChargeTodayKwh: null, battDischargeTodayKwh: null,
     battChargeTotalKwh: null, battDischargeTotalKwh: null,
-    selfUseTodayKwh: null, batteryStatus: null, gridStatus: null,
+    selfUseTodayKwh: null, fullLoadHours: null,
+    weatherText: null, tempMinC: null, tempMaxC: null, tempNowC: null, sunrise: null, sunset: null,
+    batteryStatus: null, gridStatus: null,
   };
 }
 
