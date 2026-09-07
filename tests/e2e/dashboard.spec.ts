@@ -175,6 +175,8 @@ test.describe('Overview', () => {
     await stubApi(page, { invs: [], devs: [] });
     await page.goto('/');
     await expect(page.locator('.empty')).toContainText('No inverters yet');
+    // The chart moved to its own page; with no fleet it says so rather than drawing.
+    await page.goto('/#/power');
     await expect(page.locator('#combined')).toContainText('No samples yet today');
   });
 });
@@ -202,6 +204,22 @@ test.describe('Energy flow page', () => {
     await expect(page).toHaveURL(/#\/flow$/);
   });
 
+  test('each flow card carries the figures and opens that system', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/flow');
+    const solis = page.locator('a.flowlink').nth(0);
+    await expect(solis).toContainText('Today');
+    await expect(solis).toContainText('Lifetime');
+    await expect(solis).toContainText('Temperature');
+    await expect(solis).toContainText('All details');
+    // An on-grid system shows no Battery figure; the hybrid does.
+    await expect(solis).not.toContainText('Battery');
+    await expect(page.locator('a.flowlink').nth(1)).toContainText('Battery');
+    await solis.click();
+    await expect(page).toHaveURL(/#\/system\//);
+    await expect(page.locator('.card h3')).toContainText(['Identity & hardware']);
+  });
+
   test('the on-grid diagram omits the battery arm the hybrid draws', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/flow');
@@ -215,6 +233,19 @@ test.describe('Energy flow page', () => {
     await page.goto('/');
     await page.locator('a.sys').nth(0).click();
     await expect(page).toHaveURL(/#\/system\//);
+  });
+});
+
+test.describe('AC output page', () => {
+  test('has its own nav entry and draws the combined day chart', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    // The chart is no longer on the overview - it has a page of its own.
+    await expect(page.locator('#combined')).toHaveCount(0);
+    await page.locator('nav').getByRole('link', { name: 'AC output' }).click();
+    await expect(page).toHaveURL(/#\/power$/);
+    await expect(page.locator('#combined')).toBeVisible();
+    await expect(page.locator('#legend span')).toContainText(['Demo Solis Plant', 'Demo Hybrid', 'Fleet total']);
   });
 });
 
