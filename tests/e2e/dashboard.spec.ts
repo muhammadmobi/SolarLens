@@ -198,8 +198,10 @@ test.describe('Energy flow page', () => {
     await page.goto('/');
     // Both systems are drawn on the overview, not just on the dedicated page.
     await expect(page.locator('svg.flow')).toHaveCount(2);
-    const link = page.locator('a.flowlink');
-    await expect(link).toHaveAttribute('href', '#/flow');
+    const link = page.locator('a.flowlink[href="#/flow"]');
+    await expect(link).toBeVisible();
+    // The overview repeats the flow figures, not just the drawing.
+    await expect(link).toContainText('Lifetime');
     await link.click();
     await expect(page).toHaveURL(/#\/flow$/);
   });
@@ -240,12 +242,17 @@ test.describe('AC output page', () => {
   test('has its own nav entry and draws the combined day chart', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    // The chart is no longer on the overview - it has a page of its own.
-    await expect(page.locator('#combined')).toHaveCount(0);
+    // The overview carries a copy that links through to the full page.
+    await expect(page.locator('a.flowlink[href="#/power"]')).toBeVisible();
     await page.locator('nav').getByRole('link', { name: 'Power', exact: true }).click();
     await expect(page).toHaveURL(/#\/power$/);
-    await expect(page.locator('#combined')).toBeVisible();
     await expect(page.locator('#legend span')).toContainText(['Demo Solis Plant', 'Demo Hybrid', 'Fleet total']);
+    // Combined chart plus one per system.
+    await expect(page.locator('svg.combined')).toHaveCount(3);
+    // And each system's full detail set, so Power is not just a picture.
+    await expect(page.locator('.card h3')).toContainText([
+      'Identity & hardware', 'Datalogger & link', 'Live power', 'Energy counters',
+    ]);
   });
 });
 
@@ -321,10 +328,11 @@ test.describe('System detail', () => {
     const raw = page.locator('details.raw');
     await expect(raw).toBeVisible();
     await raw.locator('summary').click();
-    await expect(page.locator('#rawgrid')).toContainText('generationPower');
-    await page.locator('#rawfilter').fill('battery');
-    await expect(page.locator('#rawgrid .rk').filter({ hasText: 'batterySoc' })).toBeVisible();
-    await expect(page.locator('#rawgrid .rk').filter({ hasText: 'generationPower' })).toBeHidden();
+    const grid = raw.locator('.rawgrid');
+    await expect(grid).toContainText('generationPower');
+    await raw.locator('.rawfilter').fill('battery');
+    await expect(grid.locator('.rk').filter({ hasText: 'batterySoc' })).toBeVisible();
+    await expect(grid.locator('.rk').filter({ hasText: 'generationPower' })).toBeHidden();
   });
 
   test('on-grid system: per-phase AC, frequency, power factor and DC bus', async ({ page }) => {
