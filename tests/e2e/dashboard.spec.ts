@@ -107,18 +107,17 @@ test.describe('Overview', () => {
     await stubApi(page);
     await page.goto('/');
 
-    const panels = page.locator('a.panel');
+    const panels = page.locator('a.sys');
     await expect(panels).toHaveCount(2);
     await expect(panels.nth(0)).toContainText('SolisCloud');
     await expect(panels.nth(0)).toContainText('Demo Solis Plant');
     await expect(panels.nth(0).locator('.hero .val')).toHaveText('5.08');
     await expect(panels.nth(0).locator('.hero .unit')).toHaveText('kW');
-    await expect(panels.nth(0)).toContainText('5.08 kW export');
+    await expect(panels.nth(0)).toContainText('5.08 kW');
 
     await expect(panels.nth(1)).toContainText('SolarMan');
     await expect(panels.nth(1).locator('.hero .val')).toHaveText('278');
-    await expect(panels.nth(1)).toContainText('91 W import');
-    await expect(panels.nth(1)).toContainText('via solarman-web');
+    await expect(panels.nth(1)).toContainText('91 W');
     // A few watts of battery drift renders as idle, not as discharging.
     await expect(panels.nth(1)).toContainText('idle');
     await expect(panels.nth(1).locator('.ring text')).toHaveText('100%');
@@ -131,14 +130,14 @@ test.describe('Overview', () => {
   test('only the hybrid shows a battery ring; the on-grid plant has none', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await expect(page.locator('a.panel').nth(0).locator('.batt')).toHaveCount(0);
-    await expect(page.locator('a.panel').nth(1).locator('.batt')).toHaveCount(1);
+    await expect(page.locator('a.sys').nth(0).locator('.batt')).toHaveCount(0);
+    await expect(page.locator('a.sys').nth(1).locator('.batt')).toHaveCount(1);
   });
 
   test('renders the divider layout: side by side on desktop, stacked on narrow screens', async ({ page }, testInfo) => {
     await stubApi(page);
     await page.goto('/');
-    const [a, b] = await page.locator('a.panel').all();
+    const [a, b] = await page.locator('a.sys').all();
     const ba = await a.boundingBox();
     const bb = await b.boundingBox();
     expect(ba && bb).toBeTruthy();
@@ -153,9 +152,9 @@ test.describe('Overview', () => {
   test('flags an inverter whose newest sample is older than 15 minutes', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
     await page.goto('/');
-    const solis = page.locator('a.panel').nth(0);
-    await expect(solis.locator('.stale')).toContainText('last sample');
-    await expect(solis.locator('.badge')).toHaveClass(/warn/);
+    const solis = page.locator('a.sys').nth(0);
+    await expect(solis.locator('.freshness')).toContainText('last sample');
+    await expect(solis.locator('.pill')).toHaveClass(/warn/);
   });
 
   test('surfaces a failed poll in the footer', async ({ page }) => {
@@ -177,6 +176,33 @@ test.describe('Overview', () => {
     await page.goto('/');
     await expect(page.locator('.empty')).toContainText('No inverters yet');
     await expect(page.locator('#combined')).toContainText('No samples yet today');
+  });
+});
+
+test.describe('Energy flow page', () => {
+  test('has its own nav entry and draws one diagram per system', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    await page.getByRole('link', { name: 'Energy flow' }).click();
+    await expect(page).toHaveURL(/#\/flow$/);
+    await expect(page.locator('svg.flow')).toHaveCount(2);
+    // Each card names its system, so the two diagrams are tellable apart.
+    await expect(page.locator('.card')).toContainText(['Demo Solis Plant', 'Demo Hybrid']);
+  });
+
+  test('the on-grid diagram omits the battery arm the hybrid draws', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/flow');
+    const [solis, hybrid] = await page.locator('svg.flow').all();
+    await expect(solis.locator('.wire')).toHaveCount(3);
+    await expect(hybrid.locator('.wire')).toHaveCount(4);
+  });
+
+  test('clicking a system on the overview still opens its detail', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    await page.locator('a.sys').nth(0).click();
+    await expect(page).toHaveURL(/#\/system\//);
   });
 });
 
@@ -207,18 +233,18 @@ test.describe('System detail', () => {
   test('opens from a panel and keeps a linkable URL', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await page.locator('a.panel').nth(0).click();
+    await page.locator('a.sys').nth(0).click();
     await expect(page).toHaveURL(/#\/system\//);
-    await expect(page.locator('.who .name')).toContainText('Demo Solis Plant');
+    await expect(page.locator('.sys-name')).toContainText('Demo Solis Plant');
     await page.locator('a.back').click();
-    await expect(page.locator('a.panel')).toHaveCount(2);
+    await expect(page.locator('a.sys')).toHaveCount(2);
   });
 
   test('on-grid system: hardware, datalogger, PV strings, and no battery block', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/' + encodeURIComponent(SOLIS));
 
-    const blocks = page.locator('.block h3');
+    const blocks = page.locator('.card h3');
     await expect(blocks.filter({ hasText: 'Identity & hardware' })).toBeVisible();
     await expect(blocks.filter({ hasText: 'Datalogger & link' })).toBeVisible();
     await expect(blocks.filter({ hasText: 'PV strings' })).toBeVisible();
@@ -237,7 +263,7 @@ test.describe('System detail', () => {
   test('hybrid system: battery block with charge and discharge counters', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/' + encodeURIComponent(HYBRID));
-    const battery = page.locator('.block').filter({ has: page.locator('h3', { hasText: 'Battery' }) });
+    const battery = page.locator('.card').filter({ has: page.locator('h3', { hasText: 'Battery' }) });
     await expect(battery).toBeVisible();
     await expect(battery).toContainText('static');
     await expect(battery).toContainText('1100 kWh');
@@ -261,7 +287,7 @@ test.describe('System detail', () => {
   test('on-grid system: per-phase AC, frequency, power factor and DC bus', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/' + encodeURIComponent(SOLIS));
-    const ac = page.locator('.block').filter({ has: page.locator('h3', { hasText: 'AC output' }) });
+    const ac = page.locator('.card').filter({ has: page.locator('h3', { hasText: 'AC output' }) });
     await expect(ac).toBeVisible();
     await expect(ac).toContainText('228.4 V · 0.1 A');
     await expect(ac).toContainText('49.64 Hz');
@@ -271,15 +297,15 @@ test.describe('System detail', () => {
   test('heatsink temperature comes from the device when the reading has none', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/' + encodeURIComponent(SOLIS));
-    const diag = page.locator('.block').filter({ has: page.locator('h3', { hasText: 'Status' }) });
+    const diag = page.locator('.card').filter({ has: page.locator('h3', { hasText: 'Status' }) });
     await expect(diag).toContainText('40.6 °C');
   });
 
   test('the hybrid shows no AC-phase block, because SolarMan reports none', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/system/' + encodeURIComponent(HYBRID));
-    await expect(page.locator('.block h3').filter({ hasText: 'AC output' })).toHaveCount(0);
-    await expect(page.locator('.block h3').filter({ hasText: 'PV strings' })).toHaveCount(0);
+    await expect(page.locator('.card h3').filter({ hasText: 'AC output' })).toHaveCount(0);
+    await expect(page.locator('.card h3').filter({ hasText: 'PV strings' })).toHaveCount(0);
   });
 
   test('energy flow: the hybrid draws all four arms, with directions from the signs', async ({ page }) => {
@@ -287,7 +313,7 @@ test.describe('System detail', () => {
     await page.goto('/#/system/' + encodeURIComponent(HYBRID));
     const flow = page.locator('svg.flow');
     await expect(flow).toBeVisible();
-    await expect(flow.locator('.nlabel')).toHaveText([/Production/, /Grid/, /Battery/, /Consumption/]);
+    await expect(flow.locator('.lbl')).toHaveText([/Production/, /Grid/, /Battery/, /Consumption/]);
     // 91 W import, 278 W production, 307 W load, battery idle at -24 W.
     await expect(flow).toContainText('278 W');
     await expect(flow).toContainText('91 W');
@@ -300,7 +326,7 @@ test.describe('System detail', () => {
     await page.goto('/#/system/' + encodeURIComponent(SOLIS));
     const flow = page.locator('svg.flow');
     await expect(flow.locator('.wire')).toHaveCount(3);
-    await expect(flow.locator('.nlabel')).toHaveText([/Production/, /Grid/, /Consumption/]);
+    await expect(flow.locator('.lbl')).toHaveText([/Production/, /Grid/, /Consumption/]);
     await expect(flow).not.toContainText('Battery');
     // Exporting 5.08 kW, so the grid arm is labelled as such.
     await expect(flow).toContainText('exporting');

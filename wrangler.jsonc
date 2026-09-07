@@ -5,7 +5,7 @@
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
-  "preview_urls": false,
+  "preview_urls": true,
 
   // Poll both clouds every 5 minutes. SolisCloud itself only refreshes
   // roughly every 5 min, so faster polling buys nothing but rate-limit risk.
