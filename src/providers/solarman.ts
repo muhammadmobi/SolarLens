@@ -78,6 +78,7 @@ export function stationReading(inv: Inverter, s: Rec, source = 'solarman'): Read
   metrics.battChargeTotalKwh = num(pick(s, 'chargeTotal', 'chargeUploadTotal'));
   metrics.battDischargeTotalKwh = num(pick(s, 'dischargeTotal', 'dischargeUploadTotal'));
   metrics.selfUseTodayKwh = num(pick(s, 'selfGenAndUseValue'));
+  metrics.fullLoadHours = num(pick(s, 'fullPowerHoursDay'));
   metrics.batteryStatus = (pick(s, 'batteryStatus') as string | null) ?? null;
   metrics.gridStatus = (pick(s, 'wireStatus') as string | null) ?? null;
 
@@ -201,6 +202,12 @@ export function deviceFromV3Detail(d: Rec, plantId: string | null = null): Devic
   const sn = (pick(d, 'deviceSn') as string | null) ?? str('SN1');
   const state = String(pick(d, 'deviceState') ?? '');
 
+  // "Battery Voltage Type" is a menu label, not a number: "LV-24V", "HV-192V".
+  const nominalV = (() => {
+    const m = /([0-9]+(?:[.][0-9]+)?)[ ]*V/i.exec(str('SAFETY') ?? '');
+    return m ? Number(m[1]) : null;
+  })();
+
   // Only build a battery record when the pack actually reports something, so a
   // string inverter never gains an all-null battery block.
   const bat = {
@@ -212,6 +219,13 @@ export function deviceFromV3Detail(d: Rec, plantId: string | null = null): Devic
     bmsCurrentA: val('BMS_B_C1'),
     chargeLimitA: val('C_C_L'),
     dischargeLimitA: val('D_C_L'),
+    ratedCapacityAh: val('BRC'),
+    nominalVoltageV: nominalV,
+    chemistry: str('B_TYP1'),
+    status: str('B_ST1'),
+    bmsSocPct: val('C_CAP'),
+    bmsChargeVoltageV: val('BMS_C_V'),
+    bmsDischargeVoltageV: val('BMS_D_V'),
   };
   const battery = Object.values(bat).some((v) => v !== null) ? bat : null;
   const firmware = [str('MAIN_1'), str('HMI')].filter(Boolean).join(' / ') || null;
