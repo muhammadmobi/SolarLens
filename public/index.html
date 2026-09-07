@@ -117,6 +117,10 @@
   .quiet { font-size: 10.5px; font-weight: 650; color: var(--warn); margin-top: 1px; }
   /* A figure nobody can vouch for any more reads dimmer than a live one. */
   .lastknown { opacity: .55; }
+  /* A dead feed's diagram should not animate as though power were moving:
+     the travelling pips are what make it read as live. */
+  .lastknown .flow .pip { display: none; }
+  .flowstale { font-size: 11.5px; font-weight: 650; color: var(--warn); margin: 2px 0 6px; }
   .lastknown .lk { color: var(--warn); font-weight: 650; opacity: 1; }
   [hidden] { display: none !important; }
   .flabel { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
@@ -786,10 +790,15 @@
     const boxTitle = (inv) =>
       `<div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>`;
 
-    const flows = invs.map((inv) => `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}">
+    const flows = invs.map((inv) => {
+      const st = statusOf(inv);
+      return `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}">
       <section class="card"><div class="body">
-        ${boxTitle(inv)}${flowSvg(inv, parse(inv.metrics) ?? {})}
-      </div></section></a>`).join('');
+        ${boxTitle(inv)}
+        ${st.stale ? `<div class="flowstale">⚠ not reporting · this is the last snapshot, ${esc(inv.ts ? ago(inv.ts) : 'never')}</div>` : ''}
+        <div class="${st.stale ? 'lastknown' : ''}">${flowSvg(inv, parse(inv.metrics) ?? {})}</div>
+      </div></section></a>`;
+    }).join('');
 
     const charts = invs.map((inv, i) => `<a class="flowlink" href="#/power">
       <section class="card"><div class="body">
