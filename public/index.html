@@ -5,207 +5,289 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SolarLens</title>
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e100f" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
 <style>
   :root {
-    --bg: #f6f5f1;
-    --panel: #ffffff;
-    --ink: #1c1c1a;
-    --muted: #6b6a66;
-    --faint: #8d8c86;
-    --line: #dedcd5;
-    --soft: #efede7;
-    --ok: #2e8b57;
-    --warn: #c98a12;
-    --bad: #c0392b;
-    --solis: #e8792b;
+    --bg: #f7f6f2;
+    --surface: #ffffff;
+    --surface-2: #f1f0ea;
+    --ink: #17191a;
+    --muted: #5f6570;
+    --faint: #8b919b;
+    --line: #e5e4dc;
+    --line-soft: #efeee7;
+    --ok: #15803d;
+    --ok-bg: #e8f3ec;
+    --warn: #b45309;
+    --warn-bg: #fbf1e2;
+    --bad: #b91c1c;
+    --bad-bg: #fbeaea;
+    --solis: #db6b1c;
     --solarman: #2f6fde;
     --local: #6b4fbb;
-    --total: #1c1c1a;
+    --total: #17191a;
+    --shadow: 0 1px 2px rgba(20, 24, 30, .05), 0 10px 28px -12px rgba(20, 24, 30, .16);
+    --shadow-lift: 0 2px 6px rgba(20, 24, 30, .07), 0 18px 40px -16px rgba(20, 24, 30, .22);
+    --r: 18px;
+    --r-sm: 11px;
+    --font: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #121311;
-      --panel: #1b1c19;
-      --ink: #ecebe6;
-      --muted: #9a9993;
-      --faint: #83827b;
-      --line: #2c2d29;
-      --soft: #232420;
-      --total: #ecebe6;
+      --bg: #0e100f;
+      --surface: #171a18;
+      --surface-2: #1f2320;
+      --ink: #edeee9;
+      --muted: #9aa1a8;
+      --faint: #6f767d;
+      --line: #262a27;
+      --line-soft: #202422;
+      --ok: #4ade80; --ok-bg: #12251a;
+      --warn: #fbbf24; --warn-bg: #2a2113;
+      --bad: #f87171; --bad-bg: #2a1616;
+      --solis: #f0913f;
+      --solarman: #6fa0f0;
+      --local: #a78bfa;
+      --total: #edeee9;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
+      --shadow-lift: 0 2px 6px rgba(0,0,0,.5), 0 18px 40px -16px rgba(0,0,0,.7);
     }
   }
   :root[data-theme="dark"] {
-    --bg: #121311; --panel: #1b1c19; --ink: #ecebe6; --muted: #9a9993;
-    --faint: #83827b; --line: #2c2d29; --soft: #232420; --total: #ecebe6;
+    --bg: #0e100f; --surface: #171a18; --surface-2: #1f2320; --ink: #edeee9;
+    --muted: #9aa1a8; --faint: #6f767d; --line: #262a27; --line-soft: #202422;
+    --ok: #4ade80; --ok-bg: #12251a; --warn: #fbbf24; --warn-bg: #2a2113;
+    --bad: #f87171; --bad-bg: #2a1616;
+    --solis: #f0913f; --solarman: #6fa0f0; --local: #a78bfa; --total: #edeee9;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
+    --shadow-lift: 0 2px 6px rgba(0,0,0,.5), 0 18px 40px -16px rgba(0,0,0,.7);
   }
+
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--ink); }
   body {
-    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: var(--font);
+    font-size: 15px; line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 48px; }
-  a { color: inherit; }
-  :focus-visible { outline: 2px solid var(--solarman); outline-offset: 2px; border-radius: 4px; }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  a { color: inherit; text-decoration: none; }
+  :focus-visible { outline: 2px solid var(--solarman); outline-offset: 3px; border-radius: 8px; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 
-  header {
-    display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-    padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 56px; }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--line-soft);
   }
-  header h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; font-weight: 650; }
-  header h1 span { color: var(--muted); font-weight: 400; }
-  .fleet { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  .fleet .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
-  .fleet .sub { color: var(--muted); font-size: 13px; }
+  .topbar .inner {
+    max-width: 1180px; margin: 0 auto; padding: 14px 20px 0;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 17px; letter-spacing: -0.02em; }
+  .brand .mark {
+    width: 26px; height: 26px; border-radius: 8px; flex: none;
+    background: linear-gradient(135deg, var(--solis), var(--solarman));
+  }
+  .fleet { display: flex; align-items: baseline; gap: 8px; margin-left: auto; }
+  .fleet .num { font-size: 24px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .fleet .unit { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .fleet .sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; }
+  .fleet .sub { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .livedot {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted);
+    padding: 4px 10px; border-radius: 999px; background: var(--surface-2);
+  }
+  .livedot i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
+  .livedot.stale i { background: var(--warn); }
 
-  nav { display: flex; gap: 4px; margin: 0 0 18px; border-bottom: 1px solid var(--line); }
+  nav { display: flex; gap: 2px; padding: 10px 0 0; }
   nav a {
-    text-decoration: none; padding: 9px 14px; font-size: 14px; color: var(--muted);
-    border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500;
+    padding: 9px 16px 12px; font-size: 14.5px; font-weight: 600; color: var(--muted);
+    border-bottom: 2.5px solid transparent; transition: color .15s, border-color .15s;
   }
   nav a:hover { color: var(--ink); }
   nav a.on { color: var(--ink); border-bottom-color: var(--ink); }
-  .back { display: inline-block; font-size: 13px; color: var(--muted); text-decoration: none; margin-bottom: 12px; }
+
+  main { padding-top: 26px; }
+  .back {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted);
+    font-weight: 600; margin-bottom: 16px;
+  }
   .back:hover { color: var(--ink); }
 
-  .panels {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  /* ---------- cards ---------- */
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow);
   }
-  .panel { padding: 22px 24px 20px; min-width: 0; text-decoration: none; color: inherit; display: block; }
-  a.panel:hover { background: var(--soft); }
-  @media (min-width: 720px) { .panel + .panel { border-left: 1px solid var(--line); } }
-  @media (max-width: 719.98px) { .panel + .panel { border-top: 1px solid var(--line); } }
-
-  .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-  .who .name { font-weight: 600; font-size: 16px; }
-  .who .plant { color: var(--muted); font-size: 13px; }
-  .badge {
-    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 9px;
-    border-radius: 999px; border: 1px solid var(--line); background: var(--soft); white-space: nowrap;
+  .card > h2, .card > h3 {
+    margin: 0; padding: 15px 20px; font-size: 12px; font-weight: 700; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--faint); border-bottom: 1px solid var(--line-soft);
   }
-  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-  .badge.ok .dot { background: var(--ok); }
-  .badge.warn .dot { background: var(--warn); }
-  .badge.bad .dot { background: var(--bad); }
-  .provider { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 650; }
-  .provider.soliscloud { color: var(--solis); }
-  .provider.solarman { color: var(--solarman); }
-  .provider.local { color: var(--local); }
+  .card .body { padding: 18px 20px 20px; }
 
-  .hero { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 4px; }
-  .hero .val { font-size: 46px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
-  .hero .unit { font-size: 18px; color: var(--muted); }
-  .hero .cap { font-size: 13px; color: var(--muted); margin-left: auto; }
-  .stale { color: var(--warn); font-size: 12px; margin-bottom: 8px; min-height: 1.2em; }
-  .spark { width: 100%; height: 64px; display: block; margin: 8px 0 14px; }
+  .sysgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 18px; }
 
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 14px; }
-  .stat .k { color: var(--muted); font-size: 12px; }
-  .stat .v { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px; }
-  .stat .v.pos { color: var(--ok); }
-  .stat .v.neg { color: var(--solarman); }
+  /* ---------- system card ---------- */
+  .sys {
+    position: relative; display: block; overflow: hidden;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow); padding: 22px 22px 20px;
+    transition: transform .18s cubic-bezier(.2,.8,.3,1), box-shadow .18s;
+  }
+  .sys::before { content: ""; position: absolute; inset: 0 0 auto; height: 3px; background: var(--accent); }
+  a.sys:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+  .sys-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+  .vendor {
+    font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--accent);
+  }
+  .sys-name { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; }
+  .sys-plant { font-size: 13px; color: var(--muted); }
 
-  .batt { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); }
-  .ring { width: 56px; height: 56px; flex: none; }
-  .ring circle { fill: none; stroke-width: 6; }
-  .ring .track { stroke: var(--soft); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    font-size: 12px; font-weight: 650; padding: 5px 11px; border-radius: 999px;
+    background: var(--surface-2); color: var(--muted);
+  }
+  .pill i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.bad { background: var(--bad-bg); color: var(--bad); }
+
+  .hero { display: flex; align-items: baseline; gap: 9px; }
+  .hero .val { font-size: 50px; font-weight: 800; letter-spacing: -0.04em; line-height: .95; font-variant-numeric: tabular-nums; }
+  .hero .unit { font-size: 19px; font-weight: 600; color: var(--muted); }
+  .hero .cap { margin-left: auto; font-size: 12.5px; color: var(--faint); font-weight: 600; }
+  .freshness { font-size: 12.5px; color: var(--muted); margin: 8px 0 2px; min-height: 1.2em; }
+  .freshness.stale { color: var(--warn); font-weight: 600; }
+
+  .spark { width: 100%; height: 68px; display: block; margin: 10px 0 16px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 14px 16px; }
+  .stat .k { color: var(--faint); font-size: 11.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+  .stat .v { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .stat .v.import { color: var(--solarman); }
+  .stat .v.export { color: var(--ok); }
+
+  .batt { display: flex; align-items: center; gap: 14px; margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--line); }
+  .ring { width: 54px; height: 54px; flex: none; }
+  .ring circle { fill: none; stroke-width: 6.5; }
+  .ring .track { stroke: var(--surface-2); }
   .ring .fill { stroke: var(--ok); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
-  .ring text { font-size: 13px; font-weight: 650; fill: var(--ink); }
-  .batt .k { color: var(--muted); font-size: 12px; }
-  .batt .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ring text { font-size: 14px; font-weight: 800; fill: var(--ink); font-family: var(--font); }
+  .batt .k { color: var(--faint); font-size: 11.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+  .batt .v { font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px; }
 
-  section.chart { margin-top: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
-  section.chart h2 { font-size: 14px; margin: 0 0 8px; font-weight: 600; color: var(--muted); }
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-  .legend i { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
-  .combined { width: 100%; height: 220px; display: block; }
-  .axis { fill: var(--muted); font-size: 11px; }
-  .grid { stroke: var(--line); stroke-dasharray: 3 4; }
+  /* ---------- chart ---------- */
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
+  .legend i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 7px; }
+  .combined { width: 100%; height: 230px; display: block; }
+  .axis { fill: var(--faint); font-size: 11px; font-family: var(--font); font-weight: 600; }
+  .grid { stroke: var(--line-soft); }
 
-  .blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; align-items: start; }
-  .block { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .block > h3 {
-    margin: 0; padding: 12px 16px; font-size: 12px; font-weight: 600; color: var(--muted);
-    text-transform: uppercase; letter-spacing: .07em; border-bottom: 1px solid var(--line); background: var(--soft);
-  }
-  .block .body { padding: 14px 16px 16px; }
-  .kv { display: grid; grid-template-columns: minmax(92px, auto) 1fr; gap: 7px 16px; font-size: 14px; margin: 0; }
-  .kv dt { color: var(--muted); }
-  .kv dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-  .kv dd.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  /* ---------- flow ---------- */
+  .flow { width: 100%; height: auto; display: block; }
+  .flow .wire { fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: round; }
+  .flow .wire.live { stroke: var(--accent); }
+  .flow .pip { fill: var(--accent); }
+  .flow .nodebg { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
+  .flow .nodebg.live { stroke: var(--accent); }
+  .flow .house { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.5; }
+  .flow .glyph { font-size: 26px; }
+  .flow .glyph.big { font-size: 34px; }
+  .flow .lbl { fill: var(--faint); font-size: 12.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; font-family: var(--font); }
+  .flow .val { fill: var(--ink); font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; font-family: var(--font); }
+  .flow .sub { fill: var(--faint); font-size: 12px; font-weight: 600; font-family: var(--font); }
+  .flowhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
 
-  .flow { width: 100%; height: auto; display: block; max-height: 460px; }
-  .flow .wire { stroke: var(--line); stroke-width: 2.5; fill: none; }
-  .flow .wire.live { stroke: var(--accent-flow); }
-  .flow .pip { fill: var(--accent-flow); }
-  .flow .nlabel { fill: var(--muted); font-size: 13px; }
-  .flow .nvalue { fill: var(--ink); font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
-  .flow .nsub { fill: var(--faint); font-size: 11.5px; }
-  .flow .glyph { font-size: 30px; }
-  @media (prefers-reduced-motion: reduce) { .flow .pip { display: none; } }
-  .bars { display: flex; flex-direction: column; gap: 9px; }
-  .bar-row { display: grid; grid-template-columns: 62px 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
-  .bar-row .lbl { color: var(--muted); }
-  .bar-track { height: 8px; background: var(--soft); border-radius: 4px; overflow: hidden; }
-  .bar-fill { height: 100%; border-radius: 4px; }
-  .bar-row .num { font-variant-numeric: tabular-nums; font-weight: 600; }
-  .bar-row .sub2 { grid-column: 2 / -1; color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  /* ---------- blocks (detail) ---------- */
+  .blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; align-items: start; }
+  .kv { display: grid; grid-template-columns: minmax(96px, auto) 1fr; gap: 9px 18px; font-size: 14px; margin: 0; }
+  .kv dt { color: var(--muted); font-weight: 500; }
+  .kv dd { margin: 0; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .kv dd.mono { font-family: var(--mono); font-size: 12.5px; font-weight: 500; }
 
+  .bars { display: flex; flex-direction: column; gap: 12px; }
+  .bar-row { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; font-size: 13px; }
+  .bar-row .lbl { color: var(--muted); font-weight: 600; }
+  .bar-track { height: 9px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 999px; }
+  .bar-row .num { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .bar-row .sub2 { grid-column: 2 / -1; color: var(--faint); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ---------- devices ---------- */
+  .tablewrap { overflow-x: auto; }
   table.devices { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.devices th {
     text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
-    color: var(--muted); font-weight: 600; padding: 12px 12px 8px; border-bottom: 1px solid var(--line);
+    color: var(--faint); font-weight: 700; padding: 14px 14px 10px; border-bottom: 1px solid var(--line);
+    white-space: nowrap;
   }
-  table.devices td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+  table.devices td { padding: 13px 14px; border-bottom: 1px solid var(--line-soft); vertical-align: top; font-variant-numeric: tabular-nums; }
   table.devices tr:last-child td { border-bottom: none; }
-  table.devices td.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; }
-  .tablewrap { overflow-x: auto; }
+  table.devices td.mono { font-family: var(--mono); font-size: 12.5px; }
+  .dev-name { font-weight: 700; }
+  .dev-meta { color: var(--muted); font-size: 12.5px; }
 
-  details.raw { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
-  details.raw summary { padding: 12px 16px; cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 500; }
+  details.raw { margin-top: 16px; }
+  details.raw summary { padding: 15px 20px; cursor: pointer; font-size: 13px; color: var(--muted); font-weight: 650; list-style: none; }
+  details.raw summary::-webkit-details-marker { display: none; }
+  details.raw summary::before { content: "▸ "; color: var(--faint); }
+  details.raw[open] summary::before { content: "▾ "; }
   details.raw summary:hover { color: var(--ink); }
-  details.raw .body { padding: 0 16px 16px; }
+  details.raw .body { padding: 0 20px 20px; }
   details.raw input {
-    width: 100%; padding: 8px 10px; margin-bottom: 10px; font: inherit; font-size: 13px;
-    background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 7px;
+    width: 100%; padding: 10px 12px; margin-bottom: 12px; font: inherit; font-size: 13.5px;
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-sm);
   }
   .rawgrid {
-    display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: 4px 16px;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px;
-    max-height: 340px; overflow: auto;
+    display: grid; grid-template-columns: minmax(130px, max-content) 1fr; gap: 5px 18px;
+    font-family: var(--mono); font-size: 12.5px; max-height: 360px; overflow: auto;
   }
   .rawgrid .rk { color: var(--muted); }
   .rawgrid .rv { overflow-wrap: anywhere; }
 
-  footer { margin-top: 18px; color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
-  .empty { padding: 48px 24px; text-align: center; color: var(--muted); }
-  .empty code { background: var(--soft); padding: 2px 6px; border-radius: 6px; }
+  footer { margin-top: 26px; color: var(--faint); font-size: 12.5px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .empty { padding: 56px 24px; text-align: center; color: var(--muted); }
+  .empty code { background: var(--surface-2); padding: 3px 8px; border-radius: 7px; font-family: var(--mono); font-size: 12.5px; }
+  .stack { display: flex; flex-direction: column; gap: 18px; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>SolarLens <span>· both inverters, one screen</span></h1>
+<div class="topbar">
+  <div class="inner">
+    <div class="brand"><span class="mark"></span>SolarLens</div>
     <div class="fleet">
-      <div class="big" id="fleet-power">—</div>
-      <div class="sub" id="fleet-today">—</div>
-      <div class="sub" id="updated">loading…</div>
+      <span class="num" id="fleet-power">—</span>
+      <span class="sep"></span>
+      <span class="sub" id="fleet-today"></span>
     </div>
-  </header>
+    <span class="livedot" id="updated"><i></i>loading…</span>
+  </div>
+  <div class="inner" style="padding-top:0">
+    <nav id="nav">
+      <a href="#/">Overview</a>
+      <a href="#/flow">Energy flow</a>
+      <a href="#/devices">Devices</a>
+    </nav>
+  </div>
+</div>
 
-  <nav id="nav">
-    <a href="#/">Overview</a>
-    <a href="#/devices">Devices</a>
-  </nav>
-
+<div class="wrap">
   <main id="view"><div class="empty">Loading…</div></main>
-
   <footer>
     <span id="poll-status">—</span>
-    <span id="auth-note"></span>
   </footer>
 </div>
 
@@ -246,14 +328,13 @@
     return r.json();
   }
 
-  // The two vendors report link quality on different scales: SolisCloud gives
-  // dBm (negative, closer to 0 is stronger), SolarMan gives a 0-100 percent.
-  // Rendering one as the other would be nonsense, so each keeps its own units.
+  // The two vendors report link quality on different scales: SolisCloud in dBm
+  // (negative, closer to 0 is stronger), SolarMan as a 0-100 percent.
   const band = (q) => q >= 75 ? 'strong' : q >= 50 ? 'good' : q >= 25 ? 'weak' : 'very weak';
   const signalLabel = (d) => {
     if (!d) return '—';
-    if (d.signal_dbm !== null && d.signal_dbm !== undefined) return `${d.signal_dbm} dBm · ${band((d.signal_dbm + 100) * 2)}`;
-    if (d.signal_pct !== null && d.signal_pct !== undefined) return `${Math.round(d.signal_pct)}% · ${band(d.signal_pct)}`;
+    if (d.signal_dbm != null) return `${d.signal_dbm} dBm · ${band((d.signal_dbm + 100) * 2)}`;
+    if (d.signal_pct != null) return `${Math.round(d.signal_pct)}% · ${band(d.signal_pct)}`;
     return '—';
   };
 
@@ -261,8 +342,8 @@
   const devicesFor = (inv) => state.devices.filter(
     (d) => d.provider === inv.provider && (!d.plant_id || d.plant_id === plantIdOf(inv)));
 
-  // A hybrid has a battery; an on-grid inverter does not, so the block is hidden
-  // rather than rendered as a row of dashes.
+  // A hybrid has a battery; an on-grid inverter does not, so its arm and card
+  // are omitted rather than drawn as a row of dashes.
   const hasBattery = (inv, m) =>
     (inv.battery_soc !== null && inv.battery_soc !== undefined) ||
     !!(m && (m.battChargeTotalKwh || m.battDischargeTotalKwh || m.batteryStatus));
@@ -277,17 +358,24 @@
     };
   }
 
+  const gridText = (v) => v === null || v === undefined ? '—'
+    : v >= 0 ? `↓ ${fmtWs(v)}` : `↑ ${fmtWs(-v)}`;
+  // A few tens of watts either way is BMS/meter drift, not real charge or
+  // discharge - SolarMan reports the same reading as batteryStatus "STATIC".
+  const battText = (v) => v === null || v === undefined ? '—'
+    : Math.abs(v) < 50 ? 'idle' : v >= 0 ? `charging ${fmtWs(v)}` : `discharging ${fmtWs(-v)}`;
+
   function ring(soc) {
-    const r = 22, c = 2 * Math.PI * r, off = c * (1 - Math.min(100, Math.max(0, soc)) / 100);
-    return `<svg class="ring" viewBox="0 0 56 56" aria-hidden="true">
-      <circle class="track" cx="28" cy="28" r="${r}"/>
-      <circle class="fill" cx="28" cy="28" r="${r}" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
-      <text x="28" y="32" text-anchor="middle">${Math.round(soc)}%</text>
+    const r = 21, c = 2 * Math.PI * r, off = c * (1 - Math.min(100, Math.max(0, soc)) / 100);
+    return `<svg class="ring" viewBox="0 0 54 54" aria-hidden="true">
+      <circle class="track" cx="27" cy="27" r="${r}"/>
+      <circle class="fill" cx="27" cy="27" r="${r}" stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
+      <text x="27" y="32" text-anchor="middle">${Math.round(soc)}%</text>
     </svg>`;
   }
 
   function sparkline(points, color) {
-    const W = 300, H = 64, P = 2;
+    const W = 300, H = 68, P = 3;
     if (points.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"></svg>`;
     const t0 = startOfToday(), t1 = t0 + 86400;
     const max = Math.max(1, ...points.map((p) => p.ac_power_w || 0));
@@ -296,44 +384,139 @@
     const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.ac_power_w).toFixed(1)}`).join(' ');
     const last = points[points.length - 1];
     const area = `${d} L${x(last.ts).toFixed(1)},${H - P} L${x(points[0].ts).toFixed(1)},${H - P} Z`;
+    const id = 'g' + Math.random().toString(36).slice(2, 8);
     return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
-      <path d="${area}" fill="${color}" opacity="0.12"/>
-      <path d="${d}" fill="none" stroke="${color}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+      <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity=".28"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#${id})"/>
+      <path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      <circle cx="${x(last.ts).toFixed(1)}" cy="${y(last.ac_power_w).toFixed(1)}" r="3" fill="${color}"/>
     </svg>`;
   }
 
-  const gridText = (v) => v === null || v === undefined ? '—'
-    : v >= 0 ? `↓ ${fmtWs(v)} import` : `↑ ${fmtWs(-v)} export`;
-  // A few tens of watts either way is BMS/meter drift, not real charge or
-  // discharge — SolarMan reports the same reading as batteryStatus "STATIC".
-  const battText = (v) => v === null || v === undefined ? '—'
-    : Math.abs(v) < 50 ? 'idle' : v >= 0 ? `charging ${fmtWs(v)}` : `discharging ${fmtWs(-v)}`;
+  // ---------- energy flow ----------
+  /**
+   * Each arm is drawn only when the system has it, and the direction of travel
+   * comes from the sign of the figure:
+   *   grid    + import  -> grid feeds the house;   - export -> house feeds grid
+   *   battery + charge  -> house feeds battery;    - discharge -> battery feeds house
+   * An arm carrying no power is drawn in the neutral line colour with no pip,
+   * so "nothing is flowing" reads differently from "this arm does not exist".
+   */
+  function flowSvg(inv, m) {
+    const W = 1000, H = 520, CX = 500, CY = 260;
+    const battery = hasBattery(inv, m);
+    const accent = colorFor(inv.provider);
+
+    // With no battery there is nothing in the bottom-left, so production moves
+    // to the middle of the left column instead of leaving a hole.
+    const nodes = [
+      { key: 'pv', x: 155, y: battery ? 128 : CY, glyph: '☀️', label: 'Production',
+        value: inv.ac_power_w, toHouse: true, side: -1 },
+      { key: 'grid', x: 845, y: 128, glyph: '⚡', label: 'Grid',
+        value: inv.grid_power_w, toHouse: (inv.grid_power_w ?? 0) >= 0, side: 1,
+        sub: (inv.grid_power_w ?? 0) >= 0 ? 'importing' : 'exporting' },
+      battery ? { key: 'batt', x: 155, y: 392, glyph: '🔋',
+        label: `Battery${inv.battery_soc != null ? ' ' + Math.round(inv.battery_soc) + '%' : ''}`,
+        value: inv.battery_power_w, toHouse: (inv.battery_power_w ?? 0) < 0, side: -1,
+        sub: battText(inv.battery_power_w) } : null,
+      { key: 'load', x: 845, y: 392, glyph: '🏠', label: 'Consumption',
+        value: inv.load_power_w, toHouse: false, side: 1 },
+    ].filter(Boolean);
+
+    let out = `<defs>
+      <marker id="a-off" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>
+      <marker id="a-on" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="${accent}"/></marker>
+    </defs>`;
+
+    for (const n of nodes) {
+      const w = Math.abs(n.value ?? 0);
+      const live = w >= 1;
+      // side is -1 for the left column, +1 for the right, so the elbow and the
+      // house-side end both sit on the node's own side of the centre.
+      const nx = n.x - n.side * 52;
+      const elbow = CX + n.side * 175;
+      const hx = CX + n.side * 78;
+      const d = n.y === CY
+        ? `M${nx},${CY} H${hx}`
+        : `M${nx},${n.y} H${elbow} V${CY} H${hx}`;
+      const rev = !n.toHouse;
+      out += `<path class="wire${live ? ' live' : ''}" d="${d}" marker-${rev ? 'start' : 'end'}="url(#${live ? 'a-on' : 'a-off'})"/>`;
+      if (live) {
+        out += `<circle class="pip" r="5.5"><animateMotion dur="2.6s" repeatCount="indefinite" keyPoints="${rev ? '1;0' : '0;1'}" keyTimes="0;1" calcMode="linear" path="${d}"/></circle>`;
+      }
+      out += `<circle class="nodebg${live ? ' live' : ''}" cx="${n.x}" cy="${n.y}" r="40"/>`;
+      out += `<text class="glyph" x="${n.x}" y="${n.y + 10}" text-anchor="middle">${n.glyph}</text>`;
+
+      const anchor = n.side < 0 ? 'start' : 'end';
+      const tx = n.side < 0 ? n.x - 56 : n.x + 56;
+      const ly = n.y < CY ? n.y - 62 : n.y + 60;
+      out += `<text class="lbl" x="${tx}" y="${ly}" text-anchor="${anchor}">${esc(n.label)}</text>`;
+      out += `<text class="val" x="${tx}" y="${ly + 25}" text-anchor="${anchor}">${n.value == null ? '—' : fmtWs(w)}</text>`;
+      if (n.sub) out += `<text class="sub" x="${tx}" y="${ly + 44}" text-anchor="${anchor}">${esc(n.sub)}</text>`;
+    }
+    out += `<circle class="house" cx="${CX}" cy="${CY}" r="56"/>`;
+    out += `<text class="glyph big" x="${CX}" y="${CY + 13}" text-anchor="middle">🏡</text>`;
+
+    return `<svg class="flow" viewBox="0 0 ${W} ${H}" style="--accent:${accent}" role="img"
+      aria-label="Energy flow for ${esc(inv.name)}">${out}</svg>`;
+  }
+
+  function flowCard(inv) {
+    const m = parse(inv.metrics) ?? {};
+    const st = statusOf(inv);
+    return `<section class="card">
+      <div class="body">
+        <div class="flowhead">
+          <div>
+            <div class="vendor" style="--accent:${colorFor(inv.provider)};color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</div>
+            <div class="sys-name">${esc(inv.name)}</div>
+          </div>
+          <span class="pill ${st.cls}"><i></i>${esc(st.text)}${inv.ts ? ' · ' + ago(inv.ts) : ''}</span>
+        </div>
+        ${flowSvg(inv, m)}
+      </div>
+    </section>`;
+  }
+
+  function renderFlow() {
+    const invs = state.latest?.inverters ?? [];
+    $('view').innerHTML = invs.length
+      ? `<div class="stack">${invs.map(flowCard).join('')}</div>`
+      : `<div class="card"><div class="empty">No systems yet.</div></div>`;
+  }
 
   // ---------- overview ----------
-  function panelHtml(inv, pts) {
+  function sysCard(inv, pts) {
     const st = statusOf(inv);
     const [pv, pu] = fmtW(inv.ac_power_w);
     const m = parse(inv.metrics);
-    return `<a class="panel" href="#/system/${encodeURIComponent(inv.id)}">
-      <div class="panel-head">
-        <div class="who">
-          <div class="provider ${esc(inv.provider)}">${esc(providerName(inv.provider))}</div>
-          <div class="name">${esc(inv.name)}</div>
-          <div class="plant">${esc(inv.plant_name && inv.plant_name !== inv.name ? inv.plant_name : '')}</div>
+    const accent = colorFor(inv.provider);
+    const g = inv.grid_power_w;
+    return `<a class="sys" style="--accent:${accent}" href="#/system/${encodeURIComponent(inv.id)}">
+      <div class="sys-head">
+        <div>
+          <div class="vendor">${esc(providerName(inv.provider))}</div>
+          <div class="sys-name">${esc(inv.name)}</div>
+          <div class="sys-plant">${esc(inv.plant_name && inv.plant_name !== inv.name ? inv.plant_name : '')}</div>
         </div>
-        <span class="badge ${st.cls}"><span class="dot"></span>${esc(st.text)}</span>
+        <span class="pill ${st.cls}"><i></i>${esc(st.text)}</span>
       </div>
       <div class="hero">
         <span class="val">${pv}</span><span class="unit">${pu}</span>
         <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)}` : ''}</span>
       </div>
-      <div class="stale">${inv.ts ? (st.stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}${inv.source && inv.source !== inv.provider ? ` via ${esc(inv.source)}` : ''}`) : ''}</div>
-      ${sparkline(pts, colorFor(inv.provider))}
+      <div class="freshness ${st.stale ? 'stale' : ''}">${inv.ts ? (st.stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}`) : ''}</div>
+      ${sparkline(pts, accent)}
       <div class="stats">
         <div class="stat"><div class="k">Today</div><div class="v">${fmtKwh(inv.today_kwh)}</div></div>
         <div class="stat"><div class="k">Lifetime</div><div class="v">${fmtKwh(inv.total_kwh)}</div></div>
         <div class="stat"><div class="k">Load</div><div class="v">${fmtWs(inv.load_power_w)}</div></div>
-        <div class="stat"><div class="k">Grid</div><div class="v ${inv.grid_power_w > 0 ? 'neg' : inv.grid_power_w < 0 ? 'pos' : ''}">${gridText(inv.grid_power_w)}</div></div>
+        <div class="stat"><div class="k">Grid</div><div class="v ${g > 0 ? 'import' : g < 0 ? 'export' : ''}">${gridText(g)}</div></div>
       </div>
       ${hasBattery(inv, m) ? `<div class="batt">${ring(inv.battery_soc ?? 0)}
         <div><div class="k">Battery</div><div class="v">${battText(inv.battery_power_w)}</div></div></div>` : ''}
@@ -341,7 +524,7 @@
   }
 
   function combinedChart(svg, byInv, invs) {
-    const W = 1000, H = 220, L = 44, R = 10, T = 12, B = 24;
+    const W = 1000, H = 230, L = 46, R = 12, T = 14, B = 26;
     const t0 = startOfToday(), t1 = t0 + 86400;
     const all = Object.values(byInv).flat();
     if (!all.length) { svg.innerHTML = `<text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">No samples yet today</text>`; return []; }
@@ -360,7 +543,7 @@
     for (let i = 0; i <= 4; i++) {
       const v = (max / 4) * i, yy = y(v);
       out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" vector-effect="non-scaling-stroke"/>`;
-      out += `<text class="axis" x="${L - 6}" y="${yy + 4}" text-anchor="end">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>`;
+      out += `<text class="axis" x="${L - 8}" y="${yy + 4}" text-anchor="end">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>`;
     }
     for (let h = 0; h <= 24; h += 6) {
       const xx = x(t0 + h * 3600);
@@ -371,12 +554,12 @@
       const pts = byInv[inv.id] || [];
       if (pts.length < 2) continue;
       const c = colorFor(inv.provider);
-      out += `<path d="${line(pts)}" fill="none" stroke="${c}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+      out += `<path d="${line(pts)}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
       legend.push(`<span><i style="background:${c}"></i>${esc(inv.name)}</span>`);
     }
     if (invs.length > 1 && totalPts.length > 1) {
-      out += `<path d="${line(totalPts)}" fill="none" stroke="var(--total)" stroke-width="1.4" stroke-dasharray="4 3" opacity="0.8" vector-effect="non-scaling-stroke"/>`;
-      legend.push(`<span><i style="background:var(--total);opacity:.8"></i>Fleet total</span>`);
+      out += `<path d="${line(totalPts)}" fill="none" stroke="var(--total)" stroke-width="1.6" stroke-dasharray="5 4" opacity="0.75" vector-effect="non-scaling-stroke"/>`;
+      legend.push(`<span><i style="background:var(--total);opacity:.75"></i>Fleet total</span>`);
     }
     svg.innerHTML = out;
     return legend;
@@ -386,28 +569,30 @@
     const invs = state.latest?.inverters ?? [];
     const byInv = {};
     for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
-    const panels = invs.length
-      ? invs.map((inv) => panelHtml(inv, byInv[inv.id] || [])).join('')
-      : `<div class="empty">No inverters yet. Trigger a poll with <code>POST /api/poll</code> or wait for the next cron run.</div>`;
-    $('view').innerHTML = `<div class="panels">${panels}</div>
-      <section class="chart"><h2>Today · AC output</h2><div class="legend" id="legend"></div>
-        <svg class="combined" id="combined" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg></section>`;
+    const cards = invs.length
+      ? invs.map((inv) => sysCard(inv, byInv[inv.id] || [])).join('')
+      : `<div class="card"><div class="empty">No inverters yet. Trigger a poll with <code>POST /api/poll</code> or wait for the next cron run.</div></div>`;
+    $('view').innerHTML = `<div class="sysgrid">${cards}</div>
+      <section class="card" style="margin-top:18px"><h2>Today · AC output</h2><div class="body">
+        <div class="legend" id="legend"></div>
+        <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
+      </div></section>`;
     $('legend').innerHTML = combinedChart($('combined'), byInv, invs).join('');
   }
 
   // ---------- devices ----------
   function renderDevices() {
     if (!state.devices.length) {
-      $('view').innerHTML = `<div class="empty">No hardware recorded yet. The relay agent fills this in — run <code>npm run relay:solis</code>.</div>`;
+      $('view').innerHTML = `<div class="card"><div class="empty">No hardware recorded yet. The relay agent fills this in — run <code>npm run relay:solis</code>.</div></div>`;
       return;
     }
     const row = (d) => {
       const cls = d.status === 'online' ? 'ok' : d.status === 'alarm' ? 'bad' : 'warn';
       const strings = parse(d.strings);
       return `<tr>
-        <td><span class="badge ${cls}"><span class="dot"></span>${esc(d.status ?? 'unknown')}</span></td>
-        <td><div style="font-weight:600">${esc(d.name || d.kind)}</div>
-            <div style="color:var(--muted);font-size:12.5px">${esc(providerName(d.provider))} · ${esc(d.kind)}</div></td>
+        <td><span class="pill ${cls}"><i></i>${esc(d.status ?? 'unknown')}</span></td>
+        <td><div class="dev-name">${esc(d.name || d.kind)}</div>
+            <div class="dev-meta">${esc(providerName(d.provider))} · ${esc(d.kind)}</div></td>
         <td class="mono">${esc(d.sn ?? '—')}</td>
         <td>${esc(d.model ?? '—')}</td>
         <td class="mono">${esc(d.firmware ?? '—')}</td>
@@ -417,106 +602,41 @@
         <td>${d.temp_c != null ? `${d.temp_c} °C` : '—'}</td>
       </tr>`;
     };
-    $('view').innerHTML = `<div class="block"><h3>Hardware</h3><div class="tablewrap">
+    $('view').innerHTML = `<section class="card"><h2>Hardware</h2><div class="tablewrap">
       <table class="devices">
         <thead><tr><th>Status</th><th>Device</th><th>Serial</th><th>Model</th><th>Firmware</th>
           <th>Rated / signal</th><th>Last contact</th><th>PV strings</th><th>Temp</th></tr></thead>
         <tbody>${state.devices.map(row).join('')}</tbody>
-      </table></div></div>`;
+      </table></div></section>`;
   }
 
   // ---------- system detail ----------
-  function kvBlock(title, rows) {
+  function kvCard(title, rows) {
     const body = rows.filter(Boolean).map(([k, v, mono]) => `<dt>${esc(k)}</dt><dd class="${mono ? 'mono' : ''}">${v}</dd>`).join('');
-    return body ? `<div class="block"><h3>${esc(title)}</h3><div class="body"><dl class="kv">${body}</dl></div></div>` : '';
+    return body ? `<section class="card"><h3>${esc(title)}</h3><div class="body"><dl class="kv">${body}</dl></div></section>` : '';
   }
 
-  function stringsBlock(invDev, accent) {
-    // strings === null means the vendor reports no per-string registers at all
-    // (SolarMan); an empty array means it does, but none are producing (Solis
-    // at night). Only the second case deserves a block.
+  function stringsCard(invDev, accent) {
+    // strings === null means the vendor reports no per-string registers at all;
+    // an empty array means it does, but none are producing (night). Only the
+    // second case deserves a card.
     if (!invDev || invDev.strings === null || invDev.strings === undefined) return '';
     const strings = parse(invDev.strings);
     const body = !strings || !strings.length
       ? `<p style="margin:0;color:var(--muted);font-size:13.5px">No string is producing in the latest sample.</p>`
       : (() => {
-          const max = Math.max(...strings.map((s) => s.powerW));
+          const max = Math.max(...strings.map((s) => s.powerW), 1);
           return `<div class="bars">${strings.map((s) => `<div class="bar-row">
             <span class="lbl">String ${s.index}</span>
             <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, (s.powerW / max) * 100).toFixed(1)}%;background:${accent}"></span></span>
             <span class="num">${fmtWs(s.powerW)}</span>
-            ${s.voltageV != null || s.currentA != null ? `<span class="sub2">${s.voltageV != null ? `${s.voltageV} V` : ""}${s.voltageV != null && s.currentA != null ? " · " : ""}${s.currentA != null ? `${s.currentA} A` : ""}</span>` : ""}
+            ${s.voltageV != null || s.currentA != null ? `<span class="sub2">${s.voltageV != null ? `${s.voltageV} V` : ''}${s.voltageV != null && s.currentA != null ? ' · ' : ''}${s.currentA != null ? `${s.currentA} A` : ''}</span>` : ''}
             </div>`).join('')}</div>`;
         })();
-    return `<div class="block"><h3>PV strings · MPPT</h3><div class="body">${body}</div></div>`;
+    return `<section class="card"><h3>PV strings · MPPT</h3><div class="body">${body}</div></section>`;
   }
 
-  /**
-   * Energy-flow diagram. Each arm is drawn only when the system actually has
-   * it, and the direction of travel comes from the sign of the figure:
-   *   grid    + import  -> grid feeds the house;  - export -> house feeds grid
-   *   battery + charge  -> house feeds battery;   - discharge -> battery feeds house
-   * An arm carrying no power is drawn in the neutral line colour with no pips,
-   * so "nothing is flowing" reads differently from "this arm does not exist".
-   */
-  function flowDiagram(inv, m) {
-    const W = 1000, H = 520, CX = 500, CY = 260;
-    const battery = hasBattery(inv, m);
-    const accent = colorFor(inv.provider);
-
-    // corner, elbow-x, and which way the wire runs when power is positive
-    const nodes = [
-      { key: 'pv', x: 120, y: 120, glyph: '\u2600\uFE0F', label: 'Production',
-        value: inv.ac_power_w, toHouse: true, side: -1 },
-      { key: 'grid', x: 880, y: 120, glyph: '\u26A1', label: 'Grid',
-        value: inv.grid_power_w, toHouse: (inv.grid_power_w ?? 0) >= 0, side: 1,
-        sub: (inv.grid_power_w ?? 0) >= 0 ? 'importing' : 'exporting' },
-      battery ? { key: 'batt', x: 120, y: 420, glyph: '\uD83D\uDD0B', label: `Battery ${inv.battery_soc != null ? Math.round(inv.battery_soc) + '%' : ''}`.trim(),
-        value: inv.battery_power_w, toHouse: (inv.battery_power_w ?? 0) < 0, side: -1,
-        sub: battText(inv.battery_power_w) } : null,
-      { key: 'load', x: 880, y: 420, glyph: '\uD83C\uDFE0', label: 'Consumption',
-        value: inv.load_power_w, toHouse: false, side: 1 },
-    ].filter(Boolean);
-
-    let out = `<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>`;
-    out += `<marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${accent}"/></marker></defs>`;
-
-    for (const n of nodes) {
-      const w = Math.abs(n.value ?? 0);
-      const live = w >= 1;
-      // elbow: out from the node, then vertically to the house row, then in
-      // side is -1 for the left column, +1 for the right, so the elbow and the
-      // house-side end both sit on the node's own side of the centre.
-      const nx = n.x - n.side * 70;               // wire start, beside the glyph
-      const elbow = CX + n.side * 180;
-      const hx = CX + n.side * 70;                // wire end, beside the house
-      const d = `M${nx},${n.y} H${elbow} V${CY} H${hx}`;
-      // A path is drawn from source to sink so the arrowhead lands correctly.
-      const rev = !n.toHouse;
-      const marker = live ? (rev ? 'ahl' : 'ahl') : 'ah';
-      out += `<path class="wire${live ? ' live' : ''}" d="${d}" marker-${rev ? 'start' : 'end'}="url(#${marker})"/>`;
-      if (live) {
-        // one travelling pip; direction flips by reversing the keyframes
-        out += `<circle class="pip" r="5"><animateMotion dur="2.4s" repeatCount="indefinite" keyPoints="${rev ? '1;0' : '0;1'}" keyTimes="0;1" calcMode="linear" path="${d}"/></circle>`;
-      }
-      const anchor = n.side < 0 ? 'start' : 'end';
-      const tx = n.side < 0 ? n.x - 70 : n.x + 70;
-      const above = n.y < CY;
-      const ly = above ? n.y - 78 : n.y + 60;
-      out += `<text class="nlabel" x="${tx}" y="${ly}" text-anchor="${anchor}">${esc(n.label)}</text>`;
-      out += `<text class="nvalue" x="${tx}" y="${ly + 22}" text-anchor="${anchor}">${n.value == null ? '\u2014' : fmtWs(w)}</text>`;
-      if (n.sub) out += `<text class="nsub" x="${tx}" y="${ly + 40}" text-anchor="${anchor}">${esc(n.sub)}</text>`;
-      out += `<text class="glyph" x="${n.x}" y="${n.y + 11}" text-anchor="middle">${n.glyph}</text>`;
-    }
-    out += `<text class="glyph" style="font-size:44px" x="${CX}" y="${CY + 16}" text-anchor="middle">\uD83C\uDFE1</text>`;
-
-    return `<div class="block" style="--accent-flow:${accent}"><h3>Energy flow</h3><div class="body">
-      <svg class="flow" viewBox="0 0 ${W} ${H}" role="img" aria-label="Energy flow between production, grid, battery and consumption">${out}</svg>
-    </div></div>`;
-  }
-
-  /** Per-phase AC, grid frequency and power factor - inverter detail only. */
-  function acBlock(invDev) {
+  function acCard(invDev) {
     if (!invDev) return '';
     const phases = parse(invDev.ac_phases);
     const extras = [
@@ -529,21 +649,20 @@
       [p.voltageV != null ? `${p.voltageV} V` : null, p.currentA != null ? `${p.currentA} A` : null].filter(Boolean).join(' · ') || '—'
     }</dd>`).join('');
     const tail = extras.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
-    return `<div class="block"><h3>AC output · per phase</h3><div class="body">
-      <dl class="kv">${rows}${tail}</dl></div></div>`;
+    return `<section class="card"><h3>AC output · per phase</h3><div class="body">
+      <dl class="kv">${rows}${tail}</dl></div></section>`;
   }
 
-  function rawBlock(inv) {
+  function rawCard(inv) {
     const raw = parse(inv.raw);
     if (!raw || typeof raw !== 'object') return '';
-    const rows = Object.entries(raw)
-      .filter(([, v]) => v === null || typeof v !== 'object')
-      .map(([k, v]) => {
-        const key = esc(k.toLowerCase());
-        return `<div class="rk" data-k="${key}">${esc(k)}</div><div class="rv" data-k="${key}">${esc(v === null ? 'null' : String(v))}</div>`;
-      });
-    if (!rows.length) return '';
-    return `<details class="raw"><summary>Raw telemetry · ${rows.length / 2 | 0} fields from ${esc(inv.source ?? inv.provider)}</summary>
+    const entries = Object.entries(raw).filter(([, v]) => v === null || typeof v !== 'object');
+    if (!entries.length) return '';
+    const rows = entries.map(([k, v]) => {
+      const key = esc(k.toLowerCase());
+      return `<div class="rk" data-k="${key}">${esc(k)}</div><div class="rv" data-k="${key}">${esc(v === null ? 'null' : String(v))}</div>`;
+    });
+    return `<details class="raw card"><summary>Raw telemetry · ${entries.length} fields from ${esc(inv.source ?? inv.provider)}</summary>
       <div class="body">
         <input type="search" id="rawfilter" placeholder="Filter fields…" aria-label="Filter raw telemetry fields">
         <div class="rawgrid" id="rawgrid">${rows.join('')}</div>
@@ -552,7 +671,7 @@
 
   function renderSystem(id) {
     const inv = (state.latest?.inverters ?? []).find((i) => i.id === id);
-    if (!inv) { $('view').innerHTML = `<a class="back" href="#/">← Overview</a><div class="empty">Unknown system.</div>`; return; }
+    if (!inv) { $('view').innerHTML = `<a class="back" href="#/">← Overview</a><div class="card"><div class="empty">Unknown system.</div></div>`; return; }
     const m = parse(inv.metrics) ?? {};
     const st = statusOf(inv);
     const devs = devicesFor(inv);
@@ -563,7 +682,7 @@
     // Temperature is per-device telemetry, so the station snapshot rarely has it.
     const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
 
-    const identity = kvBlock('Identity & hardware', [
+    const identity = kvCard('Identity & hardware', [
       ['System', esc(inv.name)],
       inv.plant_name && inv.plant_name !== inv.name ? ['Plant', esc(inv.plant_name)] : null,
       ['Feed', esc(inv.source ?? providerName(inv.provider))],
@@ -575,8 +694,8 @@
       invDev?.warranty_until ? ['Warranty to', esc(fmtDate(invDev.warranty_until))] : null,
     ]);
 
-    const link = logger ? kvBlock('Datalogger & link', [
-      ['Status', `<span class="badge ${logger.status === 'online' ? 'ok' : 'warn'}"><span class="dot"></span>${esc(logger.status ?? 'unknown')}</span>`],
+    const link = logger ? kvCard('Datalogger & link', [
+      ['Status', `<span class="pill ${logger.status === 'online' ? 'ok' : 'warn'}"><i></i>${esc(logger.status ?? 'unknown')}</span>`],
       logger.sn ? ['Serial', esc(logger.sn), true] : null,
       logger.model ? ['Model', esc(logger.model)] : null,
       logger.firmware ? ['Firmware', esc(logger.firmware), true] : null,
@@ -585,15 +704,15 @@
       ['Last contact', esc(logger.last_seen ? ago(logger.last_seen) : '—')],
     ]) : '';
 
-    const live = kvBlock('Live power', [
+    const live = kvCard('Live power', [
       ['AC output', fmtWs(inv.ac_power_w)],
-      inv.dc_power_w !== null && inv.dc_power_w !== undefined ? ['DC input', fmtWs(inv.dc_power_w)] : null,
+      inv.dc_power_w != null ? ['DC input', fmtWs(inv.dc_power_w)] : null,
       ['House load', fmtWs(inv.load_power_w)],
-      ['Grid', gridText(inv.grid_power_w)],
+      ['Grid', inv.grid_power_w == null ? '—' : (inv.grid_power_w >= 0 ? `↓ ${fmtWs(inv.grid_power_w)} import` : `↑ ${fmtWs(-inv.grid_power_w)} export`)],
       ['Sample', esc(inv.ts ? ago(inv.ts) : 'never')],
     ]);
 
-    const counters = kvBlock('Energy counters', [
+    const counters = kvCard('Energy counters', [
       ['Today', fmtKwh(inv.today_kwh)],
       m.genMonthKwh != null ? ['This month', fmtKwh(m.genMonthKwh)] : null,
       m.genYearKwh != null ? ['This year', fmtKwh(m.genYearKwh)] : null,
@@ -605,37 +724,37 @@
       m.gridExportTotalKwh != null ? ['Exported, lifetime', fmtKwh(m.gridExportTotalKwh)] : null,
     ]);
 
-    const battery = hasBattery(inv, m) ? `<div class="block"><h3>Battery</h3><div class="body">
+    const battery = hasBattery(inv, m) ? `<section class="card"><h3>Battery</h3><div class="body">
       <div class="batt" style="margin-top:0;padding-top:0;border-top:none">
         ${ring(inv.battery_soc ?? 0)}
         <div><div class="k">State of charge</div><div class="v">${battText(inv.battery_power_w)}</div></div>
       </div>
-      <dl class="kv" style="margin-top:14px">
+      <dl class="kv" style="margin-top:16px">
         ${m.batteryStatus ? `<dt>Status</dt><dd>${esc(String(m.batteryStatus).toLowerCase())}</dd>` : ''}
         ${m.battChargeTodayKwh != null ? `<dt>Charged today</dt><dd>${fmtKwh(m.battChargeTodayKwh)}</dd>` : ''}
         ${m.battDischargeTodayKwh != null ? `<dt>Discharged today</dt><dd>${fmtKwh(m.battDischargeTodayKwh)}</dd>` : ''}
         ${m.battChargeTotalKwh != null ? `<dt>Charged, lifetime</dt><dd>${fmtKwh(m.battChargeTotalKwh)}</dd>` : ''}
         ${m.battDischargeTotalKwh != null ? `<dt>Discharged, lifetime</dt><dd>${fmtKwh(m.battDischargeTotalKwh)}</dd>` : ''}
-      </dl></div></div>` : '';
+      </dl></div></section>` : '';
 
-    const diagnostics = kvBlock('Status & diagnostics', [
-      ['Reported', `<span class="badge ${st.cls}"><span class="dot"></span>${esc(st.text)}</span>`],
+    const diagnostics = kvCard('Status & diagnostics', [
+      ['Reported', `<span class="pill ${st.cls}"><i></i>${esc(st.text)}</span>`],
       tempC != null ? ['Temperature', `${tempC.toFixed(1)} °C`] : null,
       m.gridStatus ? ['Grid', esc(String(m.gridStatus).toLowerCase())] : null,
       ['Data age', esc(inv.ts ? ago(inv.ts) : 'never')],
     ]);
 
     $('view').innerHTML = `<a class="back" href="#/">← Overview</a>
-      <div class="panel-head" style="margin-bottom:16px">
-        <div class="who">
-          <div class="provider ${esc(inv.provider)}">${esc(providerName(inv.provider))}</div>
-          <div class="name" style="font-size:22px">${esc(inv.name)}</div>
+      <div class="sys-head" style="margin-bottom:18px">
+        <div>
+          <div class="vendor" style="color:${accent}">${esc(providerName(inv.provider))}</div>
+          <div class="sys-name" style="font-size:26px">${esc(inv.name)}</div>
         </div>
-        <div class="hero" style="margin:0"><span class="val" style="font-size:38px">${pv}</span><span class="unit">${pu}</span></div>
+        <div class="hero" style="margin:0"><span class="val" style="font-size:40px">${pv}</span><span class="unit">${pu}</span></div>
       </div>
-      ${flowDiagram(inv, m)}
-      <div class="blocks">${identity}${link}${live}${counters}${stringsBlock(invDev, accent)}${acBlock(invDev)}${battery}${diagnostics}</div>
-      ${rawBlock(inv)}`;
+      <section class="card" style="margin-bottom:16px"><div class="body">${flowSvg(inv, m)}</div></section>
+      <div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent)}${acCard(invDev)}${battery}${diagnostics}</div>
+      ${rawCard(inv)}`;
 
     const filter = $('rawfilter');
     if (filter) filter.addEventListener('input', () => {
@@ -649,13 +768,14 @@
     const hash = location.hash || '#/';
     for (const a of $('nav').children) a.classList.toggle('on', a.getAttribute('href') === hash);
     if (state.error === 'unauthorized') {
-      $('view').innerHTML = `<div class="empty">This dashboard is token-protected. Open <code>/auth?t=&lt;API_TOKEN&gt;</code> once on this device.</div>`;
+      $('view').innerHTML = `<div class="card"><div class="empty">This dashboard is token-protected. Open <code>/auth?t=&lt;API_TOKEN&gt;</code> once on this device.</div></div>`;
       return;
     }
     if (!state.latest) return; // first paint waits for data
     const sys = hash.match(/^#\/system\/(.+)$/);
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
     if (hash === '#/devices') return renderDevices();
+    if (hash === '#/flow') return renderFlow();
     renderOverview();
   }
 
@@ -671,10 +791,13 @@
       state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.error = null;
 
       const withData = lat.inverters.filter((i) => i.ts);
-      $('fleet-power').textContent = withData.length ? fmtWs(withData.reduce((a, i) => a + (i.ac_power_w || 0), 0)) : '—';
+      const [fv, fu] = fmtW(withData.reduce((a, i) => a + (i.ac_power_w || 0), 0));
+      $('fleet-power').innerHTML = withData.length ? `${fv}<span class="unit"> ${fu}</span>` : '—';
       $('fleet-today').textContent = withData.length ? `${fmtKwh(withData.reduce((a, i) => a + (i.today_kwh || 0), 0))} today` : '';
       const newest = Math.max(0, ...withData.map((i) => i.ts));
-      $('updated').textContent = newest ? `newest sample ${ago(newest)}` : 'no samples yet';
+      const stale = !newest || (now - newest) > STALE_AFTER_S;
+      $('updated').className = 'livedot' + (stale ? ' stale' : '');
+      $('updated').innerHTML = `<i></i>${newest ? ago(newest) : 'no samples yet'}`;
 
       if (health && health.polls.length) {
         const p = health.polls[0];
@@ -684,8 +807,8 @@
       route();
     } catch (e) {
       state.error = e.message;
-      if (e.message === 'unauthorized') { $('updated').textContent = 'unauthorized'; route(); }
-      else $('updated').textContent = `error: ${e.message}`;
+      if (e.message === 'unauthorized') { $('updated').innerHTML = '<i></i>unauthorized'; route(); }
+      else $('updated').innerHTML = `<i></i>error: ${esc(e.message)}`;
     }
   }
 
