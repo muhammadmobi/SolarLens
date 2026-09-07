@@ -62,7 +62,7 @@ A single Cloudflare Worker does three jobs:
 1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1.
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
 3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker, with three views:
-   - **Overview** (`#/`) — both systems as cards (stacking on phones), sparklines and a combined day chart.
+   - **Overview** (`#/`) — both systems as cards carrying the full figure set, then the flow diagrams and a separate day curve per system; each block links to its full page.
    - **Flow** (`#/flow`) — a PV / grid / battery / load diagram per system with its full figure set; direction is taken from the sign of each value, and the card opens that system detail. A compact copy also sits on the Overview.
    - **Power** (`#/power`) — the combined day curve, then each system's own curve followed by its full detail set (identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics, raw telemetry).
    - **Devices** (`#/devices`) — hardware inventory: inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.

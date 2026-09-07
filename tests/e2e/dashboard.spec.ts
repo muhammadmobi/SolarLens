@@ -200,8 +200,10 @@ test.describe('Energy flow page', () => {
     await expect(page.locator('svg.flow')).toHaveCount(2);
     const link = page.locator('a.flowlink[href="#/flow"]');
     await expect(link).toBeVisible();
-    // The overview repeats the flow figures, not just the drawing.
-    await expect(link).toContainText('Lifetime');
+    // On the overview the flow block is only the drawing: the figures live in
+    // the system cards above it, so they are not repeated twice on one screen.
+    await expect(link.locator('.flowstats')).toHaveCount(0);
+    await expect(page.locator('a.sys').nth(0).locator('.flowstats')).toBeVisible();
     await link.click();
     await expect(page).toHaveURL(/#\/flow$/);
   });
@@ -239,6 +241,16 @@ test.describe('Energy flow page', () => {
 });
 
 test.describe('AC output page', () => {
+  test('the overview splits the chart per system instead of merging them', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    // Overlapping curves hide each other, so the overview draws one each.
+    await expect(page.locator('.chartmini')).toHaveCount(2);
+    await expect(page.locator('#combined')).toHaveCount(0);
+    await expect(page.locator('.chartmini').nth(0)).toContainText('Demo Solis Plant');
+    await expect(page.locator('.chartmini').nth(1)).toContainText('Demo Hybrid');
+  });
+
   test('has its own nav entry and draws the combined day chart', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
