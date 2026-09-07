@@ -487,16 +487,15 @@
    * explain it, and the whole card opens that system's full detail view - the
    * flow is a summary, not a dead end.
    */
-  function flowCard(inv) {
+  /** The figures that explain a flow diagram; shared by Flow and Overview. */
+  function flowStats(inv) {
     const m = parse(inv.metrics) ?? {};
-    const st = statusOf(inv);
     const devs = devicesFor(inv);
     const invDev = devs.find((d) => d.kind === 'inverter');
     const logger = devs.find((d) => d.kind === 'datalogger');
     const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
     const strings = parse(invDev?.strings);
     const g = inv.grid_power_w;
-
     const stat = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls ?? ''}">${v}</div></div>`;
     const cells = [
       stat('Today', fmtKwh(inv.today_kwh)),
@@ -510,7 +509,12 @@
       invDev?.model ? stat('Model', esc(invDev.model)) : '',
       logger ? stat('Datalogger', esc(signalLabel(logger))) : '',
     ].filter(Boolean).join('');
+    return `<div class="flowstats">${cells}</div>`;
+  }
 
+  function flowCard(inv) {
+    const m = parse(inv.metrics) ?? {};
+    const st = statusOf(inv);
     return `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}"><section class="card">
       <div class="body">
         <div class="flowhead">
@@ -524,7 +528,7 @@
           </div>
         </div>
         ${flowSvg(inv, m)}
-        <div class="flowstats">${cells}</div>
+        ${flowStats(inv)}
       </div>
     </section></a>`;
   }
@@ -536,15 +540,54 @@
       : `<div class="card"><div class="empty">No systems yet.</div></div>`;
   }
 
+  /** One system's own day curve, drawn at chart size rather than sparkline size. */
+  function systemChart(inv, pts, id) {
+    const W = 1000, H = 200, L = 46, R = 12, T = 12, B = 24;
+    const t0 = startOfToday(), t1 = t0 + 86400;
+    const c = colorFor(inv.provider);
+    if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">No samples yet today</text></svg>`;
+    const max = Math.max(200, ...pts.map((p) => p.ac_power_w || 0));
+    const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
+    const y = (v) => T + (1 - (v || 0) / max) * (H - T - B);
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.ac_power_w).toFixed(1)}`).join(' ');
+    const last = pts[pts.length - 1];
+    let out = `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${c}" stop-opacity=".30"/><stop offset="100%" stop-color="${c}" stop-opacity="0"/></linearGradient></defs>`;
+    for (let i = 0; i <= 4; i++) {
+      const v = (max / 4) * i, yy = y(v);
+      out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" vector-effect="non-scaling-stroke"/>`;
+      out += `<text class="axis" x="${L - 8}" y="${yy + 4}" text-anchor="end">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>`;
+    }
+    for (let h = 0; h <= 24; h += 6) {
+      const xx = x(t0 + h * 3600);
+      out += `<text class="axis" x="${xx}" y="${H - 6}" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${String(h).padStart(2, '0')}:00</text>`;
+    }
+    out += `<path d="${d} L${x(last.ts).toFixed(1)},${y(0)} L${x(pts[0].ts).toFixed(1)},${y(0)} Z" fill="url(#${id})"/>`;
+    out += `<path d="${d}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+    out += `<circle cx="${x(last.ts).toFixed(1)}" cy="${y(last.ac_power_w).toFixed(1)}" r="3.5" fill="${c}"/>`;
+    return `<svg class="combined" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${out}</svg>`;
+  }
+
   function renderPower() {
     const invs = state.latest?.inverters ?? [];
     const byInv = {};
     for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
-    $('view').innerHTML = `<section class="card"><h2>Today · AC output</h2><div class="body">
+    const per = invs.map((inv, i) => {
+      const b = detailBlocks(inv);
+      return `<section class="card" style="margin-top:18px"><div class="body">
+        ${b.header}
+        ${systemChart(inv, byInv[inv.id] || [], 'pg' + i)}
+      </div></section>
+      ${b.blocks}
+      ${b.raw}`;
+    }).join('');
+
+    $('view').innerHTML = `<section class="card"><h2>Today · AC output · all systems</h2><div class="body">
         <div class="legend" id="legend"></div>
         <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
-      </div></section>`;
+      </div></section>${per}`;
     $('legend').innerHTML = combinedChart($('combined'), byInv, invs).join('');
+    bindRawFilters();
   }
 
   // ---------- overview ----------
@@ -637,10 +680,23 @@
         <div class="body"><div class="flowgrid">${invs.map((inv) => `<div class="flowmini">
           <div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>
           ${flowSvg(inv, parse(inv.metrics) ?? {})}
+          ${flowStats(inv)}
         </div>`).join('')}</div></div>
       </section></a>` : '';
 
-    $('view').innerHTML = `<div class="sysgrid">${cards}</div>${flow}`;
+    // The chart lives in full on the Power page; the overview carries its own
+    // copy so the day's shape is visible without leaving the first screen.
+    const chart = invs.length ? `<a class="flowlink" href="#/power" style="margin-top:18px;display:block">
+      <section class="card">
+        <div class="cardhead"><h2>Today · AC output</h2><span class="seemore">Open full view →</span></div>
+        <div class="body">
+          <div class="legend" id="legend"></div>
+          <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
+        </div>
+      </section></a>` : '';
+
+    $('view').innerHTML = `<div class="sysgrid">${cards}</div>${flow}${chart}`;
+    if (invs.length) $('legend').innerHTML = combinedChart($('combined'), byInv, invs).join('');
   }
 
   // ---------- devices ----------
@@ -727,14 +783,16 @@
     });
     return `<details class="raw card"><summary>Raw telemetry · ${entries.length} fields from ${esc(inv.source ?? inv.provider)}</summary>
       <div class="body">
-        <input type="search" id="rawfilter" placeholder="Filter fields…" aria-label="Filter raw telemetry fields">
-        <div class="rawgrid" id="rawgrid">${rows.join('')}</div>
+        <input type="search" class="rawfilter" placeholder="Filter fields…" aria-label="Filter raw telemetry fields">
+        <div class="rawgrid">${rows.join('')}</div>
       </div></details>`;
   }
 
-  function renderSystem(id) {
-    const inv = (state.latest?.inverters ?? []).find((i) => i.id === id);
-    if (!inv) { $('view').innerHTML = `<a class="back" href="#/">← Overview</a><div class="card"><div class="empty">Unknown system.</div></div>`; return; }
+  /**
+   * Every card that describes one system, in reading order. Shared verbatim by
+   * the system view and the Power page so the two can never drift apart.
+   */
+  function detailBlocks(inv) {
     const m = parse(inv.metrics) ?? {};
     const st = statusOf(inv);
     const devs = devicesFor(inv);
@@ -807,23 +865,37 @@
       ['Data age', esc(inv.ts ? ago(inv.ts) : 'never')],
     ]);
 
-    $('view').innerHTML = `<a class="back" href="#/">← Overview</a>
-      <div class="sys-head" style="margin-bottom:18px">
+    return {
+      header: `<div class="sys-head" style="margin-bottom:18px">
         <div>
           <div class="vendor" style="color:${accent}">${esc(providerName(inv.provider))}</div>
           <div class="sys-name" style="font-size:26px">${esc(inv.name)}</div>
         </div>
         <div class="hero" style="margin:0"><span class="val" style="font-size:40px">${pv}</span><span class="unit">${pu}</span></div>
-      </div>
-      <section class="card" style="margin-bottom:16px"><div class="body">${flowSvg(inv, m)}</div></section>
-      <div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent)}${acCard(invDev)}${battery}${diagnostics}</div>
-      ${rawCard(inv)}`;
+      </div>`,
+      flow: `<section class="card" style="margin-bottom:16px"><div class="body">${flowSvg(inv, m)}</div></section>`,
+      blocks: `<div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent)}${acCard(invDev)}${battery}${diagnostics}</div>`,
+      raw: rawCard(inv),
+    };
+  }
 
-    const filter = $('rawfilter');
-    if (filter) filter.addEventListener('input', () => {
-      const q = filter.value.trim().toLowerCase();
-      for (const el of $('rawgrid').children) el.hidden = !!q && !el.dataset.k.includes(q);
-    });
+  /** Wire up the raw-telemetry filters that detailBlocks() just rendered. */
+  function bindRawFilters() {
+    for (const box of document.querySelectorAll('.rawfilter')) {
+      const grid = box.closest('details').querySelector('.rawgrid');
+      box.addEventListener('input', () => {
+        const q = box.value.trim().toLowerCase();
+        for (const el of grid.children) el.hidden = !!q && !el.dataset.k.includes(q);
+      });
+    }
+  }
+
+  function renderSystem(id) {
+    const inv = (state.latest?.inverters ?? []).find((i) => i.id === id);
+    if (!inv) { $('view').innerHTML = `<a class="back" href="#/">← Overview</a><div class="card"><div class="empty">Unknown system.</div></div>`; return; }
+    const b = detailBlocks(inv);
+    $('view').innerHTML = `<a class="back" href="#/">← Overview</a>${b.header}${b.flow}${b.blocks}${b.raw}`;
+    bindRawFilters();
   }
 
   // ---------- routing ----------
