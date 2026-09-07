@@ -9,6 +9,8 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Your data, kept.** Every sample is stored (with the untouched vendor payload), so you get history the vendor apps don't let you keep or export.
 - **Works with whatever access you have.** Official API keys are best; a browser-session fallback for SolarMan and a local relay agent for SolisCloud cover you while keys are pending.
 - **Honest about freshness.** A panel shows *when* its number was last updated and turns amber when a feed goes quiet — no confidently stale zeros.
+- **Reads well in either theme.** A three-state toggle in the top-right corner follows your system, or forces light or dark; the choice is remembered and applied before first paint.
+- **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's hero number is set against its rated size.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
 
 > Not affiliated with Ginlong/Solis or IGEN Tech/SolarMan. 
@@ -30,7 +32,8 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 11. [Project layout](#project-layout)
 12. [Troubleshooting](#troubleshooting)
 13. [Security and privacy](#security-and-privacy)
-14. [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license)
+14. [Changelog](CHANGELOG.md)
+15. [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license)
 
 ---
 
@@ -211,6 +214,22 @@ Secrets go in with `npx wrangler secret put NAME` (production) or in `.dev.vars`
 | `SOLARMAN_APP_ID`, `SOLARMAN_APP_SECRET`, `SOLARMAN_EMAIL`, `SOLARMAN_PASSWORD_SHA256` | SolarMan official | From SolarMan support + your login. |
 | `SOLARMAN_WEB_REFRESH_TOKEN`, `SOLARMAN_WEB_ACCESS_TOKEN` | SolarMan fallback | Used only when the official keys are absent. |
 | `INCLUDE_PLANTS` | optional | Comma-separated vendor plant/station ids to poll. Unset = every plant visible to the accounts, including plants shared into them. |
+| `GOOGLE_WEATHER_KEY` | optional | Google Maps Platform key with the **Weather API** enabled. Unset = no lookup, and whatever weather the vendor sent stands. |
+| `SITE_LAT`, `SITE_LON` | optional | Where the array is, for the weather lookup. Only needed for a provider that ships no coordinates of its own — SolisCloud includes them, SolarMan does not. |
+
+### Weather
+
+SolisCloud sends a condition and a min/max with every station snapshot; SolarMan sends none at all. Rather than show one system's sky and leave the other blank, SolarLens can look the weather up once for the site and stamp it onto both systems.
+
+Enable the **Weather API** in a [Google Cloud project](https://console.cloud.google.com/apis/library/weather.googleapis.com), create an API key, restrict it to that one API, then:
+
+```bash
+npx wrangler secret put GOOGLE_WEATHER_KEY
+npx wrangler secret put SITE_LAT     # only if no provider reports coordinates
+npx wrangler secret put SITE_LON
+```
+
+Each lookup is cached for 30 minutes in the `kv` table, so the five-minute poll costs about 48 calls a day per site rather than 288 — comfortably inside the Maps Platform free allowance. A failed or slow lookup is swallowed: the poll still stores its reading.
 
 Cron cadence and the D1 binding live in `wrangler.jsonc`. Five minutes matches how often the vendors themselves refresh; faster polling buys nothing but rate-limit risk (SolisCloud allows 3 calls per 5 s per IP).
 
@@ -242,12 +261,15 @@ Signing itself (`crypto.subtle` MD5 + HMAC) runs only in the Workers runtime and
 
 ## Data model
 
-Four tables in D1 (`migrations/`):
+Five tables in D1 (`migrations/`), plus a poll log:
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`.
-- **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, and grid/battery status strings. Re-polling a vendor that has not produced a new sample is a no-op, not a duplicate.
-- **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, and `strings` — a JSON array of per-MPPT-string DC power. Filled by the relay agent; the vendor payload is stripped of address, coordinates and account identifiers before storage.
+- **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
+- **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. Filled by the relay agent; the vendor payload is stripped of address, coordinates and account identifiers before storage.
+- **`kv`** — a small expiring key/value shelf (`k`, `v`, `expires_at`), used by the weather cache.
 - **`tokens`** — cached bearer/refresh tokens per provider. **`poll_log`** — one line per poll with success and detail, surfaced in the dashboard footer.
+
+Neither cloud reports a battery cycle counter, so the detail view derives one — lifetime charge energy over the pack's usable capacity — and labels it `derived` rather than presenting it as a vendor figure.
 
 Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**; `grid_power_w` is **+ import / − export**; `battery_power_w` is **+ charging / − discharging** (|x| < 50 W is shown as idle). Free-tier headroom is comfortable: two inverters every 5 minutes is ≈ 600 writes/day against D1's 100 000.
 
