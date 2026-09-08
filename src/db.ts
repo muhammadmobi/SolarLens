@@ -330,11 +330,30 @@ export async function daily(
   return results;
 }
 
+/**
+ * Query strings never reach the log.
+ *
+ * SolarMan's token endpoint wants the account's `appId` in the URL - their API,
+ * not our choice - so a network failure there can hand us an Error whose
+ * message carries the whole URL. That message is written to `poll_log`, which
+ * is persisted for a week, returned by `/api/health` and printed in the
+ * dashboard footer. A credential has no business travelling that far because a
+ * DNS lookup failed, so anything query-shaped is cut out before the write.
+ */
+export function safeDetail(detail: string): string {
+  return detail
+    // A URL keeps its origin and path; the query goes.
+    .replace(/(https?:\/\/[^\s?#]+)\?[^\s]*/gi, '$1?<redacted>')
+    // A bare parameter, for a path logged without its origin.
+    .replace(/([?&](?:appId|appSecret|key|keyId|token|secret|password|passwd|sign|email)=)[^&\s]*/gi,
+      '$1<redacted>');
+}
+
 export async function logPoll(db: D1Database, provider: string, ok: boolean, detail: string): Promise<void> {
   const now = nowSec();
   await db
     .prepare(`INSERT INTO poll_log (ts, provider, ok, detail) VALUES (?1, ?2, ?3, ?4)`)
-    .bind(now, provider, ok ? 1 : 0, detail.slice(0, 500))
+    .bind(now, provider, ok ? 1 : 0, safeDetail(detail).slice(0, 500))
     .run();
   // Two feeds logging every five minutes is ~576 rows a day, and nothing else
   // ever deletes them. Prune occasionally rather than on every write: the log

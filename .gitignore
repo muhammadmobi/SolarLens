@@ -25,3 +25,6 @@ playwright-report/
 patch-*.mjs
 .probe-*.mjs
 coverage/
+
+# Generated from wrangler.jsonc with your own ids filled in (scripts/wrangler.mjs)
+.wrangler.local.jsonc

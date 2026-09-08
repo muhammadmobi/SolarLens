@@ -235,6 +235,8 @@ npx wrangler secret put SITE_LON
 
 Each lookup is cached for 30 minutes in the `kv` table, so the five-minute poll costs about 48 calls a day per site rather than 288 — comfortably inside the Maps Platform free allowance. A failed or slow lookup is swallowed: the poll still stores its reading.
 
+`wrangler.jsonc` is committed with `${CF_D1_DATABASE_ID}` where your database id goes, so no account-specific id lives in the repository. Wrangler does not substitute environment variables in its own config, so `npm run dev`, `npm run deploy` and `npm run db:*` go through `scripts/wrangler.mjs`, which fills the placeholder from the environment (falling back to `.dev.vars`) and hands wrangler a generated, gitignored copy. For anything else, `npm run cf -- <args>` passes straight through — `npm run cf -- tail`, say. Put the id in `.dev.vars` as `CF_D1_DATABASE_ID=`; `npx wrangler d1 create solar-lens` prints it.
+
 Cron cadence and the D1 binding live in `wrangler.jsonc`. Five minutes matches how often the vendors themselves refresh; faster polling buys nothing but rate-limit risk (SolisCloud allows 3 calls per 5 s per IP).
 
 ## Local development
@@ -259,7 +261,7 @@ npm run test:unit:coverage  # vitest + v8 coverage, enforces thresholds
 npm run test:e2e            # playwright (add --ui for the inspector)
 ```
 
-**97 unit tests** and **150 end-to-end tests** (75 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**104 unit tests** and **150 end-to-end tests** (75 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -271,12 +273,13 @@ npm run test:e2e            # playwright (add --ui for the inspector)
 
 ### Unit tests — `tests/unit/`
 
-Six files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
+Eight files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
 - **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
 - **`queue.test.ts`** — the rate limiter that stands between a cron run and a SolisCloud ban: calls stay in order, the minimum gap is a floor, and one failed call does not strand the ones behind it.
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
+- **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`weather.test.ts`** — coordinate extraction from each vendor's payload shape (and `0,0` treated as "unset"), the two Google responses mapped onto one shape in the site's own timezone, the cache serving instead of paying for a call, and — the point of the module — a weather outage never taking the poll down with it.
 
@@ -394,6 +397,8 @@ solar-lens/
 ## Security and privacy
 
 Headers on every response: a Content-Security-Policy that is strict about where anything may be **sent** as well as where it may come from (`connect-src 'self'`, so injected script could not exfiltrate a reading), `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` — the last of which also stops the one-time `/auth?t=<token>` link putting the token in a `Referer`. The policy is written twice, in `src/index.ts` and `public/_headers`, because Cloudflare serves the static page from the edge without invoking the Worker; change both or neither.
+
+Vendor errors are stripped of query strings before they reach `poll_log` — SolarMan's token endpoint takes the account's `appId` in the URL, and that log is kept for a week, served by `/api/health` and printed in the footer. No credential should travel that far because a DNS lookup failed.
 
 The dashboard cookie is `HttpOnly`, `Secure` and `SameSite=Lax`. Read and push routes use separate tokens, so an agent key cannot read your data. Vendor payloads are stripped of the account holder's name, email and the site's coordinates before storage, and every vendor-controlled string is escaped before it reaches the page.
 
