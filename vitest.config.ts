@@ -28,10 +28,10 @@ export default defineConfig({
       // paging, token refresh - which need a live endpoint or a large mock to
       // exercise. `npm run probe:solis` and the e2e suite cover that ground.
       thresholds: {
-        statements: 55,
-        branches: 46,
-        functions: 44,
-        lines: 55,
+        statements: 58,
+        branches: 50,
+        functions: 48,
+        lines: 58,
       },
     },
   },

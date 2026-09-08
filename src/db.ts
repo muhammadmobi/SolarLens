@@ -139,7 +139,9 @@ export async function latest(db: D1Database): Promise<LatestRow[]> {
               r.metrics, r.raw
        FROM inverters i
        LEFT JOIN readings r
-         ON r.rowid = (SELECT rowid FROM readings WHERE inverter_id = i.id ORDER BY ts DESC LIMIT 1)
+         ON r.rowid = (SELECT rowid FROM readings
+                       WHERE inverter_id = i.id AND source NOT LIKE '%-history'
+                       ORDER BY ts DESC LIMIT 1)
        WHERE i.enabled = 1
        ORDER BY i.display_order,
                 CASE i.provider WHEN 'soliscloud' THEN 0 WHEN 'solarman' THEN 1 ELSE 2 END,
@@ -251,8 +253,16 @@ export async function series(db: D1Database, fromTs: number, toTs: number): Prom
   const { results } = await db
     .prepare(
       `SELECT inverter_id, ts, ac_power_w, today_kwh, battery_soc, grid_power_w
-       FROM readings
+       FROM readings r
        WHERE ts BETWEEN ?1 AND ?2
+         AND (
+           source NOT LIKE '%-history'
+           OR NOT EXISTS (
+             SELECT 1 FROM readings live
+             WHERE live.inverter_id = r.inverter_id AND live.ts = r.ts
+               AND live.source NOT LIKE '%-history'
+           )
+         )
        ORDER BY ts ASC`,
     )
     .bind(fromTs, toTs)
