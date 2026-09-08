@@ -114,14 +114,14 @@ function series() {
 }
 
 async function stubApi(page: Page, opts: {
-  invs?: unknown[]; devs?: unknown[]; status?: number;
+  invs?: unknown[]; devs?: unknown[]; status?: number; series?: unknown[];
   poll?: { ts?: number; ok: number; detail: string; provider: string };
 } = {}) {
   const status = opts.status ?? 200;
   const invs = opts.invs ?? inverters();
   const devs = opts.devs ?? devices();
   const ids = new Set((invs as { id: string }[]).map((i) => i.id));
-  const points = series().filter((p) => ids.has((p as { inverter_id: string }).inverter_id));
+  const points = opts.series ?? series().filter((p) => ids.has((p as { inverter_id: string }).inverter_id));
   const json = (body: unknown) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
   await page.route('**/api/latest', (r) => r.fulfill(json(status === 200 ? { now: NOW, inverters: invs } : { error: 'unauthorized' })));
   await page.route('**/api/series**', (r) => r.fulfill(json(status === 200 ? { from: 0, to: NOW, points } : { error: 'unauthorized' })));
@@ -448,6 +448,16 @@ test.describe('Power page', () => {
     await expect(page.locator('.legitem').nth(0)).toHaveClass(/off/);
     await page.locator('.legitem').nth(0).click();
     await expect(page.locator('.legitem').nth(0)).not.toHaveClass(/off/);
+  });
+
+  test('one sample is not the same as none', async ({ page }) => {
+    // A curve needs two points. Saying "no samples today" next to a card
+    // reading 8.47 kW online is simply wrong, so the two cases differ.
+    await stubApi(page, { series: [{ inverter_id: SOLIS, ts: NOW - 300, ac_power_w: 8470, today_kwh: null, battery_soc: null, grid_power_w: null }] });
+    await page.goto('/#/power');
+    await expect(page.locator('.legitem').nth(0)).toContainText('one sample so far');
+    await expect(page.locator('.legitem').nth(1)).toContainText('no samples today');
+    await expect(page.locator('svg.combined').nth(1)).toContainText('One sample so far today');
   });
 
   test('switching every line off says so rather than drawing an empty box', async ({ page }) => {
