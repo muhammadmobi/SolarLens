@@ -251,16 +251,56 @@ npm run dev                      # http://localhost:8787
 ## Testing
 
 ```bash
-npm test              # unit + e2e
-npm run test:unit     # vitest
-npm run test:e2e      # playwright (add --ui for the inspector)
+npm test                    # typecheck + unit + e2e — the whole gate
+npm run typecheck           # tsc over src/ and tests/
+npm run test:unit           # vitest
+npm run test:unit:coverage  # vitest + v8 coverage, enforces thresholds
+npm run test:e2e            # playwright (add --ui for the inspector)
 ```
 
-- **Unit tests** (`tests/unit/`, Vitest) cover unit scaling (`toWatts`/`toKwh` incl. `kWp`, `MWh`), timestamp handling (ms vs s), and both vendor normalisers against fixtures that mirror real payload shapes — including the grid and battery sign conventions and the state/status mappings.
-- **End-to-end tests** (`tests/e2e/`, Playwright, TypeScript) load the real dashboard from a tiny static server and stub `/api/*`, so they run in seconds with no Cloudflare, D1 or vendor credentials. They assert what a person sees: both panels with the right numbers, the divider layout (side by side on desktop, stacked on a Pixel 7), the expandable energy breakdown, staleness flags, failed-poll reporting and the token-gate guidance. They use the Google Chrome already on the machine (`channel: 'chrome'`); remove that line in `playwright.config.ts` to use Playwright's bundled Chromium instead.
-- Tests are TypeScript on purpose: they import the same `Reading` and `Metrics` types the Worker uses, so a change to the data shape fails at compile time rather than silently in the browser.
+**74 unit tests** and **118 end-to-end tests** (59 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
-Signing itself (`crypto.subtle` MD5 + HMAC) runs only in the Workers runtime and is verified by `npm run probe:solis`.
+### The frameworks, and why each
+
+| Layer | Tool | Runs against | Why not the other one |
+|---|---|---|---|
+| Types | `tsc`, two projects | `src/` and `tests/` | Catches shape drift before a test can even start. The specs import the Worker's own `Reading` and `Metrics`, so changing a field breaks compilation rather than one assertion in the browser. |
+| Unit | Vitest | Pure modules: unit scaling, both vendor normalisers, the call queue, the weather lookup | Fast, no browser. These are the parts where a wrong answer is silent — a sign convention or a `kW`/`W` slip looks perfectly plausible on screen. |
+| End-to-end | Playwright | The real `public/index.html`, served statically, with `/api/*` stubbed | The UI is a single dependency-free file with no components to unit-test. What matters is what a person sees, so that is what is asserted. |
+
+### Unit tests — `tests/unit/`
+
+Four files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
+
+- **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
+- **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
+- **`queue.test.ts`** — the rate limiter that stands between a cron run and a SolisCloud ban: calls stay in order, the minimum gap is a floor, and one failed call does not strand the ones behind it.
+- **`weather.test.ts`** — coordinate extraction from each vendor's payload shape (and `0,0` treated as "unset"), the two Google responses mapped onto one shape in the site's own timezone, the cache serving instead of paying for a call, and — the point of the module — a weather outage never taking the poll down with it.
+
+### End-to-end tests — `tests/e2e/`
+
+One spec file, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
+
+They assert what a person sees, grouped by what it is for: the overview and its layout at both widths, the theme toggle (including that the choice is applied before first paint), the labelled header totals, the energy-flow diagram (structure, direction from the signs, wire thickness tracking power, per-diagram marker ids), the battery panel and the derived cycle count, offline handling and zeroed figures, the Alerts tab, the collapsible Power sections and the clickable chart legend, the device inventory, raw telemetry filtering, and the token-gate guidance.
+
+One retry is allowed locally (two on CI): the suite drives two real Chrome projects in parallel and a page load occasionally overruns the timeout on a loaded laptop. A genuine break still fails twice.
+
+### Coverage
+
+`npm run test:unit:coverage` writes a terminal summary plus `coverage/index.html` (and `lcov.info` for CI tooling), and fails the run if it drops below the thresholds in `vitest.config.ts`.
+
+| Scope | Statements | Branches | Functions | Lines |
+|---|---|---|---|---|
+| `src/providers/` + `src/weather.ts` | **57%** | **48%** | **46%** | **57%** |
+| `units.ts` | 96% | 97% | 100% | 100% |
+| `weather.ts` | 95% | 83% | 100% | 98% |
+| `queue.ts` | 100% | 100% | 100% | 100% |
+
+The thresholds sit just under those figures, so a regression trips them and ordinary refactoring does not. **Raise them when you add tests; never lower them to turn a red build green.**
+
+The gap to 100% is almost entirely the vendor HTTP clients — request signing, paging, token refresh — which need a live endpoint or a large mock to exercise, and which the normalisers behind them are already tested against. `src/index.ts` and `src/poll.ts` are excluded outright: they are Worker wiring (request routing, cron fan-out) covered end-to-end instead, and counting them would report a low number for code that is deliberately tested elsewhere.
+
+Request signing itself (`crypto.subtle` MD5 + HMAC) only runs in the Workers runtime, so it is verified against the live API by `npm run probe:solis`.
 
 ## Data model
 
@@ -297,11 +337,18 @@ Auth is a bearer header (`Authorization: Bearer …`) or the cookie set by `/aut
 ```
 solar-lens/
 ├── wrangler.jsonc            Worker, D1 binding, cron, static assets
-├── migrations/               D1 schema (0001 base, 0002 metrics, 0003 devices)
+├── tsconfig.json             typecheck for src/
+├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
+├── vitest.config.ts          unit test runner, coverage provider and thresholds
+├── playwright.config.ts      two browser projects, static server, retries
+├── migrations/               D1 schema, applied with `wrangler d1 migrations apply`
+│                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
+│                              0005 electrical · 0006 battery · 0007 kv cache)
 ├── src/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
 │   ├── poll.ts               builds providers from present secrets; polls; plant filter
 │   ├── db.ts                 D1 queries and the Env type
+│   ├── weather.ts            optional Google Weather lookup, cached per site
 │   └── providers/
 │       ├── types.ts          Provider / Inverter / Reading / Metrics
 │       ├── units.ts          W / kWh / timestamp normalisation
@@ -312,7 +359,13 @@ solar-lens/
 ├── public/index.html         the dashboard (no build step)
 ├── agent/solis-relay.mjs     local Chrome relay for SolisCloud
 ├── scripts/                  probe, seed, capture, static server for e2e
-├── tests/                    unit (vitest), e2e (playwright), fixtures
+├── tests/
+│   ├── unit/units.test.ts       W / kWh / timestamp scaling
+│   ├── unit/normalize.test.ts   both vendor normalisers, signs and statuses
+│   ├── unit/queue.test.ts       vendor rate-limit queue
+│   ├── unit/weather.test.ts     coordinates, mapping, cache, failure handling
+│   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
+├── CHANGELOG.md              release history, newest first
 ├── docs/api-notes.md         observed vendor field names and conventions
 └── docs/feature-gaps.md      SolisCloud vs SolarMan vs SolarLens, feature by feature
 ```
