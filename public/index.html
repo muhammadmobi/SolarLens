@@ -980,10 +980,16 @@
     if (!inv.ts) {
       add('warn', 'No data yet', 'This system has never delivered a sample.', 'SolarLens');
     } else if (st.offline) {
+      // A relay-fed system has a second way to go quiet that has nothing to do
+      // with the plant: the agent is not running. Worth saying, because the
+      // fix is on this side rather than on the roof.
+      const relay = String(inv.source || '').endsWith('-relay')
+        ? ' This system is fed by the local relay agent, so check that it is still running before suspecting the hardware.'
+        : '';
       add('bad', 'System offline',
         inv.status === 'offline'
-          ? `The vendor reports the plant offline. Last sample ${ago(inv.ts)}.`
-          : `Nothing has arrived for ${ago(inv.ts)}; the cutoff is 15 minutes.`,
+          ? `The vendor reports the plant offline. Last sample ${ago(inv.ts)}.${relay}`
+          : `Nothing has arrived for ${ago(inv.ts)}; the cutoff is 15 minutes.${relay}`,
         inv.status === 'offline' ? providerName(inv.provider) : 'SolarLens');
     }
 
@@ -1037,7 +1043,9 @@
     // --- our own polling, which can fail without the vendor being at fault --
     const poll = (state.health?.polls ?? []).find((p) => p.provider === inv.provider);
     if (poll && !poll.ok) {
-      add('bad', 'Last poll failed', esc(poll.detail || 'No detail given.') + ` (${ago(poll.ts)})`, 'SolarLens');
+      // Escaped once, by the renderer. Escaping here as well turned an "&"
+      // in a vendor's error string into "&amp;amp;" on the page.
+      add('bad', 'Last poll failed', `${poll.detail || 'No detail given.'} (${ago(poll.ts)})`, 'SolarLens');
     }
 
     return out;

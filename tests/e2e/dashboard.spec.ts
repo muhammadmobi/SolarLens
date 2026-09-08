@@ -311,14 +311,20 @@ test.describe('Alerts', () => {
     await page.goto('/#/alerts');
     await expect(page.locator('details.syssec').nth(0)).toContainText('System offline');
     await expect(page.locator('details.syssec').nth(0)).toContainText('the cutoff is 15 minutes');
+    // A relay-fed feed has a second way to go quiet that is nothing to do with
+    // the plant, and the fix for it is on this side rather than on the roof.
+    await expect(page.locator('details.syssec').nth(0)).toContainText('relay agent');
   });
 
   test("a failed poll is ours to report, not the vendor's", async ({ page }) => {
-    await stubApi(page, { poll: { ts: NOW - 60, provider: 'solarman', ok: 0, detail: 'HTTP 401 on /device/v1.0/currentData' } });
+    await stubApi(page, { poll: { ts: NOW - 60, provider: 'solarman', ok: 0, detail: 'HTTP 401 on /device/v1.0/currentData?a & b' } });
     await page.goto('/#/alerts');
     const sec = page.locator('details.syssec').nth(1);
     await expect(sec).toContainText('Last poll failed');
     await expect(sec).toContainText('HTTP 401');
+    // Escaped once, by the renderer. Escaping in the model as well turned an
+    // "&" in a vendor error string into "&amp;" on the page.
+    await expect(sec).toContainText('a & b');
     await expect(sec.locator('.a-src').last()).toHaveText('SolarLens');
   });
 
