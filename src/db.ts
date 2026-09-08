@@ -272,6 +272,64 @@ export async function series(db: D1Database, fromTs: number, toTs: number): Prom
 
 const POLL_LOG_KEEP_S = 7 * 24 * 3600;
 
+export interface DayRow {
+  inverter_id: string;
+  day: string;
+  yield_kwh: number | null;
+  peak_w: number | null;
+  load_kwh: number | null;
+  import_kwh: number | null;
+  export_kwh: number | null;
+  batt_charge_kwh: number | null;
+  batt_discharge_kwh: number | null;
+  samples: number;
+  first_ts: number;
+  last_ts: number;
+}
+
+/**
+ * One row per inverter per day.
+ *
+ * Every "today" figure the vendors publish is a counter that climbs through
+ * the day and resets at local midnight, so the day's total is simply the
+ * largest value seen within it - no summing, and no double counting when the
+ * same sample is stored twice.
+ *
+ * Local midnight is the caller's, passed in as the browser's own UTC offset in
+ * minutes. The alternative is guessing a timezone server-side and splitting
+ * every day in the wrong place.
+ */
+export async function daily(
+  db: D1Database,
+  fromTs: number,
+  toTs: number,
+  tzOffsetMin: number,
+): Promise<DayRow[]> {
+  const shift = -tzOffsetMin * 60; // JS offset is minutes to add to local to reach UTC
+  const { results } = await db
+    .prepare(
+      `SELECT inverter_id,
+              date(ts + ?3, 'unixepoch') AS day,
+              MAX(today_kwh)                                    AS yield_kwh,
+              MAX(ac_power_w)                                   AS peak_w,
+              MAX(json_extract(metrics, '$.loadTodayKwh'))      AS load_kwh,
+              MAX(json_extract(metrics, '$.gridImportTodayKwh')) AS import_kwh,
+              MAX(json_extract(metrics, '$.gridExportTodayKwh')) AS export_kwh,
+              MAX(json_extract(metrics, '$.battChargeTodayKwh')) AS batt_charge_kwh,
+              MAX(json_extract(metrics, '$.battDischargeTodayKwh')) AS batt_discharge_kwh,
+              COUNT(*) AS samples,
+              MIN(ts)  AS first_ts,
+              MAX(ts)  AS last_ts
+       FROM readings
+       WHERE ts BETWEEN ?1 AND ?2
+       GROUP BY inverter_id, day
+       ORDER BY day DESC, inverter_id`,
+    )
+    .bind(fromTs, toTs, shift)
+    .all<DayRow>();
+  return results;
+}
+
 export async function logPoll(db: D1Database, provider: string, ok: boolean, detail: string): Promise<void> {
   const now = nowSec();
   await db

@@ -14,6 +14,49 @@ import { historyFromChart } from '../../src/providers/soliscloud';
 describe('historyFromChart', () => {
   const noon = Date.UTC(2026, 8, 8, 7, 0, 0); // 12:00 in Asia/Karachi
 
+  it('reads the portal shape: time[] and power[] as parallel arrays', () => {
+    // This is what the chart call actually returns - two arrays of the same
+    // length with one unit string for the lot, not a list of points.
+    const pts = historyFromChart({
+      data: {
+        time: [noon, noon + 300_000, noon + 600_000],
+        power: [8470, 9170, 8900],
+        // The axis is drawn in kW; the numbers beside it are watts. Scaling by
+        // this label put a 12 kW array at 9.47 MW, so it is deliberately not
+        // used - the real payload was checked against a live snapshot from the
+        // same minute to settle which was which.
+        powerStr: 'kW',
+        psum: 0,
+      },
+    });
+    expect(pts).toEqual([
+      { ts: Math.floor(noon / 1000), acPowerW: 8470 },
+      { ts: Math.floor(noon / 1000) + 300, acPowerW: 9170 },
+      { ts: Math.floor(noon / 1000) + 600, acPowerW: 8900 },
+    ]);
+  });
+
+  it('trims the midnight padding off the parallel form too', () => {
+    const pts = historyFromChart({
+      time: [noon, noon + 300_000, noon + 600_000, noon + 900_000],
+      power: [1000, 2000, 0, 0],
+      powerStr: 'kW',
+    });
+    expect(pts.map((p) => p.acPowerW)).toEqual([1000, 2000]);
+  });
+
+  it('ignores parallel arrays of mismatched length rather than pairing them wrongly', () => {
+    expect(historyFromChart({ time: [noon, noon + 1], power: [1] })).toEqual([]);
+  });
+
+  it('leaves an array of objects to the object path, even beside a time array', () => {
+    const pts = historyFromChart({
+      time: [1, 2],
+      power: [{ time: noon, power: 500 }, { time: noon + 300_000, power: 600 }],
+    });
+    expect(pts.map((p) => p.acPowerW)).toEqual([500, 600]);
+  });
+
   it('reads the documented shape: a power[] array under data', () => {
     const pts = historyFromChart({
       data: {

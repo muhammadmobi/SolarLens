@@ -26,3 +26,6 @@ INCLUDE_PLANTS=
 # --- Shared secret gating /api/* and the local agent's /api/ingest ---
 API_TOKEN=
 INGEST_TOKEN=
+
+# Worker origin the relay agent pushes to (agent/solis-relay.mjs reads this file)
+SOLARLENS_URL=

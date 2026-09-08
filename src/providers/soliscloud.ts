@@ -260,6 +260,12 @@ export function stripPii<T>(rec: T): T {
 export function historyFromChart(raw: unknown): { ts: number; acPowerW: number }[] {
   const root = (raw && typeof raw === 'object' ? (raw as Rec) : {});
   const inner = (root.data && typeof root.data === 'object' ? (root.data as Rec) : root);
+  // The portal's own chart call answers with parallel arrays - `time: [...]`
+  // beside `power: [...]`, one unit string for the lot - rather than a list of
+  // points. Zip them back together before anything else looks at the payload.
+  const zipped = zipSeries(inner);
+  if (zipped) return zipped;
+
   const list = ['power', 'dataList', 'records', 'list', 'chartData']
     .map((k) => inner[k])
     .find((v): v is Rec[] => Array.isArray(v) && v.length > 0)
@@ -277,10 +283,41 @@ export function historyFromChart(raw: unknown): { ts: number; acPowerW: number }
     if (ts === null || w === null) continue;
     out.push({ ts, acPowerW: w });
   }
-  // The portal pads the rest of the day with zeros; those are not readings.
-  const lastReal = out.reduce((a, p, i) => (p.acPowerW > 0 ? i : a), -1);
-  const trimmed = lastReal >= 0 ? out.slice(0, lastReal + 1) : out;
-  return trimmed.sort((a, b) => a.ts - b.ts);
+  return trimTrailingZeros(out.sort((a, b) => a.ts - b.ts));
+}
+
+/**
+ * The parallel-array form: `time` and `power` as two arrays of the same
+ * length, with a single `powerStr` naming the unit for all of them. Returns
+ * null when the payload is not that shape, so the caller can try the others.
+ */
+function zipSeries(inner: Rec): { ts: number; acPowerW: number }[] | null {
+  const times = inner.time;
+  const powers = inner.power;
+  if (!Array.isArray(times) || !Array.isArray(powers)) return null;
+  // An array of objects is the other shape; leave it to the caller.
+  if (powers.some((p) => p !== null && typeof p === 'object')) return null;
+  if (!times.length || times.length !== powers.length) return null;
+
+  // `powerStr` here labels the chart's axis; it does not describe the array.
+  // The portal draws a "kW" axis over numbers that are already watts: a plant
+  // whose live snapshot read 9,170 W returned 9,470 in this array at its peak,
+  // and scaling by the label put a 12 kW array at 9.47 MW. So these are taken
+  // as watts, and the caller checks the result against the nameplate.
+  const out: { ts: number; acPowerW: number }[] = [];
+  for (let i = 0; i < times.length; i++) {
+    const ts = chartTs(times[i]);
+    const w = num(powers[i]);
+    if (ts === null || w === null) continue;
+    out.push({ ts, acPowerW: w });
+  }
+  return out.length ? trimTrailingZeros(out.sort((a, b) => a.ts - b.ts)) : null;
+}
+
+/** The chart runs to midnight whatever the hour; that padding is not readings. */
+function trimTrailingZeros(pts: { ts: number; acPowerW: number }[]) {
+  const lastReal = pts.reduce((a, p, i) => (p.acPowerW > 0 ? i : a), -1);
+  return lastReal >= 0 ? pts.slice(0, lastReal + 1) : pts;
 }
 
 /** Chart timestamps arrive as epoch ms, epoch seconds, or a local datetime. */

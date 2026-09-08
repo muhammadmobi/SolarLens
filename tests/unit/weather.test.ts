@@ -11,6 +11,8 @@ import type { Env } from '../../src/db';
  */
 
 const KEY = 'test-key';
+// Greenwich, deliberately: a fixture that needs coordinates should never
+// carry someone's actual roof.
 const AT = { lat: 51.4779, lon: -0.0015 };
 
 const ok = (body: unknown) => ({ ok: true, json: async () => body }) as unknown as Response;
@@ -19,15 +21,16 @@ const fail = (status = 500) => ({ ok: false, status, json: async () => ({}) }) a
 const CURRENT = {
   weatherCondition: { description: { text: 'Clear' } },
   temperature: { degrees: 29.4, unit: 'CELSIUS' },
-  timeZone: { id: 'Asia/Karachi' },
+  timeZone: { id: 'Europe/London' },
 };
 const FORECAST = {
-  timeZone: { id: 'Asia/Karachi' },
+  timeZone: { id: 'Europe/London' },
   forecastDays: [{
     maxTemperature: { degrees: 31 },
     minTemperature: { degrees: 24 },
-    // Google answers in UTC; Karachi is +05:00, so these are 05:45 and 18:25.
-    sunEvents: { sunriseTime: '2026-09-08T00:45:00Z', sunsetTime: '2026-09-08T13:25:00Z' },
+    // Google answers in UTC; London is +01:00 in September, so these are
+    // 06:15 and 19:30 at the site.
+    sunEvents: { sunriseTime: '2026-09-08T05:15:00Z', sunsetTime: '2026-09-08T18:30:00Z' },
   }],
 };
 
@@ -80,12 +83,12 @@ describe('coordsFromRaw', () => {
 
 describe('envCoords', () => {
   it('reads the fallback pair, for a provider that reports none', () => {
-    expect(envCoords({ SITE_LAT: '33.5', SITE_LON: '73.2' } as Env)).toEqual({ lat: 33.5, lon: 73.2 });
+    expect(envCoords({ SITE_LAT: '51.5', SITE_LON: '-0.12' } as Env)).toEqual({ lat: 51.5, lon: -0.12 });
   });
 
   it('needs both halves, and both to be numbers', () => {
-    expect(envCoords({ SITE_LAT: '33.5' } as Env)).toBeNull();
-    expect(envCoords({ SITE_LAT: 'north', SITE_LON: '73.2' } as Env)).toBeNull();
+    expect(envCoords({ SITE_LAT: '51.5' } as Env)).toBeNull();
+    expect(envCoords({ SITE_LAT: 'north', SITE_LON: '-0.12' } as Env)).toBeNull();
     expect(envCoords({} as Env)).toBeNull();
   });
 });
@@ -97,7 +100,7 @@ describe('fetchWeather', () => {
     expect(w).toEqual({
       text: 'Clear', tempC: 29.4, tempMinC: 24, tempMaxC: 31,
       // The useful form of a sunrise is the clock at the array, not UTC.
-      sunrise: '05:45', sunset: '18:25',
+      sunrise: '06:15', sunset: '19:30',
     });
     expect(f).toHaveBeenCalledTimes(2);
   });
@@ -182,7 +185,7 @@ describe('stampWeather', () => {
       expect(r.metrics!.weatherText).toBe('Clear');
       expect(r.metrics!.tempNowC).toBe(29.4);
       expect(r.metrics!.tempMinC).toBe(24);
-      expect(r.metrics!.sunrise).toBe('05:45');
+      expect(r.metrics!.sunrise).toBe('06:15');
     } finally {
       f.mockRestore();
     }

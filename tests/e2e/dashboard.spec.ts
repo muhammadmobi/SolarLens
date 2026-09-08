@@ -113,9 +113,31 @@ function series() {
   return points;
 }
 
+/** Four days of daily rows: the on-grid plant has no meter, the hybrid has. */
+function historyRows() {
+  const day = (n: number) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10);
+  const rows: unknown[] = [];
+  for (let n = 0; n < 4; n++) {
+    rows.push({
+      inverter_id: SOLIS, day: day(n), yield_kwh: 44.7 - n, peak_w: 9470,
+      load_kwh: null, import_kwh: null, export_kwh: null,
+      batt_charge_kwh: null, batt_discharge_kwh: null,
+      samples: 111, first_ts: NOW - 86400, last_ts: NOW,
+    });
+    rows.push({
+      inverter_id: HYBRID, day: day(n), yield_kwh: 13.2 - n, peak_w: 2850,
+      load_kwh: 5.3, import_kwh: 2.2, export_kwh: 9.4,
+      batt_charge_kwh: 0.9, batt_discharge_kwh: 0.2,
+      samples: 140, first_ts: NOW - 86400, last_ts: NOW,
+    });
+  }
+  return rows;
+}
+
 async function stubApi(page: Page, opts: {
   invs?: unknown[]; devs?: unknown[]; status?: number; series?: unknown[];
   poll?: { ts?: number; ok: number; detail: string; provider: string };
+  history?: unknown[] | null;
   feeds?: { ts: number; ok: number; detail: string; provider: string }[];
 } = {}) {
   const status = opts.status ?? 200;
@@ -127,6 +149,7 @@ async function stubApi(page: Page, opts: {
   await page.route('**/api/latest', (r) => r.fulfill(json(status === 200 ? { now: NOW, inverters: invs } : { error: 'unauthorized' })));
   await page.route('**/api/series**', (r) => r.fulfill(json(status === 200 ? { from: 0, to: NOW, points } : { error: 'unauthorized' })));
   await page.route('**/api/devices', (r) => r.fulfill(json(status === 200 ? { now: NOW, devices: devs } : { error: 'unauthorized' })));
+  await page.route('**/api/history**', (r) => r.fulfill(json({ now: NOW, days: 30, rows: opts.history ?? historyRows() })));
   const polls = [opts.poll ?? { ts: NOW - 30, provider: 'solarman', ok: 1, detail: 'plants=1 inverters=1 new=1' }];
   await page.route('**/api/health', (r) => r.fulfill(json({ now: NOW, polls, feeds: opts.feeds ?? polls })));
 }
@@ -447,6 +470,76 @@ test.describe('Feed status', () => {
   });
 });
 
+test.describe('Historical Data', () => {
+  test('one section per system, with a day table and a bar per day', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/history');
+    const secs = page.locator('details.syssec');
+    await expect(secs).toHaveCount(2);
+    await expect(secs.nth(0)).toContainText('Demo Solis Plant');
+    await expect(secs.nth(0).locator('tbody tr')).toHaveCount(4);
+    await expect(secs.nth(0).locator('.daybar')).toHaveCount(4);
+  });
+
+  test('shows only the columns that system actually measures', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/history');
+    const solis = page.locator('details.syssec').nth(0);
+    const hybrid = page.locator('details.syssec').nth(1);
+    // The on-grid plant has no meter, so consumption and grid columns would be
+    // columns of dashes. The hybrid has both, plus a battery.
+    await expect(solis.locator('thead th')).toHaveText(['Day', 'Produced', 'Peak', 'Samples']);
+    await expect(hybrid.locator('thead th')).toHaveText(
+      ['Day', 'Produced', 'Consumed', 'Imported', 'Exported', 'Charged', 'Discharged', 'Peak', 'Samples']);
+  });
+
+  test('says the record starts when SolarLens did, and shows the vendor totals beside it', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/history');
+    await expect(page.locator('.cardnote')).toContainText('begins when it started collecting');
+    const solis = page.locator('details.syssec').nth(0);
+    await expect(solis).toContainText('Recorded here');
+    // 48852 kWh lifetime against four days of our own: the two must never be
+    // mistaken for each other.
+    await expect(solis).toContainText('Vendor · lifetime');
+  });
+
+  test('the range picker reloads the page for that many days', async ({ page }) => {
+    await stubApi(page);
+    const seen: string[] = [];
+    // Registered after stubApi: Playwright tries the most recent route first.
+    await page.route('**/api/history**', (r) => {
+      seen.push(new URL(r.request().url()).searchParams.get('days') ?? '');
+      return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ now: NOW, days: 30, rows: historyRows() }) });
+    });
+    await page.goto('/#/history');
+    await expect(page.locator('.rangebtn.on')).toHaveText('30 days');
+    await page.locator('.rangebtn', { hasText: '7 days' }).click();
+    await expect(page.locator('.rangebtn.on')).toHaveText('7 days');
+    expect(seen).toContain('7');
+  });
+
+  test("asks for days in the reader's own timezone, not UTC", async ({ page }) => {
+    await stubApi(page);
+    let url = '';
+    await page.route('**/api/history**', (r) => {
+      url = r.request().url();
+      return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ now: NOW, days: 30, rows: [] }) });
+    });
+    await page.goto('/#/history');
+    await expect(page.locator('.rangepick')).toBeVisible();
+    // A solar day ends at the array's midnight; grouping by UTC would split
+    // every day in the wrong place for most of the world.
+    expect(url).toContain('tz=');
+  });
+
+  test('a system with no recorded days says so rather than drawing an empty table', async ({ page }) => {
+    await stubApi(page, { history: [] });
+    await page.goto('/#/history');
+    await expect(page.locator('details.syssec').nth(0)).toContainText('No days recorded yet');
+  });
+});
+
 test.describe('Theme', () => {
   test('the toggle cycles auto - light - dark and the choice survives a reload', async ({ page }) => {
     await stubApi(page);
@@ -673,7 +766,7 @@ test.describe('Energy flow on the overview', () => {
   test('the flow tab is gone and an old #/flow link lands on the overview', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await expect(page.locator('nav a')).toHaveText([/Overview/, /Power/, /Alerts/, /Devices/]);
+    await expect(page.locator('nav a')).toHaveText([/Overview/, /Power/, /Historical Data/, /Alerts/, /Devices/]);
     await page.goto('/#/flow');
     await expect(page.locator('h2.band').first()).toHaveText('Energy flow');
   });
@@ -847,7 +940,7 @@ test.describe('System detail', () => {
     await expect(battery).toContainText('static');
     await expect(battery).toContainText('1100 kWh');
     await expect(battery.locator('.ring text')).toHaveText('100%');
-    await expect(page.locator('.blocks')).toContainText('This month');
+    await expect(page.locator('.blocks')).toContainText('Produced this month');
     await expect(page.locator('.blocks')).toContainText('70.9 kWh');
   });
 
@@ -897,7 +990,7 @@ test.describe('System detail', () => {
     // Three arms into one house, not four arms plus a separate house-shaped
     // "Consumption" node standing next to the house it duplicated.
     await expect(flow.locator('.wire')).toHaveCount(3);
-    await expect(flow.locator('.lbl')).toHaveText([/Solar/, /Grid/, /Battery/, /Home load/]);
+    await expect(flow.locator('.lbl')).toHaveText([/Solar/, /Grid/, /Battery/, /House load/]);
     // 278 W production, 91 W import, 307 W load - the load inside the house.
     await expect(flow).toContainText('278 W');
     await expect(flow).toContainText('91 W');
@@ -926,7 +1019,7 @@ test.describe('System detail', () => {
     await page.goto('/#/system/' + encodeURIComponent(SOLIS));
     const flow = page.locator('svg.flow');
     await expect(flow.locator('.wire')).toHaveCount(2);
-    await expect(flow.locator('.lbl')).toHaveText([/Solar/, /Grid/, /Home load/]);
+    await expect(flow.locator('.lbl')).toHaveText([/Solar/, /Grid/, /House load/]);
     await expect(flow).not.toContainText('Battery');
     // Exporting 5.08 kW, so the grid arm is labelled as such.
     await expect(flow).toContainText('exporting');
