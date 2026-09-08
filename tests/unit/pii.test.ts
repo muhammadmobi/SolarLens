@@ -14,14 +14,14 @@ describe('stripPii', () => {
   it('drops the account holder and the site location', () => {
     const clean = stripPii({
       stationName: 'Solis Ongrid',
-      userId: '1300386381677186759',
+      userId: '0000000000000000000',
       userName: 'someone',
       userEmail: 'someone@example.com',
       mobile: '+10000000000',
       installerMobile: '+10000000001',
       installerEmail: 'installer@example.com',
-      latitude: '33.5386206',
-      longitude: '73.1909312',
+      latitude: '51.4779',
+      longitude: '-0.0015',
       addr: '1 Example Street',
       addrDetail: 'Flat 2',
       picUrl: 'https://example.com/a.png',

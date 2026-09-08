@@ -29,10 +29,35 @@
  *   CHROME_PATH         explicit Chrome binary; default uses the installed Google Chrome
  */
 import { chromium } from 'playwright-core';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const need = (k) => { const v = process.env[k]; if (!v) { console.error(`missing env ${k}`); process.exit(2); } return v; };
+/**
+ * The Worker's own secrets already live in .dev.vars, and the agent needs two
+ * of them. Reading that file means the documented `npm run relay:solis` works
+ * on its own instead of failing on a missing variable; a real environment
+ * variable still wins, so CI and one-off overrides behave as before.
+ */
+function loadDevVars() {
+  const path = resolve('.dev.vars');
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const value = m[2].trim().replace(/^["']|["']$/g, '');
+    if (value && process.env[m[1]] === undefined) process.env[m[1]] = value;
+  }
+}
+loadDevVars();
+
+const need = (k) => {
+  const v = process.env[k];
+  if (!v) {
+    console.error(`missing env ${k} - set it, or add it to .dev.vars`);
+    process.exit(2);
+  }
+  return v;
+};
 const SOLARLENS_URL = need('SOLARLENS_URL').replace(/\/+$/, '');
 const INGEST_TOKEN = need('INGEST_TOKEN');
 const PLANTS = (process.env.SOLIS_PLANT_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -144,8 +169,9 @@ async function pushHistory(plantId, chartJson) {
     body: JSON.stringify({ provider: 'soliscloud', plantId, raw: chartJson }),
   });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) { log(`history ${plantId}: HTTP ${res.status}`); return; }
-  log(`history ${plantId}: ${j.stored ?? 0} new of ${j.points ?? 0} points`);
+  if (!res.ok) { log(`history ${plantId}: HTTP ${res.status}${j.detail ? ` - ${j.detail}` : ""}`); return; }
+  log(`history ${plantId}: ${j.stored ?? 0} new of ${j.points ?? 0} points`
+    + (j.sawKeys ? ` (payload keys: ${j.sawKeys.join(', ')})` : ''));
 }
 
 /**
