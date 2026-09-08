@@ -254,6 +254,10 @@
   .combined { width: 100%; height: 250px; display: block; }
   .axis { fill: var(--muted); font-size: 12.5px; font-family: var(--font); font-weight: 600; }
   .axis.unit { fill: var(--faint); font-size: 11px; }
+  .axis.gap { fill: var(--warn); font-size: 12px; font-weight: 650; }
+  /* The stretch of day nobody recorded, so an empty axis does not read as a
+     flat zero the system genuinely produced. */
+  .nodata { fill: var(--faint); opacity: .07; }
   .peaklab { fill: var(--ink); font-size: 12.5px; font-weight: 700; font-family: var(--font); }
   .grid { stroke: var(--line); opacity: .7; }
 
@@ -280,6 +284,12 @@
   .flow .val { fill: var(--ink); font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; font-family: var(--font); }
   .flow .sub { fill: var(--faint); font-size: 20px; font-weight: 600; font-family: var(--font); }
   .flowbar { margin-top: 10px; max-width: 760px; margin-inline: auto; }
+  /* One system's box carries a self-powered bar the other cannot have, so the
+     cards are told to fill the row rather than each ending where its own
+     content does. */
+  .flowlink { display: flex; }
+  .flowlink > .card { flex: 1; display: flex; flex-direction: column; }
+  .flowlink > .card > .body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
   .flowbar-t { display: flex; justify-content: space-between; align-items: baseline; font-size: 12.5px;
                font-weight: 650; color: var(--muted); margin-bottom: 5px; }
   .flowbar-t b { font-size: 15px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -567,16 +577,29 @@
     // A hybrid needs room under the house for the pack. An on-grid system has
     // nothing to put there, so its box is simply shorter rather than carrying
     // an empty third of a diagram around.
-    const H = battery ? 580 : 430;
-    const CY = battery ? 196 : 200;
+    // One height for both, so two systems side by side are drawn at the same
+    // scale and their boxes match. An on-grid plant simply has nothing to hang
+    // below the house, and its row sits on the true centre line instead.
+    const H = 580;
+    const CY = battery ? 196 : 268;
     const HR = 66, NR = 52, W = 1000;
 
     const g = inv.grid_power_w, b = inv.battery_power_w;
     const dir = (v, dead, pos, neg) => v == null ? null : Math.abs(v) < dead ? 'idle' : v > 0 ? pos : neg;
+    // Share of the array's own rating, which is what makes a 12 kW system and a
+    // 3.5 kW one comparable at a glance. Only when there is a rating to divide
+    // by, and never above 100 - inverters do overshoot their nameplate.
+    const pvPct = inv.capacity_w > 0 && inv.ac_power_w != null
+      ? Math.min(100, Math.round((inv.ac_power_w / inv.capacity_w) * 100))
+      : null;
 
     const nodes = [
       {
-        key: 'pv', x: 152, y: CY, glyph: '☀️', label: 'Solar',
+        key: 'pv', x: 152, y: CY,
+        glyph: '☀️',
+        // The percentage rides on the title, where it can be read against the
+        // other system's without hunting for it.
+        label: pvPct == null ? 'Solar' : `Solar · ${pvPct}%`,
         value: inv.ac_power_w, into: true,
         // The single most common question about a small number is "small
         // compared to what?", so the array's rating sits under it.
@@ -708,6 +731,31 @@
       out += `<text class="peaklab" x="${(px + (flip ? -10 : 10)).toFixed(1)}" y="${Math.max(T + 12, py - 10).toFixed(1)}" text-anchor="${flip ? 'end' : 'start'}">peak ${fmtWs(peak.ac_power_w)} · ${new Date(peak.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>`;
     }
     out += `<circle cx="${x(last.ts).toFixed(1)}" cy="${y(last.ac_power_w).toFixed(1)}" r="3.5" fill="${c}" opacity=".55"/>`;
+
+    // What makes a curve invisible is not how few points it has but how little
+    // of the axis it covers: three samples twenty minutes apart are a smudge,
+    // while thirteen spread across the daylight hours draw perfectly well.
+    // Mark the samples only in the first case, where dots are the whole shape.
+    if (last.ts - pts[0].ts < 3 * 3600 || pts.length <= 6) {
+      for (const p of pts) {
+        out += `<circle cx="${x(p.ts).toFixed(1)}" cy="${y(p.ac_power_w).toFixed(1)}" r="3" fill="${c}" opacity=".85"/>`;
+      }
+    }
+
+    // A curve that starts at noon is not a system that produced nothing all
+    // morning - it is a record that begins at noon. But a curve that starts at
+    // six is just sunrise, and warning about that every morning would be
+    // noise. The gap worth naming is missed *daylight*, so this only speaks up
+    // when the vendor told us when the sun came up and the record began well
+    // after it. No sunrise, no claim.
+    const sunUp = sunriseTs(inv, t0);
+    if (sunUp !== null && pts[0].ts - sunUp > 3600) {
+      out += `<text class="axis gap" x="${W - R}" y="${T - 10}" text-anchor="end">recorded from ${esc(hhmm(pts[0].ts))}</text>`;
+      // Shade the stretch nobody has a reading for, so the empty part of the
+      // axis reads as "no data" rather than as a flat zero it really produced.
+      out += `<rect class="nodata" x="${L}" y="${T}" width="${(x(pts[0].ts) - L).toFixed(1)}" height="${H - T - B}"/>`;
+    }
+
     out += `<text class="axis unit" x="6" y="${T - 10}">watts</text>`;
     return `<svg class="combined" viewBox="0 0 ${W} ${H}">${out}</svg>`;
   }
@@ -972,6 +1020,22 @@
    * one at breakfast?". An alert needs both, so the absolute stamp leads and
    * the relative one follows it.
    */
+  /**
+   * Today's sunrise as an epoch, from whatever the vendor put in the metrics
+   * ("05:45", local to the site). Null when nobody told us - in which case no
+   * claim is made about a gap, because there is nothing to measure it against.
+   */
+  function sunriseTs(inv, t0) {
+    const sr = parse(inv.metrics)?.sunrise;
+    const m = typeof sr === 'string' ? sr.match(/^\s*(\d{1,2}):(\d{2})/) : null;
+    if (!m) return null;
+    return t0 + Number(m[1]) * 3600 + Number(m[2]) * 60;
+  }
+
+  /** Just the clock, for an axis label where the date is already implied. */
+  const hhmm = (ts) => new Date(ts * 1000)
+    .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
   function when(ts) {
     if (!ts) return 'unknown';
     const d = new Date(ts * 1000);
