@@ -77,19 +77,28 @@ export async function insertReading(db: D1Database, r: Reading): Promise<boolean
     .run();
   if ((res.meta.changes ?? 0) > 0) return true;
 
-  // The sample already existed. That is not a no-op once the normaliser has
-  // learned to read more fields: refresh the derived columns in place, so a
-  // parser improvement reaches the newest row instead of waiting for the vendor
-  // to produce a fresh timestamp. Still reported as "not a new sample".
+  // The sample already existed. That is not a no-op: the vendor can revise a
+  // payload without moving its timestamp - an inverter going offline keeps the
+  // same dataTimestamp and only flips its state field - and the normaliser can
+  // have learned to read more of it since. So the whole row is refreshed from
+  // the newest payload, not just some of it. Refreshing a subset is worse than
+  // refreshing none: it leaves a row whose status disagrees with the raw
+  // payload sitting in the column beside it. Still not a new sample.
   await db
     .prepare(
-      `UPDATE readings SET metrics = ?4, raw = ?5
+      `UPDATE readings SET
+         ac_power_w = ?4, dc_power_w = ?5, today_kwh = ?6, total_kwh = ?7,
+         battery_soc = ?8, battery_power_w = ?9, grid_power_w = ?10, load_power_w = ?11,
+         temp_c = ?12, status = ?13, raw = ?14, metrics = ?15
        WHERE inverter_id = ?1 AND ts = ?2 AND source = ?3`,
     )
     .bind(
       r.inverterId, r.ts, r.source,
-      r.metrics ? JSON.stringify(r.metrics) : null,
+      r.acPowerW, r.dcPowerW, r.todayKwh, r.totalKwh,
+      r.batterySoc, r.batteryPowerW, r.gridPowerW, r.loadPowerW,
+      r.tempC, r.status,
       JSON.stringify(r.raw ?? null),
+      r.metrics ? JSON.stringify(r.metrics) : null,
     )
     .run();
   return false;

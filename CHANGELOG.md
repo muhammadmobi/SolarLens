@@ -42,6 +42,19 @@ the announcement.
   figure.
 - **Full-load hours** on both providers (`fullHour` on SolisCloud,
   `fullPowerHoursDay` on SolarMan).
+- **An Alerts tab** — everything either cloud says is wrong, one collapsible
+  section per system under a single tab, with a count badge on the tab itself.
+  Nothing is invented: SolisCloud's alarm count and level, SolarMan's
+  inverter/service/load warning flags and link status, per-device alarm and
+  offline states, weak datalogger signal, and SolarLens's own failed polls,
+  each row naming the field it came from. A system with nothing wrong lists
+  what was checked, so an empty section reads as "clear" rather than "nobody
+  looked".
+- **A clickable chart legend.** Two curves lying on top of each other are two
+  curves you cannot read, so each name is a switch: click to drop that system
+  out of the picture and the axis rescales to what is left. The fleet sum is a
+  switch too, the choice is remembered per browser, and turning everything off
+  says so rather than drawing an empty box.
 - **An app icon and favicon** — a lens ring split into the two vendor accents
   around a sun core.
 - `kv` table (migration `0007`) — a small expiring key/value shelf, first used
@@ -71,6 +84,15 @@ the announcement.
 - **Charts are easier to read**: larger axis type, three-hourly time ticks, an
   explicit "watts" unit label, a marked daily peak with the time it happened,
   and a taller plot area.
+- **"Offline" means offline.** One word for one state, from either direction:
+  the vendor calling the plant down, or nothing arriving for fifteen minutes.
+  Both now read `offline` rather than one saying "online" while the sample
+  beside it is an hour old. An offline system's instantaneous figures are
+  **zero** — output, grid, load and battery power — instead of repeating
+  whatever it last managed before it dropped, and its flow diagram goes dead to
+  match. Cumulative figures (today, lifetime, charge level) are untouched:
+  those were genuinely true and still are.
+- **The chart on the Power page collapses**, like the system sections below it.
 - **The Power page collapses per system.** Each inverter is a `<details>`
   section with its own complete grid, so a two-system fleet no longer scrolls
   as one long wall.
@@ -79,6 +101,25 @@ the announcement.
 
 ### Fixed
 
+- **Arrowheads no longer borrow the wrong system's colour.** Both flow diagrams
+  defined an SVG marker with the same id, and `url(#id)` resolves to whichever
+  came first in the document — so the SolarMan diagram drew its arrows in the
+  SolisCloud accent. Each diagram names its own markers now.
+- **A re-pushed sample refreshes the whole row, not part of it.** The first cut
+  of the refresh above updated only `metrics` and `raw`, which was worse than
+  updating nothing: a vendor can revise a payload without moving its timestamp
+  (an inverter going offline keeps the same `dataTimestamp` and only flips its
+  state field), so the row ended up with a `status` of "online" sitting beside
+  a raw payload that said otherwise. That is exactly what was making a dead
+  plant read as online.
+- **`npm run db:local` / `db:remote` no longer go stale.** They hand-listed
+  every migration file, and migration 7 was never added, so a fresh install
+  would have had no `kv` table for the weather cache to write to. They call
+  `wrangler d1 migrations apply` now, which reads the directory.
+- **The test suite is typechecked.** `tsconfig.json` only covered `src`, so the
+  README's claim that a data-shape change fails at compile time was not true of
+  the tests themselves. `npm test` now typechecks both first — which
+  immediately turned up two latent type errors in the specs.
 - **A parser improvement now reaches the newest row.** `insertReading` used
   `INSERT OR IGNORE`, so re-pushing a timestamp the database already held threw
   the improved metrics away and the new fields stayed blank until the vendor
