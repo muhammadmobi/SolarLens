@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { daily, insertReading, latest, latestPollPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
+import { daily, insertReading, latest, latestPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
 import { plantFilter, pollAll } from './poll';
 import { stampWeather } from './weather';
 import type { Inverter, Reading } from './providers/types';
@@ -133,10 +133,14 @@ app.get('/api/series', async (c) => {
 app.get('/api/health', async (c) => {
   // `polls` is the recent history; `feeds` is the newest line per provider, so
   // a feed that has gone quiet cannot be hidden by a busier one logging over it.
-  const [polls, feeds] = await Promise.all([recentPolls(c.env.DB), latestPollPerProvider(c.env.DB)]);
+  // One read, two answers: the recent history, and the newest line per feed
+  // folded out of the same rows. 200 covers well over a day of both feeds.
+  const polls = await recentPolls(c.env.DB, 200);
+  const feeds = latestPerProvider(polls);
   // The dashboard turns this into a banner. An unauthenticated deployment is
   // not something anyone should have to notice for themselves.
-  return c.json({ now: nowSec(), polls, feeds, authDisabled: !c.env.API_TOKEN });
+  // The footer shows every feed; the table below it wants only the recent few.
+  return c.json({ now: nowSec(), polls: polls.slice(0, 20), feeds, authDisabled: !c.env.API_TOKEN });
 });
 
 /**

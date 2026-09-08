@@ -249,26 +249,39 @@ export interface SeriesRow {
   grid_power_w: number | null;
 }
 
+/**
+ * Readings in a range, one row per inverter per instant.
+ *
+ * A backfilled point and a live one can describe the same instant; the live one
+ * wins, because it carries the whole reading rather than just a wattage. That
+ * used to be a correlated NOT EXISTS, which ran once per row and could not use
+ * an index - `source NOT LIKE '%-history'` is not something an index can
+ * answer. Reading the rows once and folding them here costs a single indexed
+ * range scan instead.
+ */
 export async function series(db: D1Database, fromTs: number, toTs: number): Promise<SeriesRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT inverter_id, ts, ac_power_w, today_kwh, battery_soc, grid_power_w
-       FROM readings r
+      `SELECT inverter_id, ts, ac_power_w, today_kwh, battery_soc, grid_power_w, source
+       FROM readings
        WHERE ts BETWEEN ?1 AND ?2
-         AND (
-           source NOT LIKE '%-history'
-           OR NOT EXISTS (
-             SELECT 1 FROM readings live
-             WHERE live.inverter_id = r.inverter_id AND live.ts = r.ts
-               AND live.source NOT LIKE '%-history'
-           )
-         )
        ORDER BY ts ASC`,
     )
     .bind(fromTs, toTs)
-    .all<SeriesRow>();
-  return results;
+    .all<SeriesRow & { source: string | null }>();
+
+  const best = new Map<string, SeriesRow & { source: string | null }>();
+  for (const r of results) {
+    const key = `${r.inverter_id}|${r.ts}`;
+    const seen = best.get(key);
+    if (!seen || (isHistory(seen.source) && !isHistory(r.source))) best.set(key, r);
+  }
+  return [...best.values()]
+    .sort((a, b) => a.ts - b.ts)
+    .map(({ source: _source, ...row }) => row);
 }
+
+const isHistory = (source: string | null) => !!source && source.endsWith('-history');
 
 const POLL_LOG_KEEP_S = 7 * 24 * 3600;
 
@@ -363,24 +376,31 @@ export async function logPoll(db: D1Database, provider: string, ok: boolean, det
   }
 }
 
+export interface PollRow { ts: number; provider: string; ok: number; detail: string }
+
 /**
  * Newest log line per provider, so a quiet feed cannot hide behind a busy one.
  *
- * "none" is not a feed - it is the poller saying no credentials were
- * configured at all - so it is left out whenever a real provider has reported,
- * or its long-resolved error would sit in the footer forever.
+ * This was a SQL query with a correlated subquery - `WHERE ts = (SELECT MAX(ts)
+ * ... WHERE provider = p.provider)` - which re-scanned the whole log for every
+ * row in it. On a table of 869 rows that read 7,592 rows per call and, at one
+ * call per dashboard refresh, accounted for 88% of a day's entire D1 read
+ * budget on its own. It is a fold over a list, and it belongs in the language
+ * that has one: the rows are already fetched for the poll history beside it.
+ *
+ * "none" is not a feed - it is the poller saying no credentials were configured
+ * at all - so it is left out whenever a real provider has reported, or its
+ * long-resolved error would sit in the footer forever.
  */
-export async function latestPollPerProvider(db: D1Database) {
-  const { results } = await db
-    .prepare(
-      `SELECT p.ts, p.provider, p.ok, p.detail FROM poll_log p
-       WHERE p.ts = (SELECT MAX(ts) FROM poll_log WHERE provider = p.provider)
-       GROUP BY p.provider
-       ORDER BY p.provider`,
-    )
-    .all<{ ts: number; provider: string; ok: number; detail: string }>();
-  const real = results.filter((r) => r.provider !== 'none');
-  return real.length ? real : results;
+export function latestPerProvider(polls: PollRow[]): PollRow[] {
+  const newest = new Map<string, PollRow>();
+  for (const p of polls) {
+    const seen = newest.get(p.provider);
+    if (!seen || p.ts > seen.ts) newest.set(p.provider, p);
+  }
+  const all = [...newest.values()].sort((a, b) => a.provider.localeCompare(b.provider));
+  const real = all.filter((p) => p.provider !== 'none');
+  return real.length ? real : all;
 }
 
 export async function recentPolls(db: D1Database, limit = 20) {
