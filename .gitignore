@@ -24,3 +24,4 @@ playwright-report/
 # One-shot patch scripts used while developing; never part of the app
 patch-*.mjs
 .probe-*.mjs
+coverage/

@@ -186,7 +186,7 @@ test.describe('Overview', () => {
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
     await page.goto('/');
     const solis = page.locator('a.sys').nth(0);
-    await expect(solis.locator('.freshness')).toContainText('last sample');
+    await expect(solis.locator('.freshness')).toContainText('last update');
     await expect(solis.locator('.pill')).toHaveClass(/warn/);
     await expect(solis.locator('.pill')).toHaveText('offline');
     // Offline output is zero, not the 5.08 kW it managed before it dropped.
@@ -304,6 +304,63 @@ test.describe('Alerts', () => {
     await expect(sec).toContainText('Inverter warning');
     await expect(sec).toContainText('Datalogger link');
     await expect(sec).toContainText('abnormal');
+  });
+
+  test('every alert carries the moment it is describing', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
+    await page.goto('/#/alerts');
+    const stamps = page.locator('details.syssec').nth(0).locator('.a-when time');
+    await expect(stamps.first()).toBeVisible();
+
+    // A machine-readable instant, so the markup is not just decoration...
+    const dt = await stamps.first().getAttribute('datetime');
+    expect(dt).toBeTruthy();
+    expect(Number.isNaN(Date.parse(dt as string))).toBe(false);
+    // ...matching the hour the alert is actually about.
+    expect(Math.abs(Date.parse(dt as string) / 1000 - (NOW - 3600))).toBeLessThan(120);
+
+    // And a human-readable one carrying both a clock time and how long ago.
+    const text = (await stamps.first().textContent()) ?? '';
+    expect(text).toContain(':');
+    expect(text).toContain('ago');
+    expect(text).toContain(String(new Date((NOW - 3600) * 1000).getFullYear()));
+  });
+
+  test('faults sort above warnings, and newer above older', async ({ page }) => {
+    // A plant going down takes its hardware with it, which is the realistic
+    // shape of this: one fault and two symptoms.
+    const devs = devices().map((d) => d.provider === 'soliscloud'
+      ? { ...d, status: 'offline', last_seen: NOW - 3600 } : d);
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }), devs });
+    await page.goto('/#/alerts');
+    const items = page.locator('details.syssec').nth(0).locator('.alerts li');
+    await expect(items).toHaveCount(3);
+    await expect(items.first()).toHaveClass(/bad/);
+    await expect(items.first()).toContainText('System offline');
+    // The two devices that went quiet with it follow, as warnings.
+    await expect(items.nth(1)).toHaveClass(/warn/);
+    await expect(items.nth(2)).toHaveClass(/warn/);
+  });
+
+  test('a device stamp is its own last contact, not the plant\'s newest update', async ({ page }) => {
+    const devs = devices().map((d) => d.kind === 'datalogger' && d.provider === 'soliscloud'
+      ? { ...d, status: 'offline', last_seen: NOW - 7200 } : d);
+    await stubApi(page, { devs });
+    await page.goto('/#/alerts');
+    const row = page.locator('.alerts li', { hasText: 'Datalogger' }).first();
+    const dt = await row.locator('.a-when time').getAttribute('datetime');
+    // Two hours, from the datalogger's own record - not the two minutes since
+    // the plant's newest sample.
+    expect(Math.abs(Date.parse(dt as string) / 1000 - (NOW - 7200))).toBeLessThan(120);
+  });
+
+  test('a clean system is stamped with the update it was judged against', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/alerts');
+    const clear = page.locator('.allclear').first();
+    await expect(clear.locator('.a-when')).toContainText('Against the update of');
+    const dt = await clear.locator('time').getAttribute('datetime');
+    expect(Number.isNaN(Date.parse(dt as string))).toBe(false);
   });
 
   test('an offline feed is an alert in its own right', async ({ page }) => {
@@ -509,7 +566,7 @@ test.describe('Energy flow on the overview', () => {
     await page.goto('/');
     const box = page.locator('a.flowlink').nth(0);
     await expect(box.locator('.flowstale')).toContainText('offline');
-    await expect(box.locator('.flowstale')).toContainText('last sample');
+    await expect(box.locator('.flowstale')).toContainText('last update');
     // Every arm now carries a real zero, so nothing is drawn live and no pip
     // travels: the picture agrees with the figures instead of contradicting them.
     await expect(box.locator('svg.flow .wire.live')).toHaveCount(0);

@@ -129,6 +129,7 @@
   .a-src { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .05em;
            text-transform: uppercase; color: var(--faint); }
   .a-detail { margin-top: 5px; font-size: 13.5px; color: var(--muted); }
+  .a-when { margin-top: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--faint); }
   .allclear { padding: 18px 16px; }
   .ac-head { font-weight: 700; font-size: 15px; color: var(--ok); }
   .ac-sub { margin-top: 6px; font-size: 12.5px; color: var(--faint); }
@@ -796,7 +797,7 @@
         <span class="val">${pv}</span><span class="unit">${pu}</span>
         <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)} rated` : ''}</span>
       </div>
-      <div class="freshness ${st.stale ? 'stale' : ''}">${inv.ts ? (st.stale ? `⚠ last sample ${ago(inv.ts)}` : `updated ${ago(inv.ts)}`) : ''}</div>
+      <div class="freshness ${st.stale ? 'stale' : ''}"${inv.ts ? ` title="${esc(when(inv.ts))}"` : ''}>${inv.ts ? (st.stale ? `⚠ last update ${ago(inv.ts)}` : `updated ${ago(inv.ts)}`) : ''}</div>
       ${flowStats(inv, true)}
       ${battPanel(inv, m)}
     </a>`;
@@ -938,7 +939,7 @@
       return `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}">
       <section class="card"><div class="body">
         ${boxTitle(inv)}
-        ${st.offline ? `<div class="flowstale">⚠ offline · last sample ${esc(inv.ts ? ago(inv.ts) : 'never')}</div>` : ''}
+        ${st.offline ? `<div class="flowstale">⚠ offline · last update ${esc(inv.ts ? `${when(inv.ts)} (${ago(inv.ts)})` : 'never')}</div>` : ''}
         ${flowSvg(inv, parse(inv.metrics) ?? {})}
       </div></section></a>`;
     }).join('');
@@ -966,6 +967,26 @@
    * level, SolarMan carries a handful of NORMAL/ABNORMAL flags - so both
    * vocabularies are read and mapped onto the same three severities.
    */
+  /**
+   * "5 min ago" answers "is this current?"; a clock time answers "was this the
+   * one at breakfast?". An alert needs both, so the absolute stamp leads and
+   * the relative one follows it.
+   */
+  function when(ts) {
+    if (!ts) return 'unknown';
+    const d = new Date(ts * 1000);
+    if (Number.isNaN(d.getTime())) return 'unknown';
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        day: 'numeric', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(d);
+    } catch {
+      return d.toISOString().slice(0, 16).replace('T', ' ');
+    }
+  }
+  const stamp = (ts) => ts ? `${when(ts)} · ${ago(ts)}` : 'time not reported';
+
   const WARN_FLAGS = [
     ['warningStatus', 'Inverter warning'],
     ['businessWarningStatus', 'Service warning'],
@@ -976,7 +997,9 @@
     const out = [];
     const st = statusOf(inv);
     const raw = parse(inv.raw) ?? {};
-    const add = (level, title, detail, source) => out.push({ level, title, detail, source });
+    // Every row carries the moment it is describing: the sample it was read
+    // from, the device's last contact, or the poll that failed.
+    const add = (level, title, detail, source, ts = inv.ts) => out.push({ level, title, detail, source, ts });
 
     // --- the feed itself, which is ours to judge rather than the vendor's ---
     if (!inv.ts) {
@@ -990,7 +1013,7 @@
         : '';
       add('bad', 'System offline',
         inv.status === 'offline'
-          ? `The vendor reports the plant offline. Last sample ${ago(inv.ts)}.${relay}`
+          ? `The vendor reports the plant offline. Last update ${ago(inv.ts)}.${relay}`
           : `Nothing has arrived for ${ago(inv.ts)}; the cutoff is 15 minutes.${relay}`,
         inv.status === 'offline' ? providerName(inv.provider) : 'SolarLens');
     }
@@ -1021,24 +1044,26 @@
     // --- the hardware behind the readings ----------------------------------
     for (const d of devicesFor(inv)) {
       const what = `${d.kind === 'datalogger' ? 'Datalogger' : d.kind === 'inverter' ? 'Inverter' : d.kind} ${d.sn ?? ''}`.trim();
-      if (d.status === 'alarm') add('bad', `${what} in alarm`, 'The device itself is raising a fault.', providerName(d.provider));
+      // A device's own clock is its last contact, not the plant's newest sample.
+      const dts = d.last_seen ?? d.updated_at ?? inv.ts;
+      if (d.status === 'alarm') add('bad', `${what} in alarm`, 'The device itself is raising a fault.', providerName(d.provider), dts);
       else if (d.status === 'offline') {
         add('warn', `${what} offline`,
-          d.last_seen ? `Last contact ${ago(d.last_seen)}.` : 'No contact recorded.', providerName(d.provider));
+          d.last_seen ? `Last contact ${ago(d.last_seen)}.` : 'No contact recorded.', providerName(d.provider), dts);
       }
       const drow = parse(d.raw) ?? {};
       const dAlert = Number(drow.alertStatus);
       // SolarMan uses -1 for "nothing to report", so only a positive count is news.
       if (Number.isFinite(dAlert) && dAlert > 0) {
-        add('bad', `${what}: ${dAlert} alert${dAlert === 1 ? '' : 's'}`, 'Raised on the device record.', 'SolarMan');
+        add('bad', `${what}: ${dAlert} alert${dAlert === 1 ? '' : 's'}`, 'Raised on the device record.', 'SolarMan', dts);
       }
       // A datalogger that cannot hear the radio is the usual cause of a silent
       // outage, and it is worth saying before the data goes stale.
       if (d.kind === 'datalogger' && d.signal_pct != null && d.signal_pct < 25) {
-        add('warn', `${what}: weak signal`, `${Math.round(d.signal_pct)}% link quality.`, 'SolarMan');
+        add('warn', `${what}: weak signal`, `${Math.round(d.signal_pct)}% link quality.`, 'SolarMan', dts);
       }
       if (d.kind === 'datalogger' && d.signal_dbm != null && d.signal_dbm < -85) {
-        add('warn', `${what}: weak signal`, `${d.signal_dbm} dBm.`, 'SolisCloud');
+        add('warn', `${what}: weak signal`, `${d.signal_dbm} dBm.`, 'SolisCloud', dts);
       }
     }
 
@@ -1047,10 +1072,13 @@
     if (poll && !poll.ok) {
       // Escaped once, by the renderer. Escaping here as well turned an "&"
       // in a vendor's error string into "&amp;amp;" on the page.
-      add('bad', 'Last poll failed', `${poll.detail || 'No detail given.'} (${ago(poll.ts)})`, 'SolarLens');
+      add('bad', 'Last poll failed', poll.detail || 'No detail given.', 'SolarLens', poll.ts);
     }
 
-    return out;
+    // Faults first, then whatever happened most recently: the two questions a
+    // reader actually has, in that order.
+    const rank = { bad: 0, warn: 1, info: 2 };
+    return out.sort((a, b) => (rank[a.level] - rank[b.level]) || ((b.ts ?? 0) - (a.ts ?? 0)));
   }
 
   /** What was looked at, so an empty list reads as "clear", not "not checked". */
@@ -1083,10 +1111,13 @@
         ? `<ul class="alerts">${rows.map((r) => `<li class="${r.level}">
              <div class="a-head">${dot(r.level)}<span class="a-title">${esc(r.title)}</span>
                <span class="a-src">${esc(r.source)}</span></div>
-             <div class="a-detail">${esc(r.detail)}</div></li>`).join('')}</ul>`
+             <div class="a-detail">${esc(r.detail)}</div>
+             <div class="a-when"><time${r.ts ? ` datetime="${new Date(r.ts * 1000).toISOString()}"` : ''}>${esc(stamp(r.ts))}</time></div>
+           </li>`).join('')}</ul>`
         : `<div class="allclear">
              <div class="ac-head">✓ Nothing reported</div>
              <div class="ac-sub">Checked: ${esc(checksFor(inv).join(', '))}.</div>
+             <div class="a-when">Against the update of <time${inv.ts ? ` datetime="${new Date(inv.ts * 1000).toISOString()}"` : ''}>${esc(stamp(inv.ts))}</time></div>
            </div>`;
       return `<details class="syssec" open>
         <summary>
