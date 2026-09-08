@@ -55,6 +55,20 @@ the announcement.
   out of the picture and the axis rescales to what is left. The fleet sum is a
   switch too, the choice is remembered per browser, and turning everything off
   says so rather than drawing an empty box.
+- **Every alert is stamped with the moment it describes** — a clock time and a
+  relative one, in a `<time>` element with a machine-readable `datetime`. A
+  device's stamp is its own last contact rather than the plant's newest update,
+  a failed poll carries when it failed, and a clean system says which update it
+  was judged against. Rows sort faults first, then newest.
+- **Unit tests for the weather lookup and the call queue** — coordinate
+  extraction per vendor payload shape, the two Google responses mapped in the
+  site's timezone, the cache serving instead of paying, and a weather outage
+  never taking the poll down. The queue's ordering, its minimum gap, and that
+  one failed call does not strand the calls behind it.
+- **Coverage reporting** — `npm run test:unit:coverage` (v8 provider, terminal +
+  HTML + lcov) with thresholds set just under the achieved figures, so a
+  regression trips them. Documented honestly in the README, including what the
+  uncovered portion is and why it is covered elsewhere.
 - **An app icon and favicon** — a lens ring split into the two vendor accents
   around a sun core.
 - `kv` table (migration `0007`) — a small expiring key/value shelf, first used
@@ -93,6 +107,9 @@ the announcement.
   match. Cumulative figures (today, lifetime, charge level) are untouched:
   those were genuinely true and still are.
 - **The chart on the Power page collapses**, like the system sections below it.
+- **"Last update" replaces "last sample"** throughout, and now carries the
+  actual date and time in a tooltip. "Sample" was our word for it, not one that
+  says anything to someone reading a dashboard.
 - **The Power page collapses per system.** Each inverter is a `<details>`
   section with its own complete grid, so a two-system fleet no longer scrolls
   as one long wall.
@@ -101,6 +118,11 @@ the announcement.
 
 ### Fixed
 
+- **The tests are covered as well as typechecked.** `weather.ts` shipped at 6%
+  coverage - a whole module with no unit tests of its own - and the call queue,
+  which is the only thing standing between a cron run and a rate-limit ban, had
+  none either. Both are now near-complete, taking the measured figure from 41%
+  to 57% of statements.
 - **Arrowheads no longer borrow the wrong system's colour.** Both flow diagrams
   defined an SVG marker with the same id, and `url(#id)` resolves to whichever
   came first in the document — so the SolarMan diagram drew its arrows in the

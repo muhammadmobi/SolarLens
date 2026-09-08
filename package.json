@@ -17,7 +17,8 @@
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "relay:solis": "node agent/solis-relay.mjs"
+    "relay:solis": "node agent/solis-relay.mjs",
+    "test:unit:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "hono": "^4.13.7"
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260905.1",
     "@playwright/test": "^1.63.0",
+    "@vitest/coverage-v8": "^5.0.0",
     "playwright-core": "^1.63.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0",
