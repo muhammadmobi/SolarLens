@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { insertReading, latest, listDevices, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
+import { insertReading, latest, latestPollPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
 import { plantFilter, pollAll } from './poll';
 import { stampWeather } from './weather';
 import type { Inverter, Reading } from './providers/types';
@@ -75,7 +75,10 @@ app.get('/api/series', async (c) => {
 });
 
 app.get('/api/health', async (c) => {
-  return c.json({ now: nowSec(), polls: await recentPolls(c.env.DB) });
+  // `polls` is the recent history; `feeds` is the newest line per provider, so
+  // a feed that has gone quiet cannot be hidden by a busier one logging over it.
+  const [polls, feeds] = await Promise.all([recentPolls(c.env.DB), latestPollPerProvider(c.env.DB)]);
+  return c.json({ now: nowSec(), polls, feeds });
 });
 
 app.post('/api/poll', async (c) => {
@@ -188,6 +191,11 @@ app.post('/api/ingest/station', async (c) => {
   await upsertInverter(c.env.DB, inv);
   await stampWeather(c.env, reading);
   const stored = await insertReading(c.env.DB, reading);
+  // The relay is how SolisCloud data arrives, so it belongs in the poll log
+  // beside the cloud poller. Without this the footer only ever mentioned
+  // SolarMan, and the dashboard read as though one system were untracked.
+  await logPoll(c.env.DB, body.provider, true,
+    `${source}: ${inv.name || plantId} ${reading.acPowerW ?? '?'} W${stored ? '' : ' (no new sample)'}`);
   return c.json({ stored, inverterId: inv.id, ts: reading.ts, acPowerW: reading.acPowerW });
 });
 

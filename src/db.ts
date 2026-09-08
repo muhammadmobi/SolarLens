@@ -260,11 +260,40 @@ export async function series(db: D1Database, fromTs: number, toTs: number): Prom
   return results;
 }
 
+const POLL_LOG_KEEP_S = 7 * 24 * 3600;
+
 export async function logPoll(db: D1Database, provider: string, ok: boolean, detail: string): Promise<void> {
+  const now = nowSec();
   await db
     .prepare(`INSERT INTO poll_log (ts, provider, ok, detail) VALUES (?1, ?2, ?3, ?4)`)
-    .bind(nowSec(), provider, ok ? 1 : 0, detail.slice(0, 500))
+    .bind(now, provider, ok ? 1 : 0, detail.slice(0, 500))
     .run();
+  // Two feeds logging every five minutes is ~576 rows a day, and nothing else
+  // ever deletes them. Prune occasionally rather than on every write: the log
+  // is a debugging aid, not a ledger, and a week of it is plenty.
+  if (Math.random() < 0.02) {
+    await db.prepare(`DELETE FROM poll_log WHERE ts < ?1`).bind(now - POLL_LOG_KEEP_S).run();
+  }
+}
+
+/**
+ * Newest log line per provider, so a quiet feed cannot hide behind a busy one.
+ *
+ * "none" is not a feed - it is the poller saying no credentials were
+ * configured at all - so it is left out whenever a real provider has reported,
+ * or its long-resolved error would sit in the footer forever.
+ */
+export async function latestPollPerProvider(db: D1Database) {
+  const { results } = await db
+    .prepare(
+      `SELECT p.ts, p.provider, p.ok, p.detail FROM poll_log p
+       WHERE p.ts = (SELECT MAX(ts) FROM poll_log WHERE provider = p.provider)
+       GROUP BY p.provider
+       ORDER BY p.provider`,
+    )
+    .all<{ ts: number; provider: string; ok: number; detail: string }>();
+  const real = results.filter((r) => r.provider !== 'none');
+  return real.length ? real : results;
 }
 
 export async function recentPolls(db: D1Database, limit = 20) {
