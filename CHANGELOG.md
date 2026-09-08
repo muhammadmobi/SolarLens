@@ -69,6 +69,18 @@ the announcement.
   HTML + lcov) with thresholds set just under the achieved figures, so a
   regression trips them. Documented honestly in the README, including what the
   uncovered portion is and why it is covered elsewhere.
+- **The solar node carries its share of the array's rating** — `Solar · 73%`
+  right on the title, which is what makes a 12 kW system and a 3.5 kW one
+  comparable at a glance.
+- **A sparse day is drawn as samples, not as an invisible line.** A few readings
+  twenty minutes apart on a 24-hour axis is a two-pixel smudge that reads as
+  "the graph is showing nothing". When a series covers only a short stretch of
+  the day, each sample is marked; the unrecorded part of the axis is shaded and
+  labelled `recorded from 12:15`, so an empty morning reads as missing data
+  rather than as a flat zero the system genuinely produced. That claim is made
+  only when the vendor reported sunrise and the record began well after it —
+  a curve that starts at six o'clock is just sunrise, and warning about it every
+  morning would be noise.
 - **An app icon and favicon** — a lens ring split into the two vendor accents
   around a sun core.
 - `kv` table (migration `0007`) — a small expiring key/value shelf, first used
@@ -106,6 +118,9 @@ the announcement.
   whatever it last managed before it dropped, and its flow diagram goes dead to
   match. Cumulative figures (today, lifetime, charge level) are untouched:
   those were genuinely true and still are.
+- **Both flow diagrams are drawn at one size**, so a hybrid and an on-grid plant
+  side by side no longer look like one card was cut short. The cards fill the
+  row rather than each ending where its own content does.
 - **The chart on the Power page collapses**, like the system sections below it.
 - **"Last update" replaces "last sample"** throughout, and now carries the
   actual date and time in a tooltip. "Sample" was our word for it, not one that

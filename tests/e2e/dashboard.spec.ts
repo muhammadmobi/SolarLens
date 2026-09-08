@@ -517,6 +517,53 @@ test.describe('Power page', () => {
     await expect(page.locator('svg.combined').nth(1)).toContainText('One sample so far today');
   });
 
+  test('a handful of samples is marked, not drawn as an invisible smudge', async ({ page }) => {
+    // Three samples twenty minutes apart on a 24-hour axis is a two-pixel
+    // line. Drawn as a bare path, a reader quite reasonably reports it as
+    // "the graph is showing nothing".
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const noon = Math.floor(t0.getTime() / 1000) + 12 * 3600;
+    const sparse = [0, 300, 600].map((d) => ({
+      inverter_id: SOLIS, ts: noon + d, ac_power_w: 8470 + d, today_kwh: null, battery_soc: null, grid_power_w: null,
+    }));
+    await stubApi(page, { series: sparse });
+    await page.goto('/#/power');
+    // svg.combined 0 is the fleet chart; 1 and 2 are the per-system ones.
+    const chart = page.locator('svg.combined').nth(1);
+    // Every sample gets a dot of its own.
+    await expect(chart.locator('circle')).toHaveCount(5); // 3 samples + peak + latest
+    // And the empty morning is labelled and shaded, so it reads as "nobody
+    // recorded this" rather than "the system produced nothing". SolisCloud
+    // said the sun came up at 05:45, so six hours of daylight are missing.
+    await expect(chart.locator('.axis.gap')).toContainText('recorded from 12:00');
+    await expect(chart.locator('.nodata')).toHaveCount(1);
+  });
+
+  test('a record that starts at sunrise is not a gap', async ({ page }) => {
+    // The fixture's curve begins at 06:00 and sunrise was 05:45. Warning about
+    // that every morning would be noise, not information.
+    await stubApi(page);
+    await page.goto('/#/power');
+    await expect(page.locator('svg.combined').nth(1).locator('.axis.gap')).toHaveCount(0);
+  });
+
+  test('no sunrise reported means no claim about a gap', async ({ page }) => {
+    // The hybrid's fixture carries no weather, so there is nothing to measure
+    // a late start against - and a guess would be worse than silence.
+    await stubApi(page);
+    await page.goto('/#/power');
+    await expect(page.locator('svg.combined').nth(2).locator('.axis.gap')).toHaveCount(0);
+  });
+
+  test('a full day of samples gets no per-sample dots', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/power');
+    const chart = page.locator('svg.combined').nth(2);
+    await expect(chart.locator('.nodata')).toHaveCount(0);
+    // Only the peak and the latest reading are marked; 13 dots would be clutter.
+    await expect(chart.locator('circle')).toHaveCount(2);
+  });
+
   test('switching every line off says so rather than drawing an empty box', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/power');
@@ -580,6 +627,43 @@ test.describe('Energy flow on the overview', () => {
     await expect(page.locator('nav a')).toHaveText([/Overview/, /Power/, /Alerts/, /Devices/]);
     await page.goto('/#/flow');
     await expect(page.locator('h2.band').first()).toHaveText('Energy flow');
+  });
+
+  test('both systems draw at the same size, whatever hardware they have', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    const boxes = await page.locator('svg.flow').evaluateAll(
+      (svgs) => svgs.map((s) => s.getAttribute('viewBox')));
+    // A hybrid hangs a battery below the house and carries a self-powered bar;
+    // an on-grid plant has neither. Drawn at different heights, the shorter
+    // card just looks cut off beside the taller one.
+    expect(new Set(boxes).size).toBe(1);
+
+    // Matching heights is a same-row property: stacked on a phone, the hybrid's
+    // card is taller because it carries a self-powered bar, and that is fine.
+    const rects = await page.locator('a.flowlink').evaluateAll(
+      (els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ y: Math.round(r.y), h: Math.round(r.height) })));
+    if (Math.abs(rects[0].y - rects[1].y) < 2) {
+      expect(Math.abs(rects[0].h - rects[1].h)).toBeLessThanOrEqual(2);
+    } else {
+      expect(rects[1].y).toBeGreaterThan(rects[0].y + rects[0].h - 2); // stacked
+    }
+  });
+
+  test('the solar node says what share of the array is working', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    const labels = page.locator('svg.flow .lbl');
+    // 5.08 kW of a 12 kW array; 278 W of a 3.5 kW one. The percentage is what
+    // makes those two comparable at a glance, so it rides on the title.
+    await expect(labels.nth(0)).toHaveText('Solar · 42%');
+    await expect(page.locator('a.flowlink').nth(1).locator('.lbl').first()).toHaveText('Solar · 8%');
+  });
+
+  test('no percentage where there is no rating to divide by', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { capacity_w: null } }) });
+    await page.goto('/');
+    await expect(page.locator('a.flowlink').nth(0).locator('.lbl').first()).toHaveText('Solar');
   });
 
   test('each diagram owns its arrow markers, so accents cannot leak', async ({ page }) => {
