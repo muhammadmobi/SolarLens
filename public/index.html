@@ -326,6 +326,9 @@
   .bars { display: flex; flex-direction: column; gap: 12px; }
   .bar-row { display: grid; grid-template-columns: 64px 1fr auto; gap: 12px; align-items: center; font-size: 13px; }
   .bar-row .lbl { color: var(--muted); font-weight: 600; }
+  .bar-row.unused { opacity: .55; }
+  .bar-row.unused .num { color: var(--faint); font-weight: 650; }
+  .cardnote { margin: 12px 0 0; font-size: 12.5px; color: var(--faint); }
   .bar-track { height: 9px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
   .bar-fill { height: 100%; border-radius: 999px; }
   .bar-row .num { font-variant-numeric: tabular-nums; font-weight: 700; }
@@ -819,7 +822,12 @@
       stat('Load', fmtWs(inv.load_power_w)),
       // The card shows a battery ring already, so the figure would be a repeat.
       !omitBattery && hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
-      strings && strings.length ? stat('PV strings', `${strings.length} producing`) : '',
+      (() => {
+        if (!strings || !strings.length) return '';
+        const live = strings.filter((x) => (x.powerW ?? 0) > 0).length;
+        // "2 producing" was counting an unused MPPT input as a working string.
+        return stat('PV strings', live === strings.length ? `${live} producing` : `${live} of ${strings.length} producing`);
+      })(),
       tempC != null ? stat('Temperature', `${tempC.toFixed(1)} °C`) : '',
       (() => { const b = parse(invDev?.battery); return b?.tempC != null ? stat('Battery temp', `${b.tempC} °C`) : ''; })(),
       invDev?.model ? stat('Model', esc(invDev.model)) : '',
@@ -1238,9 +1246,11 @@
   }
 
   // ---------- system detail ----------
-  function kvCard(title, rows) {
+  function kvCard(title, rows, note) {
     const body = rows.filter(Boolean).map(([k, v, mono]) => `<dt>${esc(k)}</dt><dd class="${mono ? 'mono' : ''}">${v}</dd>`).join('');
-    return body ? `<section class="card"><h3>${esc(title)}</h3><div class="body"><dl class="kv">${body}</dl></div></section>` : '';
+    if (!body) return '';
+    return `<section class="card"><h3>${esc(title)}</h3><div class="body"><dl class="kv">${body}</dl>` +
+      `${note ? `<p class="cardnote">${esc(note)}</p>` : ''}</div></section>`;
   }
 
   function stringsCard(invDev, accent) {
@@ -1253,12 +1263,20 @@
       ? `<p style="margin:0;color:var(--muted);font-size:13.5px">No string is producing in the latest sample.</p>`
       : (() => {
           const max = Math.max(...strings.map((s) => s.powerW), 1);
-          return `<div class="bars">${strings.map((s) => `<div class="bar-row">
+          return `<div class="bars">${strings.map((s) => {
+            const state = stringState(s);
+            const detail = [s.voltageV != null ? `${s.voltageV} V` : null, s.currentA != null ? `${s.currentA} A` : null]
+              .filter(Boolean).join(' · ');
+            return `<div class="bar-row${state === 'no input' ? ' unused' : ''}">
             <span class="lbl">String ${s.index}</span>
             <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, (s.powerW / max) * 100).toFixed(1)}%;background:${accent}"></span></span>
-            <span class="num">${fmtWs(s.powerW)}</span>
-            ${s.voltageV != null || s.currentA != null ? `<span class="sub2">${s.voltageV != null ? `${s.voltageV} V` : ''}${s.voltageV != null && s.currentA != null ? ' · ' : ''}${s.currentA != null ? `${s.currentA} A` : ''}</span>` : ''}
-            </div>`).join('')}</div>`;
+            <span class="num">${state ? esc(state) : fmtWs(s.powerW)}</span>
+            ${detail ? `<span class="sub2">${esc(detail)}</span>` : ''}
+            </div>`;
+          }).join('')}</div>
+          ${strings.some((x) => stringState(x) === 'no input')
+            ? `<p class="cardnote">An MPPT input reading a fraction of a volt with no current has nothing plugged into it - not a string producing zero.</p>`
+            : ''}`;
         })();
     return `<section class="card"><h3>PV strings · MPPT</h3><div class="body">${body}</div></section>`;
   }
@@ -1300,6 +1318,17 @@
    * Every card that describes one system, in reading order. Shared verbatim by
    * the system view and the Power page so the two can never drift apart.
    */
+  /**
+   * An MPPT input with no array on it still appears in the register set,
+   * reporting a fraction of a volt and no current. That is not a string
+   * producing zero watts at night - it is a socket with nothing in it, and
+   * saying so answers "why does string 2 have no value?" once instead of
+   * every time someone looks.
+   */
+  const stringState = (st) =>
+    (st.voltageV ?? 0) < 10 && !(st.currentA > 0) && !(st.powerW > 0) ? 'no input'
+      : (st.powerW ?? 0) > 0 ? null : 'not producing';
+
   function detailBlocks(inv) {
     const m = parse(inv.metrics) ?? {};
     const st = statusOf(inv);
@@ -1338,7 +1367,7 @@
       inv.dc_power_w != null ? ['DC input', fmtWs(inv.dc_power_w)] : null,
       ['House load', fmtWs(inv.load_power_w)],
       ['Grid', inv.grid_power_w == null ? '—' : (inv.grid_power_w >= 0 ? `↓ ${fmtWs(inv.grid_power_w)} import` : `↑ ${fmtWs(-inv.grid_power_w)} export`)],
-      ['Sample', esc(inv.ts ? ago(inv.ts) : 'never')],
+      ['Updated', inv.ts ? `${esc(when(inv.ts))} · ${esc(ago(inv.ts))}` : 'never'],
     ]);
 
     const counters = kvCard('Energy counters', [
@@ -1354,7 +1383,15 @@
       m.loadTotalKwh != null ? ['Consumed, lifetime', fmtKwh(m.loadTotalKwh)] : null,
       m.selfUseTodayKwh != null ? ['Self-consumed today', fmtKwh(m.selfUseTodayKwh)] : null,
       m.fullLoadHours != null ? ['Full-load hours', `${m.fullLoadHours} h`] : null,
-    ]);
+    ],
+    // A row that is simply absent invites the question every time. Say once
+    // why: an on-grid plant with no CT clamp reports every grid field as zero,
+    // and SolisCloud mirrors generation into household load so its own flow
+    // diagram has something to draw. None of that is a measurement, so none of
+    // it is shown - but the absence deserves a sentence.
+    m.genTotalKwh != null && m.gridImportTotalKwh === null && m.gridExportTotalKwh === null
+      ? 'Grid import, export and household consumption are missing because this plant has no grid meter — the vendor returns zeros for all of them, and a zero is not a measurement.'
+      : undefined);
 
     const bat = parse(invDev?.battery);
     const cyc = cycles(m, bat);

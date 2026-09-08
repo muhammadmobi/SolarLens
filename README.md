@@ -258,7 +258,7 @@ npm run test:unit:coverage  # vitest + v8 coverage, enforces thresholds
 npm run test:e2e            # playwright (add --ui for the inspector)
 ```
 
-**74 unit tests** and **138 end-to-end tests** (69 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**93 unit tests** and **138 end-to-end tests** (69 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -270,11 +270,13 @@ npm run test:e2e            # playwright (add --ui for the inspector)
 
 ### Unit tests — `tests/unit/`
 
-Four files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
+Six files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
 - **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
 - **`queue.test.ts`** — the rate limiter that stands between a cron run and a SolisCloud ban: calls stay in order, the minimum gap is a floor, and one failed call does not strand the ones behind it.
+- **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
+- **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`weather.test.ts`** — coordinate extraction from each vendor's payload shape (and `0,0` treated as "unset"), the two Google responses mapped onto one shape in the site's own timezone, the cache serving instead of paying for a call, and — the point of the module — a weather outage never taking the poll down with it.
 
 ### End-to-end tests — `tests/e2e/`
@@ -291,7 +293,7 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| `src/providers/` + `src/weather.ts` | **57%** | **48%** | **46%** | **57%** |
+| `src/providers/` + `src/weather.ts` | **60%** | **52%** | **51%** | **60%** |
 | `units.ts` | 96% | 97% | 100% | 100% |
 | `weather.ts` | 95% | 83% | 100% | 98% |
 | `queue.ts` | 100% | 100% | 100% | 100% |
@@ -364,6 +366,8 @@ solar-lens/
 │   ├── unit/normalize.test.ts   both vendor normalisers, signs and statuses
 │   ├── unit/queue.test.ts       vendor rate-limit queue
 │   ├── unit/weather.test.ts     coordinates, mapping, cache, failure handling
+│   ├── unit/history.test.ts     day-curve backfill normalisation
+│   ├── unit/pii.test.ts         what is stripped from a stored payload
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first
 ├── docs/api-notes.md         observed vendor field names and conventions

@@ -134,17 +134,36 @@ function plantHasBattery(d: Rec): boolean {
   return Array.isArray(list) && list.length > 0;
 }
 
+/**
+ * Whether the plant has any grid metering at all. Lifetime import and export
+ * both sitting at exactly zero is the tell: a real meter accumulates something
+ * eventually, so two lifetime zeros mean nothing is measuring the boundary.
+ */
+export function hasGridMetering(d: Rec): boolean {
+  const imported = num(pick(d, 'gridPurchasedTotalEnergy')) ?? 0;
+  const exported = num(pick(d, 'gridSellTotalEnergy')) ?? 0;
+  return imported > 0 || exported > 0;
+}
+
 function stationMetrics(d: Rec): Metrics {
   const m = emptyMetrics();
   m.genMonthKwh = kwhPair(d, 'monthEnergy');
   m.genYearKwh = kwhPair(d, 'yearEnergy');
   m.genTotalKwh = kwhPair(d, 'allEnergy');
-  m.loadTodayKwh = kwhPair(d, 'homeLoadEnergy') ?? kwhPair(d, 'homeLoadTodayEnergy');
-  m.loadTotalKwh = kwhPair(d, 'homeLoadTotalEnergy');
-  m.gridImportTodayKwh = kwhPair(d, 'gridPurchasedDayEnergy');
-  m.gridExportTodayKwh = kwhPair(d, 'gridSellDayEnergy');
-  m.gridImportTotalKwh = kwhPair(d, 'gridPurchasedTotalEnergy');
-  m.gridExportTotalKwh = kwhPair(d, 'gridSellTotalEnergy');
+  // An unmetered plant still returns every one of these fields, filled with
+  // zeros, and SolisCloud mirrors generation into homeLoad so the flow diagram
+  // has something to draw. A plant that has produced 48 MWh over its life
+  // without importing or exporting one kilowatt-hour is not perfectly
+  // self-sufficient; it is a plant nobody is metering. Leaving these null says
+  // "not measured", which is true; printing the zeros claims a measurement.
+  if (hasGridMetering(d)) {
+    m.loadTodayKwh = kwhPair(d, 'homeLoadEnergy') ?? kwhPair(d, 'homeLoadTodayEnergy');
+    m.loadTotalKwh = kwhPair(d, 'homeLoadTotalEnergy');
+    m.gridImportTodayKwh = kwhPair(d, 'gridPurchasedDayEnergy');
+    m.gridExportTodayKwh = kwhPair(d, 'gridSellDayEnergy');
+    m.gridImportTotalKwh = kwhPair(d, 'gridPurchasedTotalEnergy');
+    m.gridExportTotalKwh = kwhPair(d, 'gridSellTotalEnergy');
+  }
   m.fullLoadHours = num(pick(d, 'fullHour'));
   // condTxtD is the daytime description; the snapshot also carries sunrise and
   // sunset, which is enough to say whether the sun is even up.
@@ -177,11 +196,16 @@ export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Re
     batterySoc: battery ? num(pick(d, 'batteryCapacitySoc', 'batteryCapacitySoc2')) : null,
     batteryPowerW: battery ? toWatts(pick(d, 'batteryPower'), pick(d, 'batteryPowerStr')) : null,
     gridPowerW: psum === null ? null : -psum,
-    loadPowerW: toWatts(pick(d, 'familyLoadPower'), pick(d, 'familyLoadPowerStr')),
+    loadPowerW: hasGridMetering(d)
+      ? toWatts(pick(d, 'familyLoadPower'), pick(d, 'familyLoadPowerStr'))
+      : null,
     tempC: null,
     status: mapState(pick(d, 'state')),
     metrics: stationMetrics(d),
-    raw: d,
+    // The station snapshot carries the account holder's name and email and the
+    // site's coordinates, none of which is needed to monitor an inverter - and
+    // all of which would otherwise sit in the raw telemetry table.
+    raw: stripPii(d),
   };
 }
 
@@ -190,7 +214,22 @@ export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Re
  * account identifiers. None of that is needed to monitor an inverter, so it is
  * dropped before the payload is stored rather than filtered at render time.
  */
-const PII_KEY = /addr|latitude|longitude|iccid|userId|mobile|email|picUrl|position|region|city|county|country/i;
+/**
+ * Keys worth dropping before a payload is stored.
+ *
+ * Case matters here. A plain /city/i also matches "capaCITY", so the old
+ * pattern was quietly deleting capacity, capacityStr and every
+ * batteryCapacity* field from the raw telemetry it stored - discarding real
+ * data in the name of privacy. Location words therefore only count at the
+ * start of a key or on a camelCase boundary, where they are actually places.
+ */
+const PII_KEY = new RegExp([
+  '[Aa]ddr', '[Ee]mail', '[Mm]obile', '[Pp]hone', '[Ii]ccid', '[Pp]icUrl',
+  '[Pp]osition', '[Ll]atitude', '[Ll]ongitude',
+  'nickName', 'loginName', 'userId', 'userName',
+  'City', 'County', 'Country', 'Region',
+  '^(?:city|county|country|region)',
+].join('|'));
 
 export function stripPii<T>(rec: T): T {
   if (Array.isArray(rec)) return rec.map(stripPii) as unknown as T;
@@ -203,6 +242,56 @@ export function stripPii<T>(rec: T): T {
     return out as unknown as T;
   }
   return rec;
+}
+
+/**
+ * Today's power curve, from the chart call the portal makes for its own graph.
+ *
+ * The relay only records what it sees while it is running, so a laptop that was
+ * asleep until noon leaves the morning blank - the energy was generated, we
+ * simply were not watching. The portal keeps the whole day, so this backfills
+ * it.
+ *
+ * The payload is read defensively: the series has been seen under several keys,
+ * and timestamps arrive as epoch milliseconds, epoch seconds or "YYYY-MM-DD
+ * HH:mm:ss". Anything that does not yield both a time and a number is skipped
+ * rather than guessed at.
+ */
+export function historyFromChart(raw: unknown): { ts: number; acPowerW: number }[] {
+  const root = (raw && typeof raw === 'object' ? (raw as Rec) : {});
+  const inner = (root.data && typeof root.data === 'object' ? (root.data as Rec) : root);
+  const list = ['power', 'dataList', 'records', 'list', 'chartData']
+    .map((k) => inner[k])
+    .find((v): v is Rec[] => Array.isArray(v) && v.length > 0)
+    ?? (Array.isArray(inner) ? (inner as unknown as Rec[]) : null);
+  if (!list) return [];
+
+  const out: { ts: number; acPowerW: number }[] = [];
+  for (const row of list) {
+    if (!row || typeof row !== 'object') continue;
+    const ts = chartTs(pick(row, 'time', 'dataTimestamp', 'ts', 'date', 'collectTime', 'timeStr'));
+    const w = toWatts(
+      pick(row, 'power', 'pac', 'value', 'acPower', 'p'),
+      pick(row, 'powerStr', 'pacStr', 'valueStr', 'unit'),
+    );
+    if (ts === null || w === null) continue;
+    out.push({ ts, acPowerW: w });
+  }
+  // The portal pads the rest of the day with zeros; those are not readings.
+  const lastReal = out.reduce((a, p, i) => (p.acPowerW > 0 ? i : a), -1);
+  const trimmed = lastReal >= 0 ? out.slice(0, lastReal + 1) : out;
+  return trimmed.sort((a, b) => a.ts - b.ts);
+}
+
+/** Chart timestamps arrive as epoch ms, epoch seconds, or a local datetime. */
+function chartTs(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    return v > 1e11 ? Math.floor(v / 1000) : Math.floor(v);
+  }
+  if (typeof v !== 'string' || !v.trim()) return null;
+  if (/^[0-9]+$/.test(v)) return chartTs(Number(v));
+  const t = Date.parse(v.replace(' ', 'T'));
+  return Number.isNaN(t) ? null : Math.floor(t / 1000);
 }
 
 /** Epoch ms (number or string, as SolisCloud mixes both) -> epoch seconds. */

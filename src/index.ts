@@ -9,6 +9,7 @@ import {
   deviceFromCollector,
   deviceFromInverter,
   deviceFromInverterDetail,
+  historyFromChart,
   stationReading as solisStationReading,
 } from './providers/soliscloud';
 import { stationReading as solarmanStationReading } from './providers/solarman';
@@ -194,9 +195,56 @@ app.post('/api/ingest/station', async (c) => {
   // The relay is how SolisCloud data arrives, so it belongs in the poll log
   // beside the cloud poller. Without this the footer only ever mentioned
   // SolarMan, and the dashboard read as though one system were untracked.
+  // Worded like the cron poller's own line, so two feeds in one footer read
+  // as the same kind of statement rather than two unrelated ones.
   await logPoll(c.env.DB, body.provider, true,
-    `${source}: ${inv.name || plantId} ${reading.acPowerW ?? '?'} W${stored ? '' : ' (no new sample)'}`);
+    `plants=1 inverters=1 new=${stored ? 1 : 0} via ${source}`);
   return c.json({ stored, inverterId: inv.id, ts: reading.ts, acPowerW: reading.acPowerW });
+});
+
+/**
+ * Backfill: today's curve as the vendor's own chart reports it.
+ *
+ * The relay records only what it sees while it is running, so any stretch when
+ * the machine was asleep is missing from a graph that otherwise looks like a
+ * system that produced nothing. The portal has the whole day; this takes it.
+ *
+ * Rows land under a "-history" source so they never masquerade as the live
+ * feed: `latest` ignores them, and the series query prefers a live sample
+ * whenever both exist for the same instant.
+ */
+app.post('/api/ingest/history', async (c) => {
+  const token = c.env.INGEST_TOKEN;
+  if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);
+  const given = bearer(c.req.header('Authorization')) ?? '';
+  if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
+
+  const body = (await c.req.json()) as { provider?: string; plantId?: string | number; raw?: unknown };
+  if (!body?.provider || !body?.plantId || body.raw === undefined) {
+    return c.json({ error: 'provider, plantId and raw required' }, 400);
+  }
+  const plantId = String(body.plantId);
+  if (!plantFilter(c.env)(plantId)) return c.json({ stored: 0, skipped: 'not in INCLUDE_PLANTS' });
+
+  const points = historyFromChart(body.raw);
+  if (!points.length) return c.json({ stored: 0, points: 0 });
+
+  const inverterId = `${body.provider}:station:${plantId}`;
+  const source = `${body.provider}-history`;
+  // A day of five-minute samples is under 300 rows; anything larger is not a
+  // day curve and is refused rather than written.
+  if (points.length > 1000) return c.json({ error: 'too many points' }, 400);
+
+  let stored = 0;
+  for (const p of points) {
+    if (await insertReading(c.env.DB, {
+      inverterId, ts: p.ts, source,
+      acPowerW: p.acPowerW, dcPowerW: null, todayKwh: null, totalKwh: null,
+      batterySoc: null, batteryPowerW: null, gridPowerW: null, loadPowerW: null,
+      tempC: null, status: null, metrics: null, raw: null,
+    })) stored++;
+  }
+  return c.json({ stored, points: points.length });
 });
 
 // Everything else is the static UI.

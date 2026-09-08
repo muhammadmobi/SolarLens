@@ -120,11 +120,32 @@ async function snapshot(plantId) {
   // Navigating to the plant page makes the portal fetch detailMix with a
   // correctly signed request; we simply wait for that response.
   const wait = page.waitForResponse((r) => r.url().endsWith('/api/station/detailMix') && r.request().method() === 'POST', { timeout: 30_000 });
+  // The same page draws today's curve, so the chart call arrives alongside it.
+  // Catching it costs nothing and fills in the hours this agent was not
+  // running: the energy was generated either way, we simply were not watching.
+  // Never fatal - a missing chart must not cost us the snapshot.
+  const chart = page
+    .waitForResponse((r) => r.url().includes('/api/chart/station/day'), { timeout: 25_000 })
+    .then((r) => r.json())
+    .catch(() => null);
   await page.goto(`${PORTAL}/station/stationDetails/generalSituation/${plantId}`, { waitUntil: 'domcontentloaded' });
   const res = await wait;
   const j = await res.json();
   if (!j?.data) throw new Error(`detailMix for ${plantId}: ${j?.msg ?? 'no data'}`);
-  return j.data;
+  return { detail: j.data, chart };
+}
+
+/** Push today's curve, so the graph covers the whole day and not just uptime. */
+async function pushHistory(plantId, chartJson) {
+  if (!chartJson) return;
+  const res = await fetch(`${SOLARLENS_URL}/api/ingest/history`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${INGEST_TOKEN}` },
+    body: JSON.stringify({ provider: 'soliscloud', plantId, raw: chartJson }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) { log(`history ${plantId}: HTTP ${res.status}`); return; }
+  log(`history ${plantId}: ${j.stored ?? 0} new of ${j.points ?? 0} points`);
 }
 
 /**
@@ -212,7 +233,14 @@ async function cycle() {
   if (!ids.length) { log('no plants discovered yet (set SOLIS_PLANT_IDS or wait for the plant list to load)'); return; }
   log(`plants: ${ids.map((id) => known.get(id)?.name ?? id).join(', ')}`);
   for (const id of ids) {
-    try { await push(id, await snapshot(id)); }
+    try {
+      const { detail, chart } = await snapshot(id);
+      await push(id, detail);
+      // Backfill after the snapshot, so a chart problem can never cost us the
+      // live reading - which is the one thing this agent exists to deliver.
+      try { await pushHistory(id, await chart); }
+      catch (e) { log(`history ${id}: ${e.message}`); }
+    }
     catch (e) { log(`plant ${id}: ${e.message}`); }
     await sleep(2500); // stay well under Solis's 3 calls / 5 s
     try { await pushDevices(id, await devices(id)); }
