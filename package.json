@@ -5,10 +5,10 @@
   "description": "One screen for both inverters: SolisCloud + SolarMan, unified.",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:local": "wrangler d1 migrations apply solar-lens --local",
-    "db:remote": "wrangler d1 migrations apply solar-lens --remote",
+    "dev": "node scripts/wrangler.mjs dev",
+    "deploy": "node scripts/wrangler.mjs deploy",
+    "db:local": "node scripts/wrangler.mjs d1 migrations apply solar-lens --local",
+    "db:remote": "node scripts/wrangler.mjs d1 migrations apply solar-lens --remote",
     "probe:solis": "node scripts/probe-solis.mjs",
     "seed:local": "node scripts/seed-local.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
@@ -18,7 +18,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "relay:solis": "node agent/solis-relay.mjs",
-    "test:unit:coverage": "vitest run --coverage"
+    "test:unit:coverage": "vitest run --coverage",
+    "cf": "node scripts/wrangler.mjs"
   },
   "dependencies": {
     "hono": "^4.13.7"
