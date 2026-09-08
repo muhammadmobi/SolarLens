@@ -258,7 +258,7 @@ npm run test:unit:coverage  # vitest + v8 coverage, enforces thresholds
 npm run test:e2e            # playwright (add --ui for the inspector)
 ```
 
-**74 unit tests** and **132 end-to-end tests** (66 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**74 unit tests** and **138 end-to-end tests** (69 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -279,7 +279,7 @@ Four files, one concern each. They are all pure-function tests against fixtures 
 
 ### End-to-end tests — `tests/e2e/`
 
-One spec file of 66 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
+One spec file of 69 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
 
 They assert what a person sees, grouped by what it is for: the overview and its layout at both widths, the theme toggle (including that the choice is applied before first paint), the labelled header totals, the energy-flow diagram (structure, direction from the signs, wire thickness tracking power, per-diagram marker ids), the battery panel and the derived cycle count, offline handling and zeroed figures, the Alerts tab, the collapsible Power sections and the clickable chart legend, the device inventory, raw telemetry filtering, and the token-gate guidance.
 
@@ -322,7 +322,7 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 |---|---|---|
 | `GET /api/latest` | API_TOKEN | newest reading per inverter, with `metrics` |
 | `GET /api/series?from=&to=` | API_TOKEN | readings in a range (≤ 31 days) |
-| `GET /api/health` | API_TOKEN | recent poll log |
+| `GET /api/health` | API_TOKEN | recent poll log, plus the newest line per feed |
 | `POST /api/poll` | API_TOKEN | poll all providers now |
 | `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |

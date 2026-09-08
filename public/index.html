@@ -114,6 +114,9 @@
   .derived { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
              border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .fitem { display: flex; flex-direction: column; gap: 1px; }
+  #poll-status .feed { display: inline-flex; align-items: baseline; gap: 4px; margin-right: 18px; white-space: nowrap; }
+  #poll-status .feed.bad { color: var(--bad); }
+  #poll-status .feed em { font-style: normal; color: var(--faint); max-width: 46ch; overflow: hidden; text-overflow: ellipsis; }
   .quiet { font-size: 10.5px; font-weight: 650; color: var(--warn); margin-top: 1px; }
   .navbadge { display: inline-block; min-width: 17px; padding: 0 5px; margin-left: 7px; border-radius: 999px;
               background: var(--warn-bg); color: var(--warn); font-size: 10.5px; font-weight: 800;
@@ -1507,10 +1510,15 @@
       $('updated').className = 'livedot' + (stale ? ' stale' : '');
       $('updated').innerHTML = `<i></i>${newest ? ago(newest) : 'no samples yet'}`;
 
-      if (health && health.polls.length) {
-        const p = health.polls[0];
-        $('poll-status').textContent = `last poll (${p.provider}) ${p.ok ? 'ok' : 'FAILED'} ${ago(p.ts)} — ${p.detail}`;
-        $('poll-status').style.color = p.ok ? '' : 'var(--bad)';
+      // One line per feed. Showing only the newest row meant the busier feed
+      // wrote over the quieter one, and the footer read as though a whole
+      // system were untracked - "plants=1 inverters=1" for the only provider
+      // that logs on a cron, with nothing at all about the relay.
+      const feeds = health?.feeds?.length ? health.feeds : (health?.polls?.length ? [health.polls[0]] : []);
+      if (feeds.length) {
+        $('poll-status').innerHTML = feeds.map((p) =>
+          `<span class="feed ${p.ok ? '' : 'bad'}">${esc(providerName(p.provider))} ${p.ok ? 'ok' : 'FAILED'} ${esc(ago(p.ts))}` +
+          `<em title="${esc(p.detail || '')}"> — ${esc(p.detail || '')}</em></span>`).join('');
       }
       route();
     } catch (e) {

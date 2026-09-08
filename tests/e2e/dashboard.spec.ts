@@ -116,6 +116,7 @@ function series() {
 async function stubApi(page: Page, opts: {
   invs?: unknown[]; devs?: unknown[]; status?: number; series?: unknown[];
   poll?: { ts?: number; ok: number; detail: string; provider: string };
+  feeds?: { ts: number; ok: number; detail: string; provider: string }[];
 } = {}) {
   const status = opts.status ?? 200;
   const invs = opts.invs ?? inverters();
@@ -126,7 +127,8 @@ async function stubApi(page: Page, opts: {
   await page.route('**/api/latest', (r) => r.fulfill(json(status === 200 ? { now: NOW, inverters: invs } : { error: 'unauthorized' })));
   await page.route('**/api/series**', (r) => r.fulfill(json(status === 200 ? { from: 0, to: NOW, points } : { error: 'unauthorized' })));
   await page.route('**/api/devices', (r) => r.fulfill(json(status === 200 ? { now: NOW, devices: devs } : { error: 'unauthorized' })));
-  await page.route('**/api/health', (r) => r.fulfill(json({ now: NOW, polls: [opts.poll ?? { ts: NOW - 30, provider: 'solarman', ok: 1, detail: 'plants=1 inverters=1 new=1' }] })));
+  const polls = [opts.poll ?? { ts: NOW - 30, provider: 'solarman', ok: 1, detail: 'plants=1 inverters=1 new=1' }];
+  await page.route('**/api/health', (r) => r.fulfill(json({ now: NOW, polls, feeds: opts.feeds ?? polls })));
 }
 
 test.describe('Overview', () => {
@@ -157,7 +159,8 @@ test.describe('Overview', () => {
     await expect(page.locator('.flabel')).toHaveText(['Producing now', 'Produced today', 'Consumed today', 'Weather']);
     await expect(page.locator('#fleet-used')).toHaveText('53.8 kWh');
     await expect(page.locator('#fleet-wx')).toContainText('Clear');
-    await expect(page.locator('#poll-status')).toContainText('last poll (solarman) ok');
+    // The footer names each feed rather than reciting one raw log row.
+    await expect(page.locator('#poll-status')).toContainText('SolarMan ok');
   });
 
   test('only the hybrid shows a battery ring; the on-grid plant has none', async ({ page }) => {
@@ -395,6 +398,52 @@ test.describe('Alerts', () => {
     await expect(page.locator('#alertbadge')).toBeVisible();
     await expect(page.locator('#alertbadge')).toHaveText('1');
     await expect(page.locator('#alertbadge')).toHaveClass(/bad/);
+  });
+});
+
+test.describe('Feed status', () => {
+  test('names every feed, not just whichever logged most recently', async ({ page }) => {
+    // Only SolarMan runs on the cron; SolisCloud arrives through the relay.
+    // Showing one newest row meant the footer read "plants=1 inverters=1" and
+    // never mentioned the other system at all.
+    await stubApi(page, {
+      feeds: [
+        { ts: NOW - 90, provider: 'solarman', ok: 1, detail: 'plants=1 inverters=1 new=1' },
+        { ts: NOW - 20, provider: 'soliscloud', ok: 1, detail: 'soliscloud-relay: Demo Solis Plant 5080 W' },
+      ],
+    });
+    await page.goto('/');
+    const feeds = page.locator('#poll-status .feed');
+    await expect(feeds).toHaveCount(2);
+    await expect(feeds.nth(0)).toContainText('SolarMan');
+    await expect(feeds.nth(1)).toContainText('SolisCloud');
+    await expect(feeds.nth(1)).toContainText('soliscloud-relay');
+  });
+
+  test('a failed feed is marked, and the healthy one still shows', async ({ page }) => {
+    await stubApi(page, {
+      feeds: [
+        { ts: NOW - 60, provider: 'soliscloud', ok: 0, detail: 'HTTP 408 on /v1/api/userStationList' },
+        { ts: NOW - 20, provider: 'solarman', ok: 1, detail: 'plants=1 inverters=1 new=1' },
+      ],
+    });
+    await page.goto('/');
+    await expect(page.locator('#poll-status .feed.bad')).toHaveCount(1);
+    await expect(page.locator('#poll-status .feed.bad')).toContainText('FAILED');
+    await expect(page.locator('#poll-status .feed.bad')).toContainText('HTTP 408');
+    await expect(page.locator('#poll-status .feed:not(.bad)')).toContainText('SolarMan');
+  });
+
+  test('falls back to the newest single line for an older Worker', async ({ page }) => {
+    // /api/health gained `feeds` after the page shipped; a deploy where the
+    // two are out of step must not blank the footer.
+    await page.route('**/api/health', (r) => r.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ now: NOW, polls: [{ ts: NOW - 30, provider: 'solarman', ok: 1, detail: 'plants=1' }] }),
+    }));
+    await stubApi(page);
+    await page.goto('/');
+    await expect(page.locator('#poll-status')).toContainText('SolarMan');
   });
 });
 
