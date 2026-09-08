@@ -678,7 +678,8 @@
     const W = 1000, H = 230, L = 62, R = 16, T = 26, B = 30;
     const t0 = startOfToday(), t1 = t0 + 86400;
     const c = colorFor(inv.provider);
-    if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">No samples yet today</text></svg>`;
+    if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
+      pts.length === 1 ? 'One sample so far today - a curve needs two' : 'No samples yet today'}</text></svg>`;
     const max = Math.max(200, ...pts.map((p) => p.ac_power_w || 0));
     const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
     const y = (v) => T + (1 - (v || 0) / max) * (H - T - B);
@@ -844,7 +845,8 @@
     // everything off would take its own switch away with it.
     const legend = () => {
       const l = invs.map((i) => legendItem(i.id, colorFor(i.provider), i.name,
-        (byInv[i.id] || []).length < 2 ? 'no samples today' : null));
+        (byInv[i.id] || []).length === 0 ? 'no samples today'
+          : (byInv[i.id] || []).length === 1 ? 'one sample so far' : null));
       if (invs.length > 1) l.push(legendItem(TOTAL_KEY, 'var(--total)', 'Fleet total'));
       return l;
     };
