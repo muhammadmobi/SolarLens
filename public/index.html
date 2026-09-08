@@ -117,6 +117,8 @@
   #poll-status .feed { display: inline-flex; align-items: baseline; gap: 4px; margin-right: 18px; white-space: nowrap; }
   #poll-status .feed.bad { color: var(--bad); }
   #poll-status .feed em { font-style: normal; color: var(--faint); max-width: 46ch; overflow: hidden; text-overflow: ellipsis; }
+  .openwarn { font-size: 11.5px; font-weight: 700; color: var(--bad); background: var(--bad-bg);
+              border-radius: 999px; padding: 5px 12px; }
   .quiet { font-size: 10.5px; font-weight: 650; color: var(--warn); margin-top: 1px; }
   .navbadge { display: inline-block; min-width: 17px; padding: 0 5px; margin-left: 7px; border-radius: 999px;
               background: var(--warn-bg); color: var(--warn); font-size: 10.5px; font-weight: 800;
@@ -329,6 +331,13 @@
   .bar-row.unused { opacity: .55; }
   .bar-row.unused .num { color: var(--faint); font-weight: 650; }
   .cardnote { margin: 12px 0 0; font-size: 12.5px; color: var(--faint); }
+  .rangepick { display: flex; gap: 8px; flex-wrap: wrap; }
+  .rangebtn { font: inherit; font-size: 12.5px; font-weight: 650; color: var(--muted); background: var(--surface-2);
+              border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  .rangebtn:hover { border-color: var(--muted); }
+  .rangebtn.on { background: var(--accent, var(--ink)); color: var(--surface); border-color: transparent; }
+  .daybar { rx: 2; }
+  td.faint { color: var(--faint); }
   .bar-track { height: 9px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
   .bar-fill { height: 100%; border-radius: 999px; }
   .bar-row .num { font-variant-numeric: tabular-nums; font-weight: 700; }
@@ -401,6 +410,7 @@
       <span class="sep" id="wx-sep" hidden></span>
       <div class="fitem" id="wx-item" hidden><span class="flabel">Weather</span><span class="num small" id="fleet-wx">—</span></div>
     </div>
+    <span class="openwarn" id="openwarn" hidden title="Set the API_TOKEN secret and redeploy to close it">⚠ No API token — this dashboard is open to anyone with the link</span>
     <span class="livedot" id="updated"><i></i>loading…</span>
     <button class="themebtn" id="theme" type="button" aria-label="Change theme">🖥️</button>
   </div>
@@ -408,6 +418,7 @@
     <nav id="nav">
       <a href="#/">Overview</a>
       <a href="#/power">Power</a>
+      <a href="#/history">Historical Data</a>
       <a href="#/alerts">Alerts<span class="navbadge" id="alertbadge" hidden></span></a>
       <a href="#/devices">Devices</a>
     </nav>
@@ -685,7 +696,7 @@
     // The house is the hub and the load at the same time.
     const load = inv.load_power_w;
     out += `<circle class="house" cx="${CX}" cy="${CY}" r="${HR}"/>`;
-    out += `<text class="lbl" x="${CX}" y="${CY - HR - 22}" text-anchor="middle">Home load</text>`;
+    out += `<text class="lbl" x="${CX}" y="${CY - HR - 22}" text-anchor="middle">House load</text>`;
     out += `<text class="glyph big" x="${CX}" y="${CY - 6}" text-anchor="middle">🏡</text>`;
     out += `<text class="val${load ? '' : ' idle'}" x="${CX}" y="${CY + 42}" text-anchor="middle">${load == null ? '—' : fmtWs(load)}</text>`;
 
@@ -815,11 +826,11 @@
     const g = inv.grid_power_w;
     const stat = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls ?? ''}">${v}</div></div>`;
     const cells = [
-      stat('Today', fmtKwh(inv.today_kwh)),
+      stat('Produced today', fmtKwh(inv.today_kwh)),
       m.genMonthKwh != null ? stat('This month', fmtKwh(m.genMonthKwh)) : '',
       stat('Lifetime', fmtKwh(inv.total_kwh)),
       stat('Grid', g == null ? '—' : (g >= 0 ? `↓ ${fmtWs(g)}` : `↑ ${fmtWs(-g)}`), g > 0 ? 'import' : g < 0 ? 'export' : ''),
-      stat('Load', fmtWs(inv.load_power_w)),
+      stat('House load', fmtWs(inv.load_power_w)),
       // The card shows a battery ring already, so the figure would be a repeat.
       !omitBattery && hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
       (() => {
@@ -1215,6 +1226,151 @@
       </div></section>${sections}`;
   }
 
+  // ---------- historical data ----------
+  /**
+   * Day by day, per system.
+   *
+   * Every "today" figure the vendors publish is a counter that climbs through
+   * the day and resets at local midnight, so a day's total is the largest
+   * value seen inside it. The Worker does that grouping; this draws it.
+   *
+   * The record starts when SolarLens started collecting, which is worth saying
+   * plainly - the vendors' own lifetime totals are shown beside it so the two
+   * are never mistaken for each other.
+   */
+  const HISTORY_RANGES = [7, 30, 90];
+
+  async function loadHistory(days) {
+    state.historyDays = days;
+    try {
+      state.history = await api(`/api/history?days=${days}&tz=${new Date().getTimezoneOffset()}`);
+    } catch (e) {
+      state.history = { error: e.message };
+    }
+    if (location.hash === '#/history') renderHistory();
+  }
+
+  function renderHistory() {
+    const invs = state.latest?.inverters ?? [];
+    if (!state.history) { loadHistory(state.historyDays ?? 30); }
+
+    const days = state.historyDays ?? 30;
+    const picker = `<div class="rangepick">${HISTORY_RANGES.map((d) =>
+      `<button type="button" class="rangebtn${d === days ? ' on' : ''}" data-days="${d}">${d} days</button>`).join('')}</div>`;
+
+    if (state.history?.error) {
+      $('view').innerHTML = `<div class="card"><div class="empty">Could not load history: ${esc(state.history.error)}</div></div>`;
+      return;
+    }
+    if (!state.history) {
+      $('view').innerHTML = `<section class="card"><h2>Historical Data</h2><div class="body">${picker}
+        <div class="empty">Loading…</div></div></section>`;
+      bindRange();
+      return;
+    }
+
+    const rows = state.history.rows ?? [];
+    const byInv = {};
+    for (const r of rows) (byInv[r.inverter_id] ||= []).push(r);
+
+    const sections = invs.map((inv, i) => {
+      const mine = byInv[inv.id] ?? [];
+      const m = parse(inv.metrics) ?? {};
+      if (!mine.length) {
+        return `<details class="syssec" open><summary>
+            <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+            <span class="sname">${esc(inv.name)}</span></summary>
+          <div class="secbody"><div class="empty">No days recorded yet for this system.</div></div></details>`;
+      }
+      const totals = mine.reduce((a, r) => ({
+        yield: a.yield + (r.yield_kwh ?? 0),
+        load: a.load + (r.load_kwh ?? 0),
+        imp: a.imp + (r.import_kwh ?? 0),
+        exp: a.exp + (r.export_kwh ?? 0),
+      }), { yield: 0, load: 0, imp: 0, exp: 0 });
+
+      const anyLoad = mine.some((r) => r.load_kwh != null);
+      const anyGrid = mine.some((r) => r.import_kwh != null || r.export_kwh != null);
+      const anyBatt = mine.some((r) => r.batt_charge_kwh != null || r.batt_discharge_kwh != null);
+
+      const head = ['Day', 'Produced', anyLoad ? 'Consumed' : null, anyGrid ? 'Imported' : null,
+        anyGrid ? 'Exported' : null, anyBatt ? 'Charged' : null, anyBatt ? 'Discharged' : null,
+        'Peak', 'Samples'].filter(Boolean);
+
+      const body = mine.map((r) => `<tr>
+        <td class="mono">${esc(r.day)}</td>
+        <td>${fmtKwh(r.yield_kwh)}</td>
+        ${anyLoad ? `<td>${fmtKwh(r.load_kwh)}</td>` : ''}
+        ${anyGrid ? `<td>${fmtKwh(r.import_kwh)}</td><td>${fmtKwh(r.export_kwh)}</td>` : ''}
+        ${anyBatt ? `<td>${fmtKwh(r.batt_charge_kwh)}</td><td>${fmtKwh(r.batt_discharge_kwh)}</td>` : ''}
+        <td>${fmtWs(r.peak_w)}</td>
+        <td class="faint">${r.samples}</td>
+      </tr>`).join('');
+
+      return `<details class="syssec" open>
+        <summary>
+          <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="sname">${esc(inv.name)}</span>
+          <span class="snow">${fmtKwh(totals.yield)}<small> in ${mine.length} day${mine.length === 1 ? '' : 's'}</small></span>
+        </summary>
+        <div class="secbody">
+          <section class="card"><div class="body">${dailyBars(mine, colorFor(inv.provider), 'hb' + i)}</div></section>
+          <div class="tablewrap"><table class="devices">
+            <thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+            <tbody>${body}</tbody>
+          </table></div>
+          <dl class="kv" style="padding:16px 20px 20px">
+            <dt>Recorded here</dt><dd>${fmtKwh(totals.yield)} over ${mine.length} day${mine.length === 1 ? '' : 's'}</dd>
+            ${m.genMonthKwh != null ? `<dt>Vendor · this month</dt><dd>${fmtKwh(m.genMonthKwh)}</dd>` : ''}
+            ${m.genYearKwh != null ? `<dt>Vendor · this year</dt><dd>${fmtKwh(m.genYearKwh)}</dd>` : ''}
+            ${m.genTotalKwh != null ? `<dt>Vendor · lifetime</dt><dd>${fmtKwh(m.genTotalKwh)}</dd>` : ''}
+          </dl>
+        </div>
+      </details>`;
+    }).join('');
+
+    $('view').innerHTML = `<section class="card"><h2>Historical Data</h2><div class="body">
+        ${picker}
+        <p class="cardnote" style="margin-top:14px">Built from the samples SolarLens has stored, so the record begins when it
+        started collecting — not when the array was installed. Each vendor's own running totals are shown at the
+        foot of its section for comparison.</p>
+      </div></section>${sections}`;
+    bindRange();
+  }
+
+  function bindRange() {
+    for (const b of document.querySelectorAll('.rangebtn')) {
+      b.onclick = () => { state.history = null; loadHistory(Number(b.dataset.days)); renderHistory(); };
+    }
+  }
+
+  /** Daily yield as bars: the shape of a month reads faster than 30 numbers. */
+  function dailyBars(rows, colour, id) {
+    const W = 1000, H = 200, L = 54, R = 12, T = 18, B = 34;
+    const days = [...rows].reverse(); // oldest first, left to right
+    const max = Math.max(1, ...days.map((r) => r.yield_kwh ?? 0));
+    const bw = (W - L - R) / days.length;
+    let out = '';
+    for (let i = 0; i <= 4; i++) {
+      const v = (max / 4) * i, y = T + (1 - v / max) * (H - T - B);
+      out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" vector-effect="non-scaling-stroke"/>`;
+      out += `<text class="axis" x="${L - 8}" y="${y + 4}" text-anchor="end">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>`;
+    }
+    days.forEach((r, i) => {
+      const v = r.yield_kwh ?? 0;
+      const h = (v / max) * (H - T - B);
+      const x = L + i * bw + bw * 0.15;
+      out += `<rect class="daybar" x="${x.toFixed(1)}" y="${(H - B - h).toFixed(1)}" width="${(bw * 0.7).toFixed(1)}" height="${Math.max(1, h).toFixed(1)}" fill="${colour}"><title>${esc(r.day)}: ${esc(fmtKwh(v))}</title></rect>`;
+      // A label per day is unreadable past a week, so thin them out.
+      const step = Math.ceil(days.length / 10);
+      if (i % step === 0 || i === days.length - 1) {
+        out += `<text class="axis" x="${(x + bw * 0.35).toFixed(1)}" y="${H - 12}" text-anchor="middle">${esc(r.day.slice(5))}</text>`;
+      }
+    });
+    out += `<text class="axis unit" x="6" y="${T - 4}">kWh per day</text>`;
+    return `<svg class="combined" id="${id}" viewBox="0 0 ${W} ${H}">${out}</svg>`;
+  }
+
   // ---------- devices ----------
   function renderDevices() {
     if (!state.devices.length) {
@@ -1371,10 +1527,10 @@
     ]);
 
     const counters = kvCard('Energy counters', [
-      ['Today', fmtKwh(inv.today_kwh)],
-      m.genMonthKwh != null ? ['This month', fmtKwh(m.genMonthKwh)] : null,
-      m.genYearKwh != null ? ['This year', fmtKwh(m.genYearKwh)] : null,
-      ['Lifetime', fmtKwh(inv.total_kwh)],
+      ['Produced today', fmtKwh(inv.today_kwh)],
+      m.genMonthKwh != null ? ['Produced this month', fmtKwh(m.genMonthKwh)] : null,
+      m.genYearKwh != null ? ['Produced this year', fmtKwh(m.genYearKwh)] : null,
+      ['Produced, lifetime', fmtKwh(inv.total_kwh)],
       m.loadTodayKwh != null ? ['Consumed today', fmtKwh(m.loadTodayKwh)] : null,
       m.gridImportTodayKwh != null ? ['Imported today', fmtKwh(m.gridImportTodayKwh)] : null,
       m.gridExportTodayKwh != null ? ['Exported today', fmtKwh(m.gridExportTodayKwh)] : null,
@@ -1424,12 +1580,12 @@
       </dl></div></section>` : '';
 
     const diagnostics = kvCard('Status & diagnostics', [
-      ['Reported', `<span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>`],
+      ['Status', `<span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>`],
       tempC != null ? ['Temperature', `${tempC.toFixed(1)} °C`] : null,
       m.gridStatus ? ['Grid', esc(String(m.gridStatus).toLowerCase())] : null,
       m.weatherText ? ['Weather', `${esc(m.weatherText)}${m.tempNowC != null ? ` · ${Math.round(m.tempNowC)} °C now` : ''}${m.tempMinC != null && m.tempMaxC != null ? ` · ${Math.round(m.tempMinC)}–${Math.round(m.tempMaxC)} °C` : ''}`] : null,
       m.sunrise && m.sunset ? ['Sun', `${esc(m.sunrise)} – ${esc(m.sunset)}`] : null,
-      ['Data age', esc(inv.ts ? ago(inv.ts) : 'never')],
+      ['Updated', inv.ts ? `${esc(when(inv.ts))} · ${esc(ago(inv.ts))}` : 'never'],
     ]);
 
     return {
@@ -1482,6 +1638,7 @@
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
     if (hash === '#/devices') return renderDevices();
     if (hash === '#/alerts') return renderAlerts();
+    if (hash === '#/history') return renderHistory();
     // The Flow tab is gone: its diagrams live on the overview now, but an
     // old bookmark should still land somewhere sensible.
     if (hash === '#/flow') { location.replace('#/'); return renderOverview(); }
@@ -1551,6 +1708,10 @@
       // wrote over the quieter one, and the footer read as though a whole
       // system were untracked - "plants=1 inverters=1" for the only provider
       // that logs on a cron, with nothing at all about the relay.
+      // An open dashboard is worth interrupting for: it is not a state anyone
+      // chooses on a deployment that is reachable from the internet.
+      $('openwarn').hidden = !health?.authDisabled;
+
       const feeds = health?.feeds?.length ? health.feeds : (health?.polls?.length ? [health.polls[0]] : []);
       if (feeds.length) {
         $('poll-status').innerHTML = feeds.map((p) =>

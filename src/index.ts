@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { insertReading, latest, latestPollPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
+import { daily, insertReading, latest, latestPollPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
 import { plantFilter, pollAll } from './poll';
 import { stampWeather } from './weather';
 import type { Inverter, Reading } from './providers/types';
@@ -17,6 +17,53 @@ import { stationReading as solarmanStationReading } from './providers/solarman';
 const COOKIE = 'sl_token';
 
 const app = new Hono<{ Bindings: Env }>();
+
+/**
+ * Security headers on every response.
+ *
+ * The page loads one web font from Google and nothing else, so the policy is
+ * strict about everything but that - and, more usefully, about where anything
+ * may be *sent*. `connect-src 'self'` means injected script could not
+ * exfiltrate a reading even if it ran, and `frame-ancestors 'none'` keeps the
+ * page out of somebody else's iframe.
+ *
+ * Kept identical to public/_headers, which covers the same page when the edge
+ * serves it without invoking this Worker at all.
+ *
+ * `'unsafe-inline'` is unavoidable while the script and styles live in the
+ * HTML; that is the deliberate trade for having no build step.
+ *
+ * `Referrer-Policy: no-referrer` matters more than it looks: the one-time
+ * `/auth?t=<token>` link would otherwise put the token in a Referer header.
+ */
+app.use('*', async (c, next) => {
+  await next();
+  // The static-assets binding hands back a Response whose headers are frozen,
+  // so they have to be rebuilt rather than appended to - otherwise the policy
+  // silently applies to the JSON routes and not to the page it is protecting.
+  const res = new Response(c.res.body, {
+    status: c.res.status,
+    statusText: c.res.statusText,
+    headers: new Headers(c.res.headers),
+  });
+  const h = res.headers;
+  h.set('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ].join('; '));
+  h.set('X-Content-Type-Options', 'nosniff');
+  h.set('Referrer-Policy', 'no-referrer');
+  h.set('Cross-Origin-Opener-Policy', 'same-origin');
+  h.set('X-Frame-Options', 'DENY');
+  c.res = res;
+});
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -55,7 +102,15 @@ app.use('/api/*', async (c, next) => {
   // Push endpoints carry their own INGEST_TOKEN check; everything under /api/ingest/ is theirs.
   if (c.req.path === '/api/ingest' || c.req.path.startsWith('/api/ingest/')) return next();
   const token = c.env.API_TOKEN;
-  if (!token) return next();
+  // No token configured means no gate. That is the documented local-dev
+  // affordance, but it fails open: a deploy that lost the secret would serve
+  // the whole dataset to anyone who found the URL, silently. So it is said out
+  // loud - in the log, and in /api/health, which the dashboard turns into a
+  // banner - rather than left to be discovered.
+  if (!token) {
+    console.warn('API_TOKEN is not set: /api/* is unauthenticated');
+    return next();
+  }
   const given = bearer(c.req.header('Authorization')) ?? getCookie(c, COOKIE) ?? '';
   if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
   return next();
@@ -79,7 +134,24 @@ app.get('/api/health', async (c) => {
   // `polls` is the recent history; `feeds` is the newest line per provider, so
   // a feed that has gone quiet cannot be hidden by a busier one logging over it.
   const [polls, feeds] = await Promise.all([recentPolls(c.env.DB), latestPollPerProvider(c.env.DB)]);
-  return c.json({ now: nowSec(), polls, feeds });
+  // The dashboard turns this into a banner. An unauthenticated deployment is
+  // not something anyone should have to notice for themselves.
+  return c.json({ now: nowSec(), polls, feeds, authDisabled: !c.env.API_TOKEN });
+});
+
+/**
+ * Daily history, one row per inverter per day.
+ *
+ * `tz` is the caller's UTC offset in minutes (what `getTimezoneOffset()`
+ * returns), because a solar day ends at the array's midnight and not at UTC's.
+ */
+app.get('/api/history', async (c) => {
+  const days = Math.min(400, Math.max(1, Number(c.req.query('days') ?? 30)));
+  const tz = Number(c.req.query('tz') ?? 0);
+  if (!Number.isFinite(tz) || Math.abs(tz) > 900) return c.json({ error: 'tz out of range' }, 400);
+  const to = nowSec();
+  const from = to - days * 86400;
+  return c.json({ now: to, days, rows: await daily(c.env.DB, from, to, tz) });
 });
 
 app.post('/api/poll', async (c) => {
@@ -227,13 +299,40 @@ app.post('/api/ingest/history', async (c) => {
   if (!plantFilter(c.env)(plantId)) return c.json({ stored: 0, skipped: 'not in INCLUDE_PLANTS' });
 
   const points = historyFromChart(body.raw);
-  if (!points.length) return c.json({ stored: 0, points: 0 });
+  if (!points.length) {
+    // "0 points" on its own is a dead end. Naming what the payload did contain
+    // turns a silent failure into something the next person can act on - the
+    // chart endpoint is the least documented thing either vendor returns.
+    const top = body.raw && typeof body.raw === 'object' ? body.raw as Record<string, unknown> : {};
+    const inner = top.data && typeof top.data === 'object' ? top.data as Record<string, unknown> : top;
+    return c.json({ stored: 0, points: 0, sawKeys: Object.keys(inner).slice(0, 40) });
+  }
 
   const inverterId = `${body.provider}:station:${plantId}`;
   const source = `${body.provider}-history`;
   // A day of five-minute samples is under 300 rows; anything larger is not a
   // day curve and is refused rather than written.
   if (points.length > 1000) return c.json({ error: 'too many points' }, 400);
+
+  // The chart payload names a unit in a field that turns out to label the axis
+  // rather than the numbers, so a perfectly plausible-looking curve can be out
+  // by a factor of a thousand. Measure it against the nameplate before writing:
+  // an array cannot deliver several times its rating, and half a day of
+  // nonsense is far harder to spot in a graph than a refusal is here.
+  const nameplate = await c.env.DB
+    .prepare('SELECT capacity_w FROM inverters WHERE id = ?1')
+    .bind(inverterId)
+    .first<{ capacity_w: number | null }>();
+  const cap = nameplate?.capacity_w ?? null;
+  const peak = Math.max(...points.map((p) => Math.abs(p.acPowerW)));
+  if (cap && peak > cap * 5) {
+    return c.json({
+      error: 'implausible curve',
+      detail: `peak ${Math.round(peak)} W against a ${cap} W array - the payload's units are not what they claim`,
+      stored: 0,
+      points: points.length,
+    }, 422);
+  }
 
   let stored = 0;
   for (const p of points) {

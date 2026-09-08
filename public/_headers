@@ -1,0 +1,25 @@
+# Security headers for the static page.
+#
+# Cloudflare's asset handler serves public/ from the edge without invoking the
+# Worker, so the Worker's own header middleware never sees these requests -
+# which is why the policy is repeated here rather than living in one place.
+# The two are kept deliberately identical; change both or neither.
+#
+# The page loads one web font from Google and nothing else, so the policy is
+# strict about everything except that - and, more usefully, about where
+# anything may be *sent*: connect-src 'self' means injected script could not
+# exfiltrate a reading even if it ran.
+#
+# That font is the one third-party request the dashboard makes, and it hands
+# Google the viewer's IP on every page view. Self-hosting it (Manrope is
+# OFL-licensed) or falling back to the system stack would remove that; both
+# change how the page looks, so it is left as a decision rather than taken.
+#
+# 'unsafe-inline' is unavoidable while the script and styles live in the HTML.
+# That is the deliberate trade for having no build step.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cross-Origin-Opener-Policy: same-origin
+  X-Frame-Options: DENY
