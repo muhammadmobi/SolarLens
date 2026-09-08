@@ -8,7 +8,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Two vendors, one model.** SolisCloud and SolarMan are normalised into the same reading shape, so the UI never cares where a number came from.
 - **Your data, kept.** Every sample is stored (with the untouched vendor payload), so you get history the vendor apps don't let you keep or export.
 - **Works with whatever access you have.** Official API keys are best; a browser-session fallback for SolarMan and a local relay agent for SolisCloud cover you while keys are pending.
-- **Honest about freshness.** A panel shows *when* its number was last updated and turns amber when a feed goes quiet — no confidently stale zeros.
+- **Honest about freshness.** Every panel shows *when* it was last updated. A system reads **offline** the moment either the vendor says so or nothing has arrived for 15 minutes — and an offline system's live figures are zero, not whatever it managed just before it dropped.
 - **Reads well in either theme.** A three-state toggle in the top-right corner follows your system, or forces light or dark; the choice is remembered and applied before first paint.
 - **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's hero number is set against its rated size.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
@@ -64,11 +64,14 @@ A single Cloudflare Worker does three jobs:
 
 1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1.
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
-3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker, with three views:
+3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Four tabs, plus a per-system page they all link into:
    - **Overview** (`#/`) — three bands, each with one box per system: the energy-flow diagram, then the figure set, then that system's day curve.
-   - **Power** (`#/power`) — the combined day curve, then each system's own curve followed by its full detail set (identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics, raw telemetry).
+   - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry.
+   - **Alerts** (`#/alerts`) — everything either cloud says is wrong, one collapsible section per system. Nothing is invented: each row names the field it came from, so an empty section reads as "both vendors report normal" rather than "nobody looked". The tab carries a count badge.
    - **Devices** (`#/devices`) — hardware inventory: inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
    - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table.
+
+   There is no Energy flow tab: the diagrams lead the overview instead, and an old `#/flow` bookmark lands there.
 
 Every provider is an adapter behind one interface (`listPlants → listInverters → getReading`). A provider is active purely when its secrets are present, so the same deploy works with one vendor today and both tomorrow.
 

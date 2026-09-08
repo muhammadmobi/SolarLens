@@ -115,7 +115,7 @@ function series() {
 
 async function stubApi(page: Page, opts: {
   invs?: unknown[]; devs?: unknown[]; status?: number;
-  poll?: { ok: number; detail: string; provider: string };
+  poll?: { ts?: number; ok: number; detail: string; provider: string };
 } = {}) {
   const status = opts.status ?? 200;
   const invs = opts.invs ?? inverters();
@@ -182,38 +182,48 @@ test.describe('Overview', () => {
     }
   });
 
-  test('flags an inverter whose newest sample is older than 15 minutes', async ({ page }) => {
+  test('a system whose sample is older than 15 minutes reads offline', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
     await page.goto('/');
     const solis = page.locator('a.sys').nth(0);
     await expect(solis.locator('.freshness')).toContainText('last sample');
     await expect(solis.locator('.pill')).toHaveClass(/warn/);
-    // The vendor's last word was "online", but that was an hour ago. Saying it
-    // now, beside an amber dot and a staleness warning, contradicts both.
-    await expect(solis.locator('.pill')).toHaveText('not reporting');
-    await expect(solis.locator('.pill')).toHaveAttribute('title', /online/);
-    // The hero figure is an hour old, so it stops claiming to be "now".
-    await expect(solis.locator('.herolabel')).toHaveText('Last known output');
-    await expect(solis.locator('.hero')).toHaveClass(/lastknown/);
+    await expect(solis.locator('.pill')).toHaveText('offline');
+    // Offline output is zero, not the 5.08 kW it managed before it dropped.
+    await expect(solis.locator('.hero .val')).toHaveText('0');
+    await expect(solis.locator('.herolabel')).toHaveText('Producing now');
   });
 
-  test('a fresh system keeps the live wording', async ({ page }) => {
-    await stubApi(page);
+  test('the vendor calling a plant offline is enough on its own', async ({ page }) => {
+    // Fresh sample, one minute old - but SolisCloud sets state 2 the moment
+    // the datalogger drops, well before our own staleness window runs out.
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 60, status: 'offline' } }) });
     await page.goto('/');
-    await expect(page.locator('a.sys').nth(0).locator('.herolabel')).toHaveText('Producing now');
-    await expect(page.locator('a.sys').nth(0).locator('.hero')).not.toHaveClass(/lastknown/);
+    const solis = page.locator('a.sys').nth(0);
+    await expect(solis.locator('.pill')).toHaveText('offline');
+    await expect(solis.locator('.hero .val')).toHaveText('0');
   });
 
-  test('a system that has gone quiet is dropped from "Producing now", not counted', async ({ page }) => {
+  test('an offline system counts as zero in the fleet total and is named', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
     await page.goto('/');
-    // 5.08 kW of it is an hour stale: whatever the plant is doing now, this is
-    // not it. Only the hybrid's 278 W is current.
+    // Only the hybrid's 278 W is real; the Solis plant contributes a zero.
     await expect(page.locator('#fleet-power')).toHaveText('278 W');
     await expect(page.locator('#fleet-quiet')).toBeVisible();
-    await expect(page.locator('#fleet-quiet')).toHaveText('Demo Solis Plant not reporting');
+    await expect(page.locator('#fleet-quiet')).toHaveText('Demo Solis Plant offline');
     // Today's energy still counts it - those kWh were genuinely generated.
     await expect(page.locator('#fleet-today')).toHaveText('62.7 kWh');
+  });
+
+  test('an offline system zeroes its grid, load and battery too', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solarman: { ts: NOW - 3600 } }) });
+    await page.goto('/#/system/' + encodeURIComponent(HYBRID));
+    const live = page.locator('.card').filter({ has: page.locator('h3', { hasText: 'Live power' }) });
+    await expect(live).toContainText('0 W');
+    await expect(live).not.toContainText('307 W');
+    // The charge level is a state, not a flow, so it survives: the pack still
+    // holds what it held when the link dropped.
+    await expect(page.locator('.ring text')).toHaveText('100%');
   });
 
   test('no flag, and both systems counted, while everything is fresh', async ({ page }) => {
@@ -244,6 +254,84 @@ test.describe('Overview', () => {
     // The chart moved to its own page; with no fleet it says so rather than drawing.
     await page.goto('/#/power');
     await expect(page.locator('#combined')).toContainText('No samples yet today');
+  });
+});
+
+test.describe('Alerts', () => {
+  test('one tab, one collapsible section per system', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/alerts');
+    const secs = page.locator('details.syssec');
+    await expect(secs).toHaveCount(2);
+    await expect(secs.nth(0)).toContainText('Demo Solis Plant');
+    await expect(secs.nth(1)).toContainText('Demo Hybrid');
+    // Collapsing one system's alerts leaves the other's alone.
+    await secs.nth(0).locator('> summary').click();
+    await expect(secs.nth(0)).not.toHaveAttribute('open', '');
+    await expect(secs.nth(1)).toHaveAttribute('open', '');
+  });
+
+  test('a clean system says what was checked, not just nothing', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/alerts');
+    const clear = page.locator('.allclear').first();
+    await expect(clear).toContainText('Nothing reported');
+    // An empty box is ambiguous between "all clear" and "nobody looked", so
+    // the checks that ran are named.
+    await expect(clear).toContainText('feed freshness');
+    await expect(clear).toContainText('last poll result');
+  });
+
+  test("raises the vendor's own alarm counter, and says which vendor", async ({ page }) => {
+    const invs = inverters({
+      solis: { raw: JSON.stringify({ power: 5.08, powerStr: 'kW', state: 3, alarmCount: 2, alarmLevel: 2 }) },
+    });
+    await stubApi(page, { invs });
+    await page.goto('/#/alerts');
+    const sec = page.locator('details.syssec').nth(0);
+    await expect(sec).toContainText('2 active alarms');
+    await expect(sec).toContainText('Alarm level 2');
+    await expect(sec.locator('.a-src').first()).toHaveText('SolisCloud');
+  });
+
+  test("reads SolarMan's NORMAL/abnormal flags", async ({ page }) => {
+    const invs = inverters({
+      solarman: { raw: JSON.stringify({ generationPower: 278, warningStatus: 'ABNORMAL', networkStatus: 'OFFLINE' }) },
+    });
+    await stubApi(page, { invs });
+    await page.goto('/#/alerts');
+    const sec = page.locator('details.syssec').nth(1);
+    await expect(sec).toContainText('Inverter warning');
+    await expect(sec).toContainText('Datalogger link');
+    await expect(sec).toContainText('abnormal');
+  });
+
+  test('an offline feed is an alert in its own right', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
+    await page.goto('/#/alerts');
+    await expect(page.locator('details.syssec').nth(0)).toContainText('System offline');
+    await expect(page.locator('details.syssec').nth(0)).toContainText('the cutoff is 15 minutes');
+  });
+
+  test("a failed poll is ours to report, not the vendor's", async ({ page }) => {
+    await stubApi(page, { poll: { ts: NOW - 60, provider: 'solarman', ok: 0, detail: 'HTTP 401 on /device/v1.0/currentData' } });
+    await page.goto('/#/alerts');
+    const sec = page.locator('details.syssec').nth(1);
+    await expect(sec).toContainText('Last poll failed');
+    await expect(sec).toContainText('HTTP 401');
+    await expect(sec.locator('.a-src').last()).toHaveText('SolarLens');
+  });
+
+  test('the tab badge counts what is wrong across the fleet', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    await expect(page.locator('#alertbadge')).toBeHidden();
+
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
+    await page.reload();
+    await expect(page.locator('#alertbadge')).toBeVisible();
+    await expect(page.locator('#alertbadge')).toHaveText('1');
+    await expect(page.locator('#alertbadge')).toHaveClass(/bad/);
   });
 });
 
@@ -309,26 +397,60 @@ test.describe('Battery', () => {
 });
 
 test.describe('Power page', () => {
-  test('marks a stale headline figure as last known rather than current', async ({ page }) => {
+  test('an offline system heads its section with a zero, not a stale figure', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
     await page.goto('/#/power');
-    const head = page.locator('details.syssec').nth(0).locator('summary');
-    await expect(head.locator('.snow')).toHaveClass(/lastknown/);
-    await expect(head.locator('.snow')).toContainText('last known');
-    await expect(page.locator('details.syssec').nth(1).locator('.snow')).not.toHaveClass(/lastknown/);
+    const head = page.locator('details.syssec', { hasText: 'Demo Solis Plant' }).locator('> summary');
+    await expect(head.locator('.snow')).toHaveText('0 W');
+    await expect(head.locator('.pill')).toHaveText('offline');
   });
 
-  test('gives each system its own collapsible section', async ({ page }) => {
+  test('gives each system its own collapsible section, and the chart one too', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/power');
     const secs = page.locator('details.syssec');
-    await expect(secs).toHaveCount(2);
+    // The chart is collapsible in its own right, above the two systems.
+    await expect(secs).toHaveCount(3);
+    await expect(secs.nth(0)).toContainText('Today · AC output · all systems');
     // Open by default: the page is there to be read, not clicked open twice.
-    await expect(secs.nth(0)).toHaveAttribute('open', '');
+    await expect(secs.nth(1)).toHaveAttribute('open', '');
+    await secs.nth(1).locator('> summary').click();
+    await expect(secs.nth(1)).not.toHaveAttribute('open', '');
+    // Collapsing one leaves the others alone.
+    await expect(secs.nth(2)).toHaveAttribute('open', '');
     await secs.nth(0).locator('> summary').click();
     await expect(secs.nth(0)).not.toHaveAttribute('open', '');
-    // Collapsing one leaves the other alone.
-    await expect(secs.nth(1)).toHaveAttribute('open', '');
+  });
+
+  test('the legend switches a line out of the chart, and remembers it', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/power');
+    const items = page.locator('.legitem');
+    await expect(items).toHaveText([/Demo Solis Plant/, /Demo Hybrid/, /Fleet total/]);
+    await expect(items.nth(0)).toHaveAttribute('aria-pressed', 'true');
+
+    // Two curves lying on top of each other are two curves you cannot read, so
+    // switching one off has to actually remove its line and rescale the axis.
+    const before = await page.locator('#combined path').count();
+    await items.nth(0).click();
+    await expect(items.nth(0)).toHaveAttribute('aria-pressed', 'false');
+    await expect(items.nth(0)).toHaveClass(/off/);
+    expect(await page.locator('#combined path').count()).toBeLessThan(before);
+
+    // The switch survives a reload, or it has to be flicked again every refresh.
+    await page.reload();
+    await expect(page.locator('.legitem').nth(0)).toHaveClass(/off/);
+    await page.locator('.legitem').nth(0).click();
+    await expect(page.locator('.legitem').nth(0)).not.toHaveClass(/off/);
+  });
+
+  test('switching every line off says so rather than drawing an empty box', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/power');
+    for (const i of [0, 1, 2]) await page.locator('.legitem').nth(i).click();
+    await expect(page.locator('#combined')).toContainText('Every system is switched off');
+    // And the switches are still there to turn back on.
+    await expect(page.locator('.legitem')).toHaveCount(3);
   });
 });
 
@@ -366,23 +488,43 @@ test.describe('Energy flow on the overview', () => {
     await expect(page.locator('svg.flow')).toHaveCount(2);
   });
 
-  test('a stale system’s diagram stops reading as live', async ({ page }) => {
+  test('an offline system draws a dead diagram and says why', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
     await page.goto('/');
     const box = page.locator('a.flowlink').nth(0);
-    await expect(box.locator('.flowstale')).toContainText('not reporting');
-    // The travelling pips are what make a diagram look live; a dead feed's
-    // are hidden rather than left circulating power that is not flowing.
-    await expect(box.locator('svg.flow .pip').first()).toBeHidden();
+    await expect(box.locator('.flowstale')).toContainText('offline');
+    await expect(box.locator('.flowstale')).toContainText('last sample');
+    // Every arm now carries a real zero, so nothing is drawn live and no pip
+    // travels: the picture agrees with the figures instead of contradicting them.
+    await expect(box.locator('svg.flow .wire.live')).toHaveCount(0);
+    await expect(box.locator('svg.flow .pip')).toHaveCount(0);
     await expect(page.locator('a.flowlink').nth(1).locator('svg.flow .pip').first()).toBeVisible();
   });
 
   test('the flow tab is gone and an old #/flow link lands on the overview', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await expect(page.locator('nav a')).toHaveText(['Overview', 'Power', 'Devices']);
+    await expect(page.locator('nav a')).toHaveText([/Overview/, /Power/, /Alerts/, /Devices/]);
     await page.goto('/#/flow');
     await expect(page.locator('h2.band').first()).toHaveText('Energy flow');
+  });
+
+  test('each diagram owns its arrow markers, so accents cannot leak', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/');
+    const ids = await page.locator('svg.flow marker').evaluateAll((ms) => ms.map((m) => m.id));
+    // Marker ids are document-wide. Two diagrams sharing one id means
+    // url(#that-id) resolves to whichever came first, and the second diagram
+    // silently borrows the first one's colour.
+    expect(new Set(ids).size).toBe(ids.length);
+    // And every reference points at a marker that exists in its own diagram.
+    const dangling = await page.locator('svg.flow').evaluateAll((svgs) =>
+      svgs.flatMap((svg) => [...svg.querySelectorAll('.wire')]
+        .flatMap((w) => ['marker-start', 'marker-end'].map((a) => w.getAttribute(a)))
+        .filter((ref): ref is string => !!ref)
+        .map((ref) => ref.slice(5, -1))
+        .filter((id) => !svg.querySelector(`marker[id="${id}"]`))));
+    expect(dangling).toEqual([]);
   });
 
   test('a flow box opens that system detail', async ({ page }) => {
@@ -421,7 +563,7 @@ test.describe('AC output page', () => {
     await expect(page.locator('a.flowlink[href="#/power"]').first()).toBeVisible();
     await page.locator('nav').getByRole('link', { name: 'Power', exact: true }).click();
     await expect(page).toHaveURL(/#\/power$/);
-    await expect(page.locator('#legend span')).toContainText(['Demo Solis Plant', 'Demo Hybrid', 'Fleet total']);
+    await expect(page.locator('#legend .legitem')).toContainText(['Demo Solis Plant', 'Demo Hybrid', 'Fleet total']);
     // Combined chart plus one per system.
     await expect(page.locator('svg.combined')).toHaveCount(3);
     // And each system's full detail set, so Power is not just a picture.

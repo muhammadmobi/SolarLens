@@ -115,13 +115,24 @@
              border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   .fitem { display: flex; flex-direction: column; gap: 1px; }
   .quiet { font-size: 10.5px; font-weight: 650; color: var(--warn); margin-top: 1px; }
-  /* A figure nobody can vouch for any more reads dimmer than a live one. */
-  .lastknown { opacity: .55; }
-  /* A dead feed's diagram should not animate as though power were moving:
-     the travelling pips are what make it read as live. */
-  .lastknown .flow .pip { display: none; }
+  .navbadge { display: inline-block; min-width: 17px; padding: 0 5px; margin-left: 7px; border-radius: 999px;
+              background: var(--warn-bg); color: var(--warn); font-size: 10.5px; font-weight: 800;
+              line-height: 17px; text-align: center; vertical-align: 1px; }
+  .navbadge.bad { background: var(--bad-bg); color: var(--bad); }
+  .alertsum { font-size: 15px; color: var(--muted); }
+  .alertsum b { color: var(--ink); font-size: 19px; font-weight: 800; }
+  .alerts { list-style: none; margin: 0; padding: 0; }
+  .alerts li { padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
+  .alerts li:last-child { border-bottom: none; }
+  .a-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .a-title { font-weight: 700; font-size: 15px; }
+  .a-src { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .05em;
+           text-transform: uppercase; color: var(--faint); }
+  .a-detail { margin-top: 5px; font-size: 13.5px; color: var(--muted); }
+  .allclear { padding: 18px 16px; }
+  .ac-head { font-weight: 700; font-size: 15px; color: var(--ok); }
+  .ac-sub { margin-top: 6px; font-size: 12.5px; color: var(--faint); }
   .flowstale { font-size: 11.5px; font-weight: 650; color: var(--warn); margin: 2px 0 6px; }
-  .lastknown .lk { color: var(--warn); font-weight: 650; opacity: 1; }
   [hidden] { display: none !important; }
   .flabel { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
   .fleet .num.small { font-size: 17px; }
@@ -227,8 +238,18 @@
   .batt .v { font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 1px; }
 
   /* ---------- chart ---------- */
-  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
-  .legend i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 7px; }
+  .legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .legitem { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 12.5px; font-weight: 600;
+             color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px;
+             padding: 5px 12px; cursor: pointer; transition: opacity .12s, border-color .12s; }
+  .legitem:hover { border-color: var(--muted); }
+  .legitem i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; }
+  /* A switched-off series keeps its swatch, struck through, so you can still
+     see which line you turned off rather than guessing from what is missing. */
+  .legitem.off { opacity: .5; text-decoration: line-through; }
+  .legitem.off i { background: var(--line) !important; }
+  .legitem em { font-style: normal; color: var(--faint); font-weight: 600; }
+  .snote { font-size: 11.5px; font-weight: 600; color: var(--faint); margin-left: auto; }
   .combined { width: 100%; height: 250px; display: block; }
   .axis { fill: var(--muted); font-size: 12.5px; font-family: var(--font); font-weight: 600; }
   .axis.unit { fill: var(--faint); font-size: 11px; }
@@ -355,7 +376,7 @@
   <div class="inner">
     <a class="brand" href="#/"><img class="mark" src="/icon.svg" alt="" width="28" height="28">SolarLens</a>
     <div class="fleet">
-      <div class="fitem" title="Only systems that have reported in the last 15 minutes. A system that has gone quiet is left out and flagged instead."><span class="flabel">Producing now</span><span class="num" id="fleet-power">—</span><span class="quiet" id="fleet-quiet" hidden></span></div>
+      <div class="fitem" title="Both systems added together. An offline system counts as zero, and is named underneath."><span class="flabel">Producing now</span><span class="num" id="fleet-power">—</span><span class="quiet" id="fleet-quiet" hidden></span></div>
       <span class="sep"></span>
       <div class="fitem" title="Both systems added together, since midnight"><span class="flabel">Produced today</span><span class="num small" id="fleet-today">—</span></div>
       <span class="sep"></span>
@@ -370,6 +391,7 @@
     <nav id="nav">
       <a href="#/">Overview</a>
       <a href="#/power">Power</a>
+      <a href="#/alerts">Alerts<span class="navbadge" id="alertbadge" hidden></span></a>
       <a href="#/devices">Devices</a>
     </nav>
   </div>
@@ -388,7 +410,13 @@
   const REFRESH_MS = 30_000;
   const STALE_AFTER_S = 15 * 60;
 
-  const state = { latest: null, series: null, devices: [], health: null, error: null };
+  // Which chart series the reader has switched off. Remembered per browser:
+  // having to switch the same line off after every refresh is worse than not
+  // being able to switch it off at all.
+  const savedHidden = (() => {
+    try { return new Set(JSON.parse(localStorage.getItem('sl-hidden') || '[]')); } catch { return new Set(); }
+  })();
+  const state = { latest: null, series: null, devices: [], health: null, error: null, hidden: savedHidden };
 
   const colorFor = (p) => ({ soliscloud: 'var(--solis)', solarman: 'var(--solarman)', local: 'var(--local)' }[p] || 'var(--muted)');
   const providerName = (p) => p === 'soliscloud' ? 'SolisCloud' : p === 'solarman' ? 'SolarMan' : p;
@@ -452,16 +480,20 @@
     return kwh && m?.battChargeTotalKwh != null ? m.battChargeTotalKwh / kwh : null;
   };
 
+  /**
+   * Offline means offline, from either direction: the vendor says the plant is
+   * down, or nothing has reached us inside the staleness window. Both end in
+   * the same word, because to someone looking at the screen they are the same
+   * situation - the system is not telling us anything.
+   */
   function statusOf(inv) {
     const age = inv.ts ? Math.floor(Date.now() / 1000) - inv.ts : null;
     const stale = age === null || age > STALE_AFTER_S;
+    const offline = stale || inv.status === 'offline';
     return {
-      stale,
-      cls: !inv.ts ? '' : stale ? 'warn' : inv.status === 'alarm' ? 'bad' : inv.status === 'offline' ? 'warn' : 'ok',
-      // The vendor's own word is only current if the sample is. Past the
-      // staleness cutoff the pill says what is actually true: nothing is
-      // arriving. The last vendor status is kept in the tooltip.
-      text: !inv.ts ? 'no data yet' : stale ? 'not reporting' : (inv.status || 'reporting'),
+      stale, offline,
+      cls: !inv.ts ? '' : inv.status === 'alarm' ? 'bad' : offline ? 'warn' : 'ok',
+      text: !inv.ts ? 'no data yet' : inv.status === 'alarm' ? 'alarm' : offline ? 'offline' : (inv.status || 'reporting'),
       lastWord: inv.status || null,
     };
   }
@@ -580,10 +612,16 @@
       return `M${n.x - side * (NR + 12)},${CY} H${CX + side * (HR + 14)}`;
     };
 
+    // Marker ids are document-wide, and the overview draws one diagram per
+    // system: two <marker id="a-on"> elements in one page mean url(#a-on)
+    // resolves to whichever came first, so the second diagram borrows the
+    // first one's accent. Each diagram therefore names its own.
+    const uid = 'f' + String(inv.id ?? 'x').replace(/[^a-zA-Z0-9]/g, '');
+    const onId = `a-on-${uid}`, offId = `a-off-${uid}`;
     let out = `<defs>
-      <marker id="a-off" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
+      <marker id="${offId}" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
         <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/></marker>
-      <marker id="a-on" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
+      <marker id="${onId}" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
         <path d="M0,0 L10,5 L0,10 z" fill="${accent}"/></marker>
     </defs>`;
 
@@ -593,7 +631,7 @@
       const d = pathFor(n);
       const rev = !n.into;
       out += `<path class="wire${live ? ' live' : ' dead'}" d="${d}" stroke-width="${gauge(n.value).toFixed(1)}"
-        marker-${rev ? 'start' : 'end'}="url(#${live ? 'a-on' : 'a-off'})"/>`;
+        marker-${rev ? 'start' : 'end'}="url(#${live ? onId : offId})"/>`;
       if (live) {
         out += `<circle class="pip" r="${(2.6 + gauge(n.value) * 0.5).toFixed(1)}"><animateMotion dur="2.6s" repeatCount="indefinite"
           keyPoints="${rev ? '1;0' : '0;1'}" keyTimes="0;1" calcMode="linear" path="${d}"/></circle>`;
@@ -686,7 +724,7 @@
         <summary>
           <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
-          <span class="snow${st.stale ? ' lastknown' : ''}"${st.stale && inv.ts ? ` title="Last known output, ${esc(ago(inv.ts))}"` : ''}>${v}<small> ${u}</small>${st.stale ? '<small class="lk"> last known</small>' : ''}</span>
+          <span class="snow">${v}<small> ${u}</small></span>
           <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
         </summary>
         <div class="secbody">
@@ -697,11 +735,15 @@
       </details>`;
     }).join('');
 
-    $('view').innerHTML = `<section class="card"><h2>Today · AC output · all systems</h2><div class="body">
-        <div class="legend" id="legend"></div>
-        <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
-      </div></section>${per}`;
-    $('legend').innerHTML = combinedChart($('combined'), byInv, invs).join('');
+    $('view').innerHTML = `<details class="syssec" open>
+        <summary><span class="sname">Today · AC output · all systems</span>
+          <span class="snote">click a name in the legend to show or hide that line</span></summary>
+        <div class="secbody"><section class="card"><div class="body">
+          <div class="legend" id="legend"></div>
+          <svg class="combined" id="combined" viewBox="0 0 1000 230" preserveAspectRatio="none"></svg>
+        </div></section></div>
+      </details>${per}`;
+    bindLegend($('combined'), byInv, invs);
     bindRawFilters();
   }
 
@@ -748,8 +790,8 @@
         </div>
         <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
       </div>
-      <div class="herolabel">${st.stale ? 'Last known output' : 'Producing now'}</div>
-      <div class="hero${st.stale ? ' lastknown' : ''}">
+      <div class="herolabel">Producing now</div>
+      <div class="hero">
         <span class="val">${pv}</span><span class="unit">${pu}</span>
         <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)} rated` : ''}</span>
       </div>
@@ -788,13 +830,34 @@
     </div>`;
   }
 
+  /**
+   * Two curves that sit almost on top of each other are two curves you cannot
+   * read. The legend is therefore a set of switches: click a name to drop that
+   * system out of the picture, and the axis rescales to whatever is left.
+   */
   function combinedChart(svg, byInv, invs) {
     const W = 1000, H = 230, L = 46, R = 12, T = 14, B = 26;
     const t0 = startOfToday(), t1 = t0 + 86400;
-    const all = Object.values(byInv).flat();
-    if (!all.length) { svg.innerHTML = `<text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">No samples yet today</text>`; return []; }
+    // Every system gets a switch, including one with nothing to draw today -
+    // otherwise it silently disappears from the page rather than reading as
+    // "this system has no samples". So does the fleet sum, always, or turning
+    // everything off would take its own switch away with it.
+    const legend = () => {
+      const l = invs.map((i) => legendItem(i.id, colorFor(i.provider), i.name,
+        (byInv[i.id] || []).length < 2 ? 'no samples today' : null));
+      if (invs.length > 1) l.push(legendItem(TOTAL_KEY, 'var(--total)', 'Fleet total'));
+      return l;
+    };
+
+    const shown = invs.filter((i) => !state.hidden.has(i.id));
+    const all = shown.flatMap((i) => byInv[i.id] || []);
+    if (!all.length) {
+      svg.innerHTML = `<text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
+        invs.length && shown.length === 0 ? 'Every system is switched off in the legend' : 'No samples yet today'}</text>`;
+      return legend();
+    }
     const bucket = 300, totals = new Map();
-    for (const [id, pts] of Object.entries(byInv)) for (const p of pts) {
+    for (const [id, pts] of Object.entries(byInv)) if (!state.hidden.has(id)) for (const p of pts) {
       const b = Math.floor(p.ts / bucket) * bucket;
       const mm = totals.get(b) || {}; mm[id] = p.ac_power_w || 0; totals.set(b, mm);
     }
@@ -814,20 +877,41 @@
       const xx = x(t0 + h * 3600);
       out += `<text class="axis" x="${xx}" y="${H - 6}" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${String(h).padStart(2, '0')}:00</text>`;
     }
-    const legend = [];
     for (const inv of invs) {
       const pts = byInv[inv.id] || [];
-      if (pts.length < 2) continue;
-      const c = colorFor(inv.provider);
-      out += `<path d="${line(pts)}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
-      legend.push(`<span><i style="background:${c}"></i>${esc(inv.name)}</span>`);
+      if (state.hidden.has(inv.id) || pts.length < 2) continue;
+      out += `<path d="${line(pts)}" fill="none" stroke="${colorFor(inv.provider)}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
     }
-    if (invs.length > 1 && totalPts.length > 1) {
+    if (invs.length > 1 && !state.hidden.has(TOTAL_KEY) && totalPts.length > 1) {
       out += `<path d="${line(totalPts)}" fill="none" stroke="var(--total)" stroke-width="1.6" stroke-dasharray="5 4" opacity="0.75" vector-effect="non-scaling-stroke"/>`;
-      legend.push(`<span><i style="background:var(--total);opacity:.75"></i>Fleet total</span>`);
     }
     svg.innerHTML = out;
-    return legend;
+    return legend();
+  }
+
+  /** The dashed sum line is a series like any other, so it needs a key too. */
+  const TOTAL_KEY = '__total__';
+
+  function legendItem(id, colour, name, note) {
+    const off = state.hidden.has(id);
+    return `<button type="button" class="legitem${off ? ' off' : ''}" data-series="${esc(id)}"
+      aria-pressed="${off ? 'false' : 'true'}" title="${off ? 'Show' : 'Hide'} ${esc(name)}">
+      <i style="background:${colour}"></i>${esc(name)}${note ? ` <em>${esc(note)}</em>` : ''}</button>`;
+  }
+
+  /** Clicking a switch redraws the chart in place rather than the whole page. */
+  function bindLegend(svg, byInv, invs) {
+    const box = $('legend');
+    if (!box) return;
+    box.innerHTML = combinedChart(svg, byInv, invs).join('');
+    for (const b of box.querySelectorAll('.legitem')) {
+      b.onclick = () => {
+        const id = b.dataset.series;
+        if (state.hidden.has(id)) state.hidden.delete(id); else state.hidden.add(id);
+        try { localStorage.setItem('sl-hidden', JSON.stringify([...state.hidden])); } catch { /* private window */ }
+        bindLegend(svg, byInv, invs);
+      };
+    }
   }
 
   function renderOverview() {
@@ -852,8 +936,8 @@
       return `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}">
       <section class="card"><div class="body">
         ${boxTitle(inv)}
-        ${st.stale ? `<div class="flowstale">⚠ not reporting · this is the last snapshot, ${esc(inv.ts ? ago(inv.ts) : 'never')}</div>` : ''}
-        <div class="${st.stale ? 'lastknown' : ''}">${flowSvg(inv, parse(inv.metrics) ?? {})}</div>
+        ${st.offline ? `<div class="flowstale">⚠ offline · last sample ${esc(inv.ts ? ago(inv.ts) : 'never')}</div>` : ''}
+        ${flowSvg(inv, parse(inv.metrics) ?? {})}
       </div></section></a>`;
     }).join('');
 
@@ -868,6 +952,151 @@
       band('Energy flow', flows) +
       band('Systems', cards) +
       band('Today · AC output', charts);
+  }
+
+  // ---------- alerts ----------
+  /**
+   * Everything either cloud says is wrong, gathered in one place.
+   *
+   * Nothing here is invented: each row names the field it came from, so a
+   * quiet page means "both vendors report normal", not "we did not look". The
+   * clouds disagree about how to say it - SolisCloud counts alarms and sets a
+   * level, SolarMan carries a handful of NORMAL/ABNORMAL flags - so both
+   * vocabularies are read and mapped onto the same three severities.
+   */
+  const WARN_FLAGS = [
+    ['warningStatus', 'Inverter warning'],
+    ['businessWarningStatus', 'Service warning'],
+    ['consumerWarningStatus', 'Load warning'],
+  ];
+
+  function alertsFor(inv) {
+    const out = [];
+    const st = statusOf(inv);
+    const raw = parse(inv.raw) ?? {};
+    const add = (level, title, detail, source) => out.push({ level, title, detail, source });
+
+    // --- the feed itself, which is ours to judge rather than the vendor's ---
+    if (!inv.ts) {
+      add('warn', 'No data yet', 'This system has never delivered a sample.', 'SolarLens');
+    } else if (st.offline) {
+      add('bad', 'System offline',
+        inv.status === 'offline'
+          ? `The vendor reports the plant offline. Last sample ${ago(inv.ts)}.`
+          : `Nothing has arrived for ${ago(inv.ts)}; the cutoff is 15 minutes.`,
+        inv.status === 'offline' ? providerName(inv.provider) : 'SolarLens');
+    }
+
+    // --- SolisCloud: an alarm counter and a severity level -----------------
+    const alarms = Number(raw.alarmCount);
+    if (Number.isFinite(alarms) && alarms > 0) {
+      add('bad', `${alarms} active alarm${alarms === 1 ? '' : 's'}`,
+        'Open the SolisCloud alarm list for the fault codes; SolarLens only sees the count.', 'SolisCloud');
+    }
+    const level = Number(raw.alarmLevel);
+    if (Number.isFinite(level) && level > 0) {
+      add(level > 1 ? 'bad' : 'warn', `Alarm level ${level}`, 'Raised by the plant itself.', 'SolisCloud');
+    }
+
+    // --- SolarMan: flags that read NORMAL until they do not -----------------
+    for (const [key, label] of WARN_FLAGS) {
+      const v = raw[key];
+      if (v && String(v).toUpperCase() !== 'NORMAL') {
+        add('warn', label, `Reported as "${String(v).toLowerCase()}".`, 'SolarMan');
+      }
+    }
+    const net = raw.networkStatus;
+    if (net && String(net).toUpperCase() !== 'NORMAL') {
+      add('warn', 'Datalogger link', `Reported as "${String(net).toLowerCase()}".`, 'SolarMan');
+    }
+
+    // --- the hardware behind the readings ----------------------------------
+    for (const d of devicesFor(inv)) {
+      const what = `${d.kind === 'datalogger' ? 'Datalogger' : d.kind === 'inverter' ? 'Inverter' : d.kind} ${d.sn ?? ''}`.trim();
+      if (d.status === 'alarm') add('bad', `${what} in alarm`, 'The device itself is raising a fault.', providerName(d.provider));
+      else if (d.status === 'offline') {
+        add('warn', `${what} offline`,
+          d.last_seen ? `Last contact ${ago(d.last_seen)}.` : 'No contact recorded.', providerName(d.provider));
+      }
+      const drow = parse(d.raw) ?? {};
+      const dAlert = Number(drow.alertStatus);
+      // SolarMan uses -1 for "nothing to report", so only a positive count is news.
+      if (Number.isFinite(dAlert) && dAlert > 0) {
+        add('bad', `${what}: ${dAlert} alert${dAlert === 1 ? '' : 's'}`, 'Raised on the device record.', 'SolarMan');
+      }
+      // A datalogger that cannot hear the radio is the usual cause of a silent
+      // outage, and it is worth saying before the data goes stale.
+      if (d.kind === 'datalogger' && d.signal_pct != null && d.signal_pct < 25) {
+        add('warn', `${what}: weak signal`, `${Math.round(d.signal_pct)}% link quality.`, 'SolarMan');
+      }
+      if (d.kind === 'datalogger' && d.signal_dbm != null && d.signal_dbm < -85) {
+        add('warn', `${what}: weak signal`, `${d.signal_dbm} dBm.`, 'SolisCloud');
+      }
+    }
+
+    // --- our own polling, which can fail without the vendor being at fault --
+    const poll = (state.health?.polls ?? []).find((p) => p.provider === inv.provider);
+    if (poll && !poll.ok) {
+      add('bad', 'Last poll failed', esc(poll.detail || 'No detail given.') + ` (${ago(poll.ts)})`, 'SolarLens');
+    }
+
+    return out;
+  }
+
+  /** What was looked at, so an empty list reads as "clear", not "not checked". */
+  function checksFor(inv) {
+    const list = ['feed freshness', 'vendor plant status'];
+    if (inv.provider === 'soliscloud') list.push('alarm count', 'alarm level');
+    else list.push('inverter, service and load warning flags', 'datalogger link status');
+    if (devicesFor(inv).length) list.push('device status', 'datalogger signal');
+    list.push('last poll result');
+    return list;
+  }
+
+  function alertCount() {
+    return (state.latest?.inverters ?? []).reduce((a, i) => a + alertsFor(i).length, 0);
+  }
+
+  function renderAlerts() {
+    const invs = state.latest?.inverters ?? [];
+    if (!invs.length) {
+      $('view').innerHTML = `<div class="card"><div class="empty">No systems yet, so nothing to report on.</div></div>`;
+      return;
+    }
+    const dot = (l) => `<span class="pill ${l === 'bad' ? 'bad' : l === 'warn' ? 'warn' : ''}"><i></i>${l === 'bad' ? 'fault' : l === 'warn' ? 'warning' : 'note'}</span>`;
+
+    const sections = invs.map((inv) => {
+      const rows = alertsFor(inv);
+      const st = statusOf(inv);
+      const worst = rows.some((r) => r.level === 'bad') ? 'bad' : rows.length ? 'warn' : 'ok';
+      const body = rows.length
+        ? `<ul class="alerts">${rows.map((r) => `<li class="${r.level}">
+             <div class="a-head">${dot(r.level)}<span class="a-title">${esc(r.title)}</span>
+               <span class="a-src">${esc(r.source)}</span></div>
+             <div class="a-detail">${esc(r.detail)}</div></li>`).join('')}</ul>`
+        : `<div class="allclear">
+             <div class="ac-head">✓ Nothing reported</div>
+             <div class="ac-sub">Checked: ${esc(checksFor(inv).join(', '))}.</div>
+           </div>`;
+      return `<details class="syssec" open>
+        <summary>
+          <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="sname">${esc(inv.name)}</span>
+          <span class="snow"><small>${rows.length ? `${rows.length} to look at` : 'clear'}</small></span>
+          <span class="pill ${worst === 'bad' ? 'bad' : worst === 'warn' ? 'warn' : 'ok'}"><i></i>${esc(st.text)}</span>
+        </summary>
+        <div class="secbody">${body}</div>
+      </details>`;
+    }).join('');
+
+    const total = invs.reduce((a, i) => a + alertsFor(i).length, 0);
+    $('view').innerHTML = `<section class="card"><h2>Alerts</h2><div class="body">
+        <div class="alertsum">${total
+          ? `<b>${total}</b> thing${total === 1 ? '' : 's'} to look at across ${invs.length} system${invs.length === 1 ? '' : 's'}.`
+          : `Nothing to look at. Both clouds report normal, and both feeds are current.`}
+        </div>
+        <div class="ac-sub">SolarLens reports what the vendors report, plus what it can see about its own polling. It does not raise alerts of its own beyond a feed going quiet.</div>
+      </div></section>${sections}`;
   }
 
   // ---------- devices ----------
@@ -1107,6 +1336,7 @@
     const sys = hash.match(/^#\/system\/(.+)$/);
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
     if (hash === '#/devices') return renderDevices();
+    if (hash === '#/alerts') return renderAlerts();
     // The Flow tab is gone: its diagrams live on the overview now, but an
     // old bookmark should still land somewhere sensible.
     if (hash === '#/flow') { location.replace('#/'); return renderOverview(); }
@@ -1123,20 +1353,29 @@
         api('/api/devices').catch(() => ({ devices: [] })),
         api('/api/health').catch(() => null),
       ]);
+      // An offline inverter is not still producing whatever it managed just
+      // before it dropped - nothing is flowing that anyone can see - so its
+      // instantaneous figures read zero everywhere at once, from this one
+      // place. The cumulative ones (today, lifetime) are left alone: those
+      // kilowatt-hours were genuinely generated and are still true.
+      for (const i of lat.inverters) {
+        i.offline = statusOf(i).offline;
+        if (!i.offline) continue;
+        i.ac_power_w = i.dc_power_w = 0;
+        i.grid_power_w = i.load_power_w = 0;
+        if (i.battery_power_w != null) i.battery_power_w = 0;
+      }
       state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.error = null;
 
       const withData = lat.inverters.filter((i) => i.ts);
-      // "Now" means now. A system whose newest sample is an hour old is not
-      // producing its last known wattage - nobody knows what it is producing -
-      // so it is left out of the total and named underneath instead.
-      const live = withData.filter((i) => now - i.ts <= STALE_AFTER_S);
-      const quiet = withData.filter((i) => now - i.ts > STALE_AFTER_S);
-      const [fv, fu] = fmtW(live.reduce((a, i) => a + (i.ac_power_w || 0), 0));
-      $('fleet-power').innerHTML = live.length ? `${fv}<span class="unit"> ${fu}</span>` : '—';
-      $('fleet-quiet').hidden = !quiet.length;
-      $('fleet-quiet').textContent = quiet.length
-        ? `${quiet.map((i) => i.name).join(', ')} not reporting`
-        : '';
+      // Offline systems now contribute a real zero rather than a last-known
+      // figure, so the total is just a total. What it cannot show is *why* it
+      // is low, hence the line naming anything that is down.
+      const down = withData.filter((i) => i.offline);
+      const [fv, fu] = fmtW(withData.reduce((a, i) => a + (i.ac_power_w || 0), 0));
+      $('fleet-power').innerHTML = withData.length ? `${fv}<span class="unit"> ${fu}</span>` : '—';
+      $('fleet-quiet').hidden = !down.length;
+      $('fleet-quiet').textContent = down.length ? `${down.map((i) => i.name).join(', ')} offline` : '';
       $('fleet-today').textContent = withData.length ? fmtKwh(withData.reduce((a, i) => a + (i.today_kwh || 0), 0)) : '—';
 
       const used = withData.reduce((a, i) => a + (parse(i.metrics)?.loadTodayKwh ?? 0), 0);
@@ -1152,6 +1391,12 @@
         $('fleet-wx').textContent =
           `${wx.weatherText}${wx.tempNowC != null ? ` · ${Math.round(wx.tempNowC)}°` : ''}${wx.tempMinC != null && wx.tempMaxC != null ? ` (${Math.round(wx.tempMinC)}–${Math.round(wx.tempMaxC)}°)` : ''}`;
       }
+      // The tab carries the count, so a fault is visible from any page.
+      const n = alertCount();
+      $('alertbadge').hidden = !n;
+      $('alertbadge').textContent = String(n);
+      $('alertbadge').className = 'navbadge' + ((state.latest?.inverters ?? []).some((i) => alertsFor(i).some((r) => r.level === 'bad')) ? ' bad' : '');
+
       const newest = Math.max(0, ...withData.map((i) => i.ts));
       const stale = !newest || (now - newest) > STALE_AFTER_S;
       $('updated').className = 'livedot' + (stale ? ' stale' : '');
