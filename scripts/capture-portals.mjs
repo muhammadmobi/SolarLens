@@ -1,7 +1,13 @@
 // Launches a SEPARATE Chrome window (own profile, not your daily one) on the
 // SolisCloud and SOLARMAN portals and records every JSON API exchange they make
 // into captures/ (gitignored). You log in yourself in that window; nothing here
-// types credentials. Password-like fields and auth tokens are redacted on write.
+// types credentials.
+//
+// Secrets AND personal details are redacted on write - the second half of that
+// was missing at first, and captures were coming out with the account holder's
+// email, phone, address and the site's coordinates in them. captures/ is
+// gitignored either way, but "gitignored" is not the same as "safe to attach
+// to a bug report", which is what these files are for.
 //
 //   node scripts/capture-portals.mjs            # runs until captures/STOP exists or 9 min
 //   echo > captures/STOP                        # from another shell, to stop early
@@ -25,6 +31,17 @@ const PORTALS = [
 // Only record traffic to the vendors' own hosts.
 const HOST_RE = /soliscloud\.com|solarmanpv\.com|ginlong\.com|solisinverters\.com/i;
 const SECRET_KEY_RE = /pass|pwd|secret|token|cookie|authorization|sign/i;
+// Personal details, on the same terms as src/providers/soliscloud.ts strips
+// them before storage. Location words only count at the start of a key or on a
+// camelCase boundary, because "capacity" contains the letters of "city".
+const PII_KEY_RE = new RegExp([
+  '[Aa]ddr', '[Ee]mail', '[Mm]obile', '[Pp]hone', '[Ii]ccid', '[Pp]icUrl',
+  '[Pp]osition', '[Ll]atitude', '[Ll]ongitude',
+  '[Nn]ickName', '[Ll]oginName', '[Uu]ser[Ii]d', '[Uu]ser[Nn]ame',
+  'City', 'County', 'Country', 'Region',
+  '^(?:city|county|country|region)',
+].join('|'));
+const sensitive = (k) => SECRET_KEY_RE.test(k) || PII_KEY_RE.test(k);
 
 mkdirSync(CAPTURES, { recursive: true });
 if (existsSync(STOP)) unlinkSync(STOP);
@@ -35,7 +52,7 @@ function redactForm(s) {
   if (typeof s !== 'string' || !s.includes('=') || s.trim().startsWith('{')) return s;
   const p = new URLSearchParams(s);
   for (const k of [...p.keys()]) {
-    if (SECRET_KEY_RE.test(k)) p.set(k, `<redacted len=${p.get(k).length}>`);
+    if (sensitive(k)) p.set(k, `<redacted len=${p.get(k).length}>`);
   }
   return p.toString();
 }
@@ -45,8 +62,10 @@ function redact(obj) {
   if (obj && typeof obj === 'object') {
     const out = {};
     for (const [k, v] of Object.entries(obj)) {
-      out[k] = SECRET_KEY_RE.test(k) && typeof v === 'string'
-        ? `<redacted len=${v.length} head=${v.slice(0, 6)}>`
+      // No "head=" preview: a few characters of a real key is still a few
+      // characters of a real key, and the length alone is enough to debug with.
+      out[k] = sensitive(k) && (typeof v === 'string' || typeof v === 'number')
+        ? `<redacted len=${String(v).length}>`
         : redact(v);
     }
     return out;
@@ -56,7 +75,7 @@ function redact(obj) {
 function redactHeaders(h) {
   const out = {};
   for (const [k, v] of Object.entries(h)) {
-    out[k] = SECRET_KEY_RE.test(k) ? `<redacted len=${v.length} head=${v.slice(0, 12)}>` : v;
+    out[k] = sensitive(k) ? `<redacted len=${v.length}>` : v;
   }
   return out;
 }

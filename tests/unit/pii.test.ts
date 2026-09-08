@@ -33,6 +33,12 @@ describe('stripPii', () => {
     expect(Object.keys(clean)).toEqual(['stationName']);
   });
 
+  it('catches the camelCase spellings too', () => {
+    // "oldUserId" slipped through a pattern that only knew "userId": the same
+    // field, one capital letter later.
+    expect(stripPii({ oldUserId: '1', UserName: 'x', installerEmail: 'a@b.c', ok: 1 })).toEqual({ ok: 1 });
+  });
+
   it('keeps capacity, which merely contains the letters of "city"', () => {
     // A case-insensitive /city/ also matches "capaCITY". The old pattern was
     // deleting every capacity field from the payload it stored.

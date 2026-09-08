@@ -226,7 +226,7 @@ export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Re
 const PII_KEY = new RegExp([
   '[Aa]ddr', '[Ee]mail', '[Mm]obile', '[Pp]hone', '[Ii]ccid', '[Pp]icUrl',
   '[Pp]osition', '[Ll]atitude', '[Ll]ongitude',
-  'nickName', 'loginName', 'userId', 'userName',
+  '[Nn]ickName', '[Ll]oginName', '[Uu]ser[Ii]d', '[Uu]ser[Nn]ame',
   'City', 'County', 'Country', 'Region',
   '^(?:city|county|country|region)',
 ].join('|'));
