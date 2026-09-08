@@ -94,6 +94,18 @@ the announcement.
   call the portal makes for its own graph and pushes it to `/api/ingest/history`.
   Backfilled rows land under a `-history` source: `latest` ignores them, and the
   series query prefers a live sample wherever both describe the same instant.
+- **A Historical Data tab** — day by day per system: produced, consumed,
+  imported, exported, battery in and out, peak and sample count, with a bar per
+  day and a 7/30/90-day range. The daily figures the vendors publish are
+  counters that climb and reset at local midnight, so a day's total is the
+  largest value inside it — grouped by the reader's own midnight, because a
+  solar day does not end at UTC's. Columns appear only where that system
+  measures the quantity, and the page says plainly that the record begins when
+  SolarLens started collecting.
+- **Security headers**: a Content-Security-Policy strict about where anything
+  may be *sent* as well as where it may come from, plus `nosniff`,
+  `no-referrer` — which also stops the one-time `/auth?t=` link leaking the
+  token in a `Referer` — and `frame-ancestors 'none'`.
 - **An app icon and favicon** — a lens ring split into the two vendor accents
   around a sun core.
 - `kv` table (migration `0007`) — a small expiring key/value shelf, first used
@@ -146,6 +158,17 @@ the announcement.
 
 ### Fixed
 
+- **The API no longer fails open silently.** With `API_TOKEN` unset the
+  dashboard is unauthenticated — deliberate for local development, but a deploy
+  that lost the secret would have served the whole dataset to anyone with the
+  URL and said nothing. It warns in the log and shows a banner now.
+- **`npm run relay:solis` works on its own.** It needed two environment
+  variables that no documented command set, so the documented invocation always
+  failed. It reads `.dev.vars`, where those secrets already live.
+- **The backfilled curve is in the right units.** The chart payload's
+  `powerStr` labels the axis rather than the numbers beside it, so scaling by
+  it put a 12 kW array at 9.47 MW. The ingest route now also measures the curve
+  against the nameplate and refuses one that could not physically have happened.
 - **The account holder's name and email are no longer stored.** The SolisCloud
   station snapshot carries `userEmail`, `userName`, `userId` and the site's
   coordinates. Device payloads were being stripped; the station payload was not,

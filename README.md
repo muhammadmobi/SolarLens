@@ -64,9 +64,10 @@ A single Cloudflare Worker does three jobs:
 
 1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1.
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
-3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Four tabs, plus a per-system page they all link into:
+3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Five tabs, plus a per-system page they all link into:
    - **Overview** (`#/`) — three bands, each with one box per system: the energy-flow diagram, then the figure set, then that system's day curve.
    - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry.
+   - **Historical Data** (`#/history`) — day by day per system: produced, consumed, imported, exported, battery in and out, peak and sample count, with a bar per day. Columns appear only where that system measures the quantity, and the page says plainly that the record begins when SolarLens started collecting rather than when the array was installed.
    - **Alerts** (`#/alerts`) — everything either cloud says is wrong, one collapsible section per system. Nothing is invented: each row names the field it came from, so an empty section reads as "both vendors report normal" rather than "nobody looked". The tab carries a count badge.
    - **Devices** (`#/devices`) — hardware inventory: inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
    - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table.
@@ -258,7 +259,7 @@ npm run test:unit:coverage  # vitest + v8 coverage, enforces thresholds
 npm run test:e2e            # playwright (add --ui for the inspector)
 ```
 
-**93 unit tests** and **138 end-to-end tests** (69 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**97 unit tests** and **150 end-to-end tests** (75 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -281,7 +282,7 @@ Six files, one concern each. They are all pure-function tests against fixtures s
 
 ### End-to-end tests — `tests/e2e/`
 
-One spec file of 69 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
+One spec file of 75 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
 
 They assert what a person sees, grouped by what it is for: the overview and its layout at both widths, the theme toggle (including that the choice is applied before first paint), the labelled header totals, the energy-flow diagram (structure, direction from the signs, wire thickness tracking power, per-diagram marker ids), the battery panel and the derived cycle count, offline handling and zeroed figures, the Alerts tab, the collapsible Power sections and the clickable chart legend, the device inventory, raw telemetry filtering, and the token-gate guidance.
 
@@ -324,7 +325,8 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 |---|---|---|
 | `GET /api/latest` | API_TOKEN | newest reading per inverter, with `metrics` |
 | `GET /api/series?from=&to=` | API_TOKEN | readings in a range (≤ 31 days) |
-| `GET /api/health` | API_TOKEN | recent poll log, plus the newest line per feed |
+| `GET /api/health` | API_TOKEN | recent poll log, the newest line per feed, and whether auth is disabled |
+| `GET /api/history?days=&tz=` | API_TOKEN | one row per inverter per day (`tz` is the caller UTC offset in minutes) |
 | `POST /api/poll` | API_TOKEN | poll all providers now |
 | `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |
@@ -390,6 +392,14 @@ solar-lens/
 | A shared plant you don't own shows up | Set `INCLUDE_PLANTS` to the ids you want. |
 
 ## Security and privacy
+
+Headers on every response: a Content-Security-Policy that is strict about where anything may be **sent** as well as where it may come from (`connect-src 'self'`, so injected script could not exfiltrate a reading), `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` — the last of which also stops the one-time `/auth?t=<token>` link putting the token in a `Referer`. The policy is written twice, in `src/index.ts` and `public/_headers`, because Cloudflare serves the static page from the edge without invoking the Worker; change both or neither.
+
+The dashboard cookie is `HttpOnly`, `Secure` and `SameSite=Lax`. Read and push routes use separate tokens, so an agent key cannot read your data. Vendor payloads are stripped of the account holder's name, email and the site's coordinates before storage, and every vendor-controlled string is escaped before it reaches the page.
+
+**With `API_TOKEN` unset the API is open.** That is deliberate for local development, and no longer silent: the Worker logs it and the dashboard shows a banner. Set the secret before pointing anything at the public URL.
+
+One third-party request remains: the page loads its web font from Google, which sees the viewer's IP. Self-hosting it (Manrope is OFL-licensed) or dropping to the system font stack removes that.
 
 - Nothing identifying belongs in the repo: credentials, tokens and plant ids live only in `wrangler secret`, the Cloudflare dashboard, or the gitignored `.dev.vars`. `captures/`, `.capture-profile/` and `.relay-profile/` (browser sessions) are gitignored too.
 - A public `workers.dev` URL is gated by `API_TOKEN`; without it anyone could read your production data. `INGEST_TOKEN` separately gates writes from agents.
