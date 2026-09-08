@@ -81,6 +81,13 @@ the announcement.
   only when the vendor reported sunrise and the record began well after it —
   a curve that starts at six o'clock is just sunrise, and warning about it every
   morning would be noise.
+- **The footer names every feed**, not just whichever logged most recently.
+  Only SolarMan runs on the cron; SolisCloud arrives through the relay, which
+  never wrote to the poll log at all - so the footer read `last poll (solarman)
+  ok — plants=1 inverters=1` and never mentioned the other system, which looks
+  exactly like a dashboard tracking one inverter. The relay logs its pushes
+  now, `/api/health` returns the newest line per provider, and the footer shows
+  one entry per feed with failures marked.
 - **An app icon and favicon** — a lens ring split into the two vendor accents
   around a sun core.
 - `kv` table (migration `0007`) — a small expiring key/value shelf, first used
@@ -157,6 +164,8 @@ the announcement.
   README's claim that a data-shape change fails at compile time was not true of
   the tests themselves. `npm test` now typechecks both first — which
   immediately turned up two latent type errors in the specs.
+- **The poll log is pruned.** Two feeds logging every five minutes is about
+  576 rows a day and nothing ever deleted them. A week is kept.
 - **A parser improvement now reaches the newest row.** `insertReading` used
   `INSERT OR IGNORE`, so re-pushing a timestamp the database already held threw
   the improved metrics away and the new fields stayed blank until the vendor
