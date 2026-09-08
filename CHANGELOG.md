@@ -88,6 +88,12 @@ the announcement.
   exactly like a dashboard tracking one inverter. The relay logs its pushes
   now, `/api/health` returns the newest line per provider, and the footer shows
   one entry per feed with failures marked.
+- **Backfill of today's curve.** The relay only records while it is running, so
+  a machine asleep until noon left the morning blank on a graph that then looked
+  like a system which had produced nothing. The relay now also catches the chart
+  call the portal makes for its own graph and pushes it to `/api/ingest/history`.
+  Backfilled rows land under a `-history` source: `latest` ignores them, and the
+  series query prefers a live sample wherever both describe the same instant.
 - **An app icon and favicon** — a lens ring split into the two vendor accents
   around a sun core.
 - `kv` table (migration `0007`) — a small expiring key/value shelf, first used
@@ -129,8 +135,8 @@ the announcement.
   side by side no longer look like one card was cut short. The cards fill the
   row rather than each ending where its own content does.
 - **The chart on the Power page collapses**, like the system sections below it.
-- **"Last update" replaces "last sample"** throughout, and now carries the
-  actual date and time in a tooltip. "Sample" was our word for it, not one that
+- **"Last update" replaces "last sample"** everywhere, including the detail and
+  Power sections, and now carries the actual date and time. "Sample" was our word for it, not one that
   says anything to someone reading a dashboard.
 - **The Power page collapses per system.** Each inverter is a `<details>`
   section with its own complete grid, so a two-system fleet no longer scrolls
@@ -140,6 +146,28 @@ the announcement.
 
 ### Fixed
 
+- **The account holder's name and email are no longer stored.** The SolisCloud
+  station snapshot carries `userEmail`, `userName`, `userId` and the site's
+  coordinates. Device payloads were being stripped; the station payload was not,
+  so all of it sat in the raw telemetry table. It is stripped now, and the 22
+  stored rows that already held it have been scrubbed.
+- **`stripPii` was eating capacity.** Its pattern matched `city`
+  case-insensitively, and `capacity` contains those letters - so `capacity`,
+  `capacityStr` and every `batteryCapacity*` field was being deleted from stored
+  payloads in the name of privacy. Location words now only count at the start of
+  a key or on a camelCase boundary.
+- **Zeros are no longer presented as measurements.** An on-grid plant with no CT
+  clamp still returns every grid field, filled with zeros, and SolisCloud mirrors
+  generation into household load so its own flow diagram has something to draw.
+  A plant that has generated 48 MWh without importing or exporting a single
+  kilowatt-hour is not perfectly self-sufficient; it is unmetered. Those fields
+  now read as absent, and the card says once why rather than leaving the reader
+  to ask.
+- **An unused MPPT input says so.** A socket with nothing plugged into it
+  reports a fraction of a volt and no current, which was being drawn as a string
+  producing zero watts and counted in "2 producing".
+- **The two feed lines are worded alike**, so the footer reads as one kind of
+  statement rather than two unrelated ones.
 - **The tests are covered as well as typechecked.** `weather.ts` shipped at 6%
   coverage - a whole module with no unit tests of its own - and the call queue,
   which is the only thing standing between a cron run and a rate-limit ban, had

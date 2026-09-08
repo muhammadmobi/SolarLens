@@ -33,15 +33,53 @@ describe('SolisCloud station normaliser', () => {
     expect(r.metrics?.genMonthKwh).toBe(185);
     expect(r.metrics?.genYearKwh).toBeCloseTo(13677, 6);
     expect(r.metrics?.genTotalKwh).toBeCloseTo(48852, 6);
-    expect(r.metrics?.loadTodayKwh).toBe(49);
-    expect(r.metrics?.loadTotalKwh).toBeCloseTo(48852, 6);
-    expect(r.metrics?.gridImportTodayKwh).toBe(0);
     // The fixture is an on-grid plant, so battery counters stay null rather
     // than reporting a permanently-empty battery that does not exist.
     expect(r.metrics?.battChargeTotalKwh).toBeNull();
   });
-  it('keeps the untouched vendor payload in raw for later backfill', () => {
-    expect(r.raw).toBe(solisFixture);
+
+  it('reports nothing about the grid on a plant with no meter', () => {
+    // The fixture has lifetime import and export both sitting at exactly zero.
+    // A plant that has generated 48 MWh without ever importing or exporting a
+    // kilowatt-hour is not perfectly self-sufficient - it is unmetered, and
+    // SolisCloud fills the fields with zeros anyway. It also mirrors generation
+    // into homeLoad so its own flow diagram has something to draw, which is why
+    // household consumption goes with them.
+    expect(r.metrics?.gridImportTodayKwh).toBeNull();
+    expect(r.metrics?.gridExportTodayKwh).toBeNull();
+    expect(r.metrics?.gridImportTotalKwh).toBeNull();
+    expect(r.metrics?.gridExportTotalKwh).toBeNull();
+    expect(r.metrics?.loadTodayKwh).toBeNull();
+    expect(r.metrics?.loadTotalKwh).toBeNull();
+    expect(r.loadPowerW).toBeNull();
+  });
+
+  it('reports all of it once the plant actually has a meter', () => {
+    const metered = solisStation(solisInv, {
+      ...solisFixture,
+      gridPurchasedTotalEnergy: 1200, gridPurchasedTotalEnergyStr: 'kWh',
+      gridSellTotalEnergy: 3400, gridSellTotalEnergyStr: 'kWh',
+      gridPurchasedDayEnergy: 2.4, gridPurchasedDayEnergyStr: 'kWh',
+      gridSellDayEnergy: 10.7, gridSellDayEnergyStr: 'kWh',
+    } as Record<string, unknown>);
+    expect(metered.metrics?.gridImportTotalKwh).toBe(1200);
+    expect(metered.metrics?.gridExportTodayKwh).toBe(10.7);
+    expect(metered.metrics?.loadTodayKwh).toBe(49);
+    expect(metered.loadPowerW).toBe(0);
+  });
+
+  it('keeps the vendor payload in raw, minus anything personal', () => {
+    // Raw telemetry is kept for later backfill and for debugging a mapping,
+    // neither of which needs the account holder's email or the site's
+    // coordinates sitting in the database.
+    const raw = r.raw as Record<string, unknown>;
+    expect(raw.dayEnergy).toBe(solisFixture.dayEnergy);
+    expect(raw.userEmail).toBeUndefined();
+    expect(raw.latitude).toBeUndefined();
+    expect(raw.longitude).toBeUndefined();
+    // ...and it is a copy, so stripping cannot reach back into the caller's
+    // payload before the normaliser has finished reading it.
+    expect(raw).not.toBe(solisFixture);
   });
   it('maps other states without guessing', () => {
     expect(solisStation(solisInv, { ...solisFixture, state: 2 } as Record<string, unknown>).status).toBe('offline');
