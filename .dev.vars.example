@@ -29,3 +29,7 @@ INGEST_TOKEN=
 
 # Worker origin the relay agent pushes to (agent/solis-relay.mjs reads this file)
 SOLARLENS_URL=
+
+# Which plants the relay agent pushes. Unset = every plant on the account,
+# including any shared into it - set this if the account can see someone else's.
+SOLIS_PLANT_IDS=

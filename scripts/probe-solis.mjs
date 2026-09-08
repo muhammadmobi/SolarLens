@@ -2,11 +2,17 @@
 /**
  * Standalone SolisCloud signing probe. Runs in plain Node with node:crypto so a
  * signature bug can be isolated without a Worker, a database, or a cron in the
- * way. Prints the raw vendor JSON, which is also how we learn the real field
- * names for your inverters before tightening the normaliser.
+ * way. Prints the vendor JSON, which is also how we learn the real field names
+ * for your inverters before tightening the normaliser.
  *
- *   npm run probe:solis           # stations only
- *   npm run probe:solis -- --deep # stations -> inverters -> detail for each
+ * The station payload carries your name, email, address and the site's
+ * coordinates. Those are redacted before printing, because the whole point of
+ * this output is to paste it somewhere - into a terminal, an issue, a chat.
+ * Pass --raw when you genuinely need the untouched payload.
+ *
+ *   npm run probe:solis            # stations only
+ *   npm run probe:solis -- --deep  # stations -> inverters -> detail for each
+ *   npm run probe:solis -- --raw   # do not redact personal details
  *
  * Reads SOLIS_KEY_ID / SOLIS_KEY_SECRET from the environment or from .dev.vars.
  */
@@ -43,6 +49,31 @@ function headersFor(path, body) {
   return { 'Content-Type': CONTENT_TYPE, 'Content-MD5': md5, Date: date, Authorization: `API ${keyId}:${sign}` };
 }
 
+// Same rule as src/providers/soliscloud.ts. Location words only count at the
+// start of a key or on a camelCase boundary: "capacity" contains "city".
+const PII_KEY = new RegExp([
+  '[Aa]ddr', '[Ee]mail', '[Mm]obile', '[Pp]hone', '[Ii]ccid', '[Pp]icUrl',
+  '[Pp]osition', '[Ll]atitude', '[Ll]ongitude',
+  '[Nn]ickName', '[Ll]oginName', '[Uu]ser[Ii]d', '[Uu]ser[Nn]ame',
+  'City', 'County', 'Country', 'Region',
+  '^(?:city|county|country|region)',
+].join('|'));
+
+const raw = process.argv.includes('--raw');
+function strip(v) {
+  if (raw) return v;
+  if (Array.isArray(v)) return v.map(strip);
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const [k, val] of Object.entries(v)) {
+      if (PII_KEY.test(k)) continue;
+      out[k] = strip(val);
+    }
+    return out;
+  }
+  return v;
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function call(path, payload) {
@@ -53,13 +84,14 @@ async function call(path, payload) {
   if (res.status === 408) console.log('408 = your clock is >15 min off SolisCloud time. Sync it and retry.');
   let json;
   try { json = JSON.parse(text); } catch { console.log(text); throw new Error('non-JSON response'); }
-  console.log(JSON.stringify(json, null, 2));
+  console.log(JSON.stringify(strip(json), null, 2));
   if (!(json.success === true || String(json.code) === '0')) throw new Error(`API error code=${json.code} msg=${json.msg}`);
   await sleep(2000); // 3 calls / 5 s per IP
   return json.data;
 }
 
 const deep = process.argv.includes('--deep');
+if (!raw) console.log('(personal details redacted; pass --raw to see them)');
 
 const stations = await call('/v1/api/userStationList', { pageNo: 1, pageSize: 20 });
 if (!deep) {
