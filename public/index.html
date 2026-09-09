@@ -436,22 +436,22 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   /**
-   * How often to ask, and for what.
+   * How often to ask.
    *
    * Neither cloud produces a new sample more often than every five minutes, so
-   * asking every thirty seconds asked ten times over for the same answer. The
-   * live figures are cheap and worth having promptly. The day's curve, the
-   * hardware inventory and the feed status are none of those things, and the
-   * curve is the expensive one - it scans a range of readings where the live
-   * figures read a handful of rows.
+   * the original thirty-second poll asked twenty times over for the same
+   * answer - and kept asking in background tabs nobody was looking at. Ten
+   * minutes is comfortably inside what the data can actually change.
    *
-   * A tab left open in the background asks for nothing until it is looked at
-   * again, which is where most of the waste was.
+   * A hidden tab asks for nothing at all; returning to it fetches immediately,
+   * which is the moment a stale figure would matter.
    */
-  const REFRESH_MS = 60_000;
-  const SLOW_MS = 5 * 60_000;
-  let lastSlow = 0;
-  const STALE_AFTER_S = 15 * 60;
+  const REFRESH_MS = 10 * 60_000;
+  // Comfortably longer than the poll interval plus a vendor's own publishing
+  // gap. At a ten-minute poll a fifteen-minute cutoff would tip a perfectly
+  // healthy system into "offline" in the minutes before the next fetch, purely
+  // because nobody had asked recently.
+  const STALE_AFTER_S = 25 * 60;
 
   // Which chart series the reader has switched off. Remembered per browser:
   // having to switch the same line off after every refresh is worse than not
@@ -1666,17 +1666,12 @@
     if (document.hidden && !force) return;
     try {
       const now = Math.floor(Date.now() / 1000);
-      const slow = force || now - lastSlow >= SLOW_MS / 1000;
       const [lat, ser, devs, health] = await Promise.all([
         api('/api/latest'),
-        slow ? api(`/api/series?from=${startOfToday()}&to=${now}`) : Promise.resolve(state.series),
-        slow ? api('/api/devices').catch(() => ({ devices: [] })) : Promise.resolve({ devices: state.devices }),
-        // The footer says which feeds reported and when. "4 minutes ago" is as
-        // useful as "40 seconds ago" for that, and it is the second most
-        // expensive read on the page, so it rides the slow cycle too.
-        slow ? api('/api/health').catch(() => null) : Promise.resolve(state.health),
+        api(`/api/series?from=${startOfToday()}&to=${now}`),
+        api('/api/devices').catch(() => ({ devices: [] })),
+        api('/api/health').catch(() => null),
       ]);
-      if (slow) lastSlow = now;
       // An offline inverter is not still producing whatever it managed just
       // before it dropped - nothing is flowing that anyone can see - so its
       // instantaneous figures read zero everywhere at once, from this one
