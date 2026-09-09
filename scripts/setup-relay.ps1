@@ -25,6 +25,32 @@ param(
 $ErrorActionPreference = 'Stop'
 $Repo = 'https://github.com/muhammadmobi/SolarLens.git'
 
+# Run an external program without PowerShell mistaking its chatter for failure.
+#
+# git and npm write ordinary progress to stderr - "Cloning into ...", npm's
+# notices - and Windows PowerShell turns any stderr from a native command into
+# an ErrorRecord. With ErrorActionPreference = Stop that aborts the script on a
+# command that actually succeeded, which is exactly how the first version of
+# this file failed at the clone step. So: no stderr redirection, and judge the
+# outcome by the exit code, which is the only thing that means anything here.
+function Invoke-Native {
+  # Not $Args: that is an automatic variable in PowerShell, and using the name
+  # here silently breaks the splat below. It cost a debugging round to find.
+  param([string] $Exe, [string[]] $CmdArgs, [string] $What)
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    $output = & $Exe @CmdArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      # Show what it actually said. "failed (exit 1)" on its own is useless to
+      # whoever has to fix it.
+      Write-Host "    ---- $Exe output ----" -ForegroundColor DarkGray
+      $output | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+      throw "$What failed (exit $LASTEXITCODE)"
+    }
+  } finally { $ErrorActionPreference = $prev }
+}
+
 function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "    OK  $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "    !!  $t" -ForegroundColor Yellow }
@@ -46,7 +72,7 @@ foreach ($tool in @(
   }
   if (Get-Command winget -ErrorAction SilentlyContinue) {
     Warn "$($tool.Name) missing - installing with winget"
-    winget install --id $tool.Pkg -e --accept-source-agreements --accept-package-agreements | Out-Null
+    Invoke-Native 'winget' @('install','--id',$tool.Pkg,'-e','--accept-source-agreements','--accept-package-agreements') "installing $($tool.Name)"
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
                 [Environment]::GetEnvironmentVariable('Path', 'User')
     if (-not (Get-Command $tool.Name -ErrorAction SilentlyContinue)) {
@@ -65,22 +91,31 @@ else { Warn 'Chrome not at the default path - set CHROME_PATH in .dev.vars if th
 # --- 2. the code -----------------------------------------------------------
 Step 2 "Getting the code into $InstallDir"
 
+if ((Test-Path $InstallDir) -and -not (Test-Path (Join-Path $InstallDir '.git')) -and
+    @(Get-ChildItem $InstallDir -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+  Die "$InstallDir exists but is not a git checkout. Delete or rename it, then run this again."
+}
+
 if (Test-Path (Join-Path $InstallDir '.git')) {
   Push-Location $InstallDir
-  git pull --ff-only 2>&1 | Out-Null
-  Pop-Location
-  Ok 'Repository already present - updated'
+  try { Invoke-Native 'git' @('pull','--ff-only') 'git pull'; Ok 'Repository already present - updated' }
+  catch { Warn "Could not update the checkout ($_) - carrying on with what is there" }
+  finally { Pop-Location }
 } else {
   $parent = Split-Path $InstallDir -Parent
   if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-  git clone $Repo $InstallDir 2>&1 | Out-Null
+  Invoke-Native 'git' @('clone','--quiet',$Repo,$InstallDir) 'git clone'
+  if (-not (Test-Path (Join-Path $InstallDir '.git'))) { Die "Clone reported success but $InstallDir has no .git - check the path is writable." }
   Ok 'Cloned'
 }
 
 Push-Location $InstallDir
 try {
   Step 3 'Installing dependencies (this takes a minute)'
-  npm install --no-audit --no-fund 2>&1 | Out-Null
+  Invoke-Native 'npm' @('install','--no-audit','--no-fund','--loglevel=error') 'npm install'
+  if (-not (Test-Path (Join-Path $InstallDir 'node_modules\playwright-core'))) {
+    Die 'npm install finished but playwright-core is missing - run "npm install" here by hand to see why.'
+  }
   Ok 'Dependencies installed'
 
   # --- 4. settings --------------------------------------------------------
