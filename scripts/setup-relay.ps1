@@ -249,7 +249,22 @@ try {
 
     $node = (Get-Command node).Source
     $me   = "$env:COMPUTERNAME\$env:USERNAME"
-    $action  = New-ScheduledTaskAction -Execute $node -Argument 'agent\solis-relay.mjs' -WorkingDirectory $InstallDir
+
+    # Started through a one-line WSH launcher rather than directly, because
+    # node.exe is a console application: run it from the task and a black
+    # terminal appears at every logon and stays for as long as the relay does.
+    # Task Scheduler's "Hidden" setting does not touch that - it hides the task
+    # from the Task Scheduler list - and the principal that would (S4U, off the
+    # interactive desktop) needs an elevated prompt this installer does not ask
+    # for. See scripts\relay-hidden.vbs.
+    $vbs = Join-Path $InstallDir 'scripts\relay-hidden.vbs'
+    if (Test-Path $vbs) {
+      $action = New-ScheduledTaskAction -Execute 'wscript.exe' `
+                  -Argument "//nologo `"$vbs`" `"$node`"" -WorkingDirectory $InstallDir
+    } else {
+      Warn 'relay-hidden.vbs is missing - the relay will run in a visible console window'
+      $action = New-ScheduledTaskAction -Execute $node -Argument 'agent\solis-relay.mjs' -WorkingDirectory $InstallDir
+    }
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
     $set     = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                  -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 2) `

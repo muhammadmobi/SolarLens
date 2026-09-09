@@ -163,26 +163,68 @@ async function launchContext() {
   });
 }
 
+/**
+ * Remove the single-instance markers Chrome leaves behind when it dies without
+ * shutting down - which is what a machine restart does to a headless browser.
+ *
+ * Only ever called once nothing is holding the profile. A live Chrome owns
+ * these files, and deleting them under it would be the bug this prevents.
+ */
+async function clearStaleSingletonFiles() {
+  const { unlink } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  let cleared = 0;
+  for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    try { await unlink(join(PROFILE, name)); cleared++; } catch { /* absent is the normal case */ }
+  }
+  return cleared;
+}
+
 async function ensureBrowser() {
   if (page && !page.isClosed()) return;
   if (ctx) { await ctx.close().catch(() => {}); log('browser was closed - relaunching'); }
-  try {
-    ctx = await launchContext();
-  } catch (e) {
-    if (CDP) {
+
+  if (CDP) {
+    try {
+      ctx = await launchContext();
+    } catch (e) {
       throw new Error(
         `${CDP}: could not attach - ${e.message}\n` +
         `Start Chrome with --remote-debugging-port=${new URL(CDP).port}, or unset RELAY_CDP ` +
         `to let the agent run its own browser.`,
       );
     }
-    // The one failure worth retrying, because the cause is ours to clear.
-    if (!/already in use|existing browser session/i.test(e.message)) throw e;
-    const killed = await killStaleProfileHolders();
-    log(`profile was locked by ${killed || 'a'} leftover Chrome process${killed === 1 ? '' : 'es'} - cleared, retrying`);
-    // Chrome takes a moment to release the profile after the process goes.
-    await sleep(2000);
-    ctx = await launchContext();
+  } else {
+    // Retry on any launch failure, not on a recognised message.
+    //
+    // The first version matched /already in use/, on the assumption that a
+    // profile still held by a previous run was the only thing that could go
+    // wrong. The first real machine restart disproved it: Chrome launched,
+    // exited 0 before Playwright could speak to it, and the error read "Target
+    // page, context or browser has been closed" - no retry, and five minutes of
+    // Solis data lost while the agent waited for its next cycle.
+    //
+    // A launch is cheap and this process has nothing else to do, so the useful
+    // question is not "which failure is this" but "has it stopped failing".
+    const delays = [2000, 8000];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        ctx = await launchContext();
+        if (attempt) log(`browser started on attempt ${attempt + 1}`);
+        break;
+      } catch (e) {
+        if (attempt >= delays.length) throw e;
+        const killed = await killStaleProfileHolders();
+        const files = killed ? 0 : await clearStaleSingletonFiles();
+        log(
+          `browser did not start (${e.message.split('\n')[0]}) - ` +
+          (killed ? `killed ${killed} process holding the profile` :
+           files ? `cleared ${files} stale lock file${files === 1 ? '' : 's'}` : 'nothing was holding the profile') +
+          `, retrying in ${delays[attempt] / 1000}s`,
+        );
+        await sleep(delays[attempt]);
+      }
+    }
   }
   // When we launched the browser, its one blank tab is ours to use. When we
   // attached to somebody's browser, every open tab belongs to them - so take a
