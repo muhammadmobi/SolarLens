@@ -43,9 +43,14 @@ try {
 
   # A URL-safe 256-bit value: it travels in a query string on the /auth link,
   # so it must survive being pasted into an address bar unescaped.
+  #
+  # Create().GetBytes(), not the tidier RandomNumberGenerator::Fill(Span): Fill
+  # exists only on .NET Core, and Windows PowerShell 5.1 - still the default
+  # shell on Windows - runs on .NET Framework, where it is simply absent.
   function New-Token {
-    $bytes = [byte[]]::new(32)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
   }
 
@@ -60,7 +65,16 @@ try {
     # Cloudflare first. If this fails the old token stays valid everywhere,
     # which is the safe way round: a .dev.vars updated ahead of a failed
     # secret put would leave the relay pushing a token the Worker rejects.
-    $value | npx wrangler secret put $name --config .wrangler.local.jsonc
+    #
+    # ErrorActionPreference drops to Continue for the call: wrangler prints its
+    # banner and progress to stderr, and Windows PowerShell turns any stderr
+    # from a native command into an ErrorRecord, which under Stop would abort
+    # this script on a command that had just succeeded. The exit code is the
+    # only thing here that actually reports the outcome.
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $value | npx wrangler secret put $name --config .wrangler.local.jsonc }
+    finally { $ErrorActionPreference = $prev }
     if ($LASTEXITCODE -ne 0) { Die "Could not set the Cloudflare secret $name - nothing was changed locally." }
     Ok 'Cloudflare secret updated'
 
