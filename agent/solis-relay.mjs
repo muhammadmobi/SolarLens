@@ -83,16 +83,66 @@ let ctx = null;
 let page = null;
 
 /** Launch Chrome, or relaunch it if the window was closed since the last cycle. */
-async function ensureBrowser() {
-  if (page && !page.isClosed()) return;
-  if (ctx) { await ctx.close().catch(() => {}); log('browser was closed - relaunching'); }
-  ctx = await chromium.launchPersistentContext(PROFILE, {
+/**
+ * Kill any Chrome still holding this agent's own profile directory.
+ *
+ * A crashed or force-quit run leaves a Chrome process attached to
+ * .relay-profile, and the next launch fails with "Opening in existing browser
+ * session" - which then repeats every cycle until somebody goes hunting in Task
+ * Manager. The agent can do that hunting itself.
+ *
+ * Matched strictly on `--user-data-dir=<this profile>`, so it can only ever
+ * touch a browser this agent started. Your ordinary Chrome windows use a
+ * different profile and are never candidates.
+ */
+async function killStaleProfileHolders() {
+  const { execFile } = await import('node:child_process');
+  const run = (cmd, args) => new Promise((resolve) => {
+    execFile(cmd, args, { windowsHide: true, maxBuffer: 1 << 24 }, (err, out) => resolve(err ? '' : String(out)));
+  });
+
+  if (process.platform === 'win32') {
+    // PowerShell reads the full command line; tasklist alone cannot.
+    const script =
+      `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | ` +
+      `Where-Object { $_.CommandLine -like '*--user-data-dir=${PROFILE}*' } | ` +
+      `ForEach-Object { $_.ProcessId }`;
+    const out = await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script]);
+    const pids = out.split(/\r?\n/).map((l) => l.trim()).filter((l) => /^\d+$/.test(l));
+    for (const pid of pids) await run('taskkill', ['/PID', pid, '/F']);
+    return pids.length;
+  }
+
+  const out = await run('pgrep', ['-f', `--user-data-dir=${PROFILE}`]);
+  const pids = out.split('\n').map((l) => l.trim()).filter(Boolean);
+  for (const pid of pids) await run('kill', ['-9', pid]);
+  return pids.length;
+}
+
+async function launchContext() {
+  return chromium.launchPersistentContext(PROFILE, {
     headless: HEADLESS,
     viewport: { width: 1280, height: 800 },
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
     args: ['--disable-blink-features=AutomationControlled'],
     ignoreDefaultArgs: ['--enable-automation'],
   });
+}
+
+async function ensureBrowser() {
+  if (page && !page.isClosed()) return;
+  if (ctx) { await ctx.close().catch(() => {}); log('browser was closed - relaunching'); }
+  try {
+    ctx = await launchContext();
+  } catch (e) {
+    // The one failure worth retrying, because the cause is ours to clear.
+    if (!/already in use|existing browser session/i.test(e.message)) throw e;
+    const killed = await killStaleProfileHolders();
+    log(`profile was locked by ${killed || 'a'} leftover Chrome process${killed === 1 ? '' : 'es'} - cleared, retrying`);
+    // Chrome takes a moment to release the profile after the process goes.
+    await sleep(2000);
+    ctx = await launchContext();
+  }
   page = ctx.pages()[0] ?? (await ctx.newPage());
   page.on('response', onResponse);
 }
