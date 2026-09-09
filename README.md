@@ -8,9 +8,10 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Two vendors, one model.** SolisCloud and SolarMan are normalised into the same reading shape, so the UI never cares where a number came from.
 - **Your data, kept.** Every sample is stored (with the untouched vendor payload), so you get history the vendor apps don't let you keep or export.
 - **Works with whatever access you have.** Official API keys are best; a browser-session fallback for SolarMan and a local relay agent for SolisCloud cover you while keys are pending.
-- **Honest about freshness.** Every panel shows *when* it was last updated. A system reads **offline** the moment either the vendor says so or nothing has arrived for 15 minutes — and an offline system's live figures are zero, not whatever it managed just before it dropped.
+- **Honest about freshness.** Every panel shows *when* it was last updated. A system reads **offline** the moment either the vendor says so or nothing has arrived for 25 minutes — and an offline system's live figures are zero, not whatever it managed just before it dropped.
 - **Reads well in either theme.** A three-state toggle in the top-right corner follows your system, or forces light or dark; the choice is remembered and applied before first paint.
 - **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's hero number is set against its rated size.
+- **Open it and it is there.** No login, no token to copy onto each device — the readings are public by design, with vendor identifiers stripped from every response before it leaves the Worker.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
 
 > Not affiliated with Ginlong/Solis or IGEN Tech/SolarMan. 
@@ -258,6 +259,23 @@ repository if it is not already there, asks for your Worker URL and
 scheduled task so the relay starts itself at every logon and keeps running
 after you close the terminal.
 
+It is safe to run twice, and a second run is how you update a machine: it pulls,
+reuses the saved session, and re-registers the task. Two details it gets right
+that are easy to get wrong by hand:
+
+- **No console window.** The task starts `scripts\relay-hidden.vbs`, not
+  `node.exe` directly. node is a console application, so running it from a task
+  puts a black terminal on screen at every logon and leaves it there. Task
+  Scheduler's *Hidden* setting does not help — that hides the task from the
+  Task Scheduler list — and the S4U principal that would needs an elevated
+  prompt this installer deliberately does not ask for.
+- **The account name comes from Windows**, via
+  `WindowsIdentity::GetCurrent().Name`, rather than being assembled from
+  `COMPUTERNAME` and `USERNAME`. On a domain or Entra-joined machine the user
+  resolves as `DOMAIN\name` or `AzureAD\name`, and the composed version maps to
+  no SID at all — registration fails with *No mapping between account names and
+  security IDs was done*.
+
 Useful switches:
 
 | Switch | Effect |
@@ -288,6 +306,8 @@ To keep it alive: `pm2 start agent/solis-relay.mjs --name solis-relay`, or a
 - Set `SOLIS_PLANT_IDS` to limit it to specific plants; otherwise it relays every plant the account can see, including plants shared into it by someone else.
 - Readings arrive tagged `source: soliscloud-relay`; the dashboard shows "via soliscloud-relay" under the panel.
 - It reads `.dev.vars` itself, and clears its own stale Chrome profile lock if a previous run was killed.
+- **It retries a failed browser launch** twice with a short backoff, and clears the `Singleton*` files Chrome leaves when a machine is shut down under it — but only when nothing holds the profile, because a live Chrome owns those files. Without this, the first cycle after a restart fails and Solis loses a whole interval: Chrome starts, exits before Playwright can speak to it, and the error is not the one a message-matching retry would recognise.
+- `RELAY_ONCE=1` runs a single cycle and exits with a code that says whether it worked. The installer uses it for the sign-in step, so that step ends by itself instead of asking anyone to press Ctrl+C — which on Windows raises *Terminate batch job (Y/N)?* inside a `.cmd` and strands the installer half-finished.
 
 ### Running it on more than one machine
 
@@ -316,7 +336,27 @@ the scheduled task without asking you anything.
 The one step that stays manual is the SolisCloud login, in the browser window
 it opens. That is not an omission — the relay works by driving a logged-in
 browser session, and no script can type your password into a login form for
-you.
+you. Everything after it is automatic, and the window closes itself.
+
+It reaches the code three ways, in order of how reliable they proved to be:
+
+1. **A checkout already on that machine** — used as it stands, updated with
+   `git pull` when that works.
+2. **`git clone` from `github.com`** — the host that stayed up while
+   `raw.githubusercontent.com` was answering 503.
+3. **A single file over HTTPS from `raw.githubusercontent.com`** — last resort,
+   for a machine with no git at all. When that is the situation the message says
+   so and names the fix, instead of blaming a busy server.
+
+If step 1 finds a checkout that can no longer fast-forward, it is fetched and
+reset to `origin/main`. That case is not exotic here: **this repository's
+history has been rewritten and force-pushed**, so any clone taken beforehand
+holds commits that are not ancestors of the published branch and can never pull
+again. A checkout in that state would otherwise sit on stale code forever —
+including a stale copy of the installer, which is how one machine ended up
+unable to deliver its own fix. The reset happens **only** when `git status`
+reports nothing to lose; a working tree with local modifications is left alone
+with a warning.
 
 > **The generated file contains your ingest token in plain text.** That is why
 > it is written outside the repository. The token only permits pushing
@@ -388,6 +428,8 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 | `RELAY_HEADLESS` | relay agent | `1` runs the relay browser invisibly. Set `0` and run by hand when you need to log in again. |
 | `RELAY_CDP` | relay agent | Attach to an already-running Chrome, e.g. `http://127.0.0.1:9222`, instead of starting one. Set by `setup-relay.cmd -UseMyChrome`. |
 | `RELAY_INTERVAL_MIN` | relay agent | Minutes between pushes (default 5). |
+| `RELAY_ONCE` | relay agent | `1` runs one cycle and exits with a code saying whether it worked. Used by the installer's sign-in step; not set in normal running. |
+| `RELAY_PROFILE` | relay agent | Where the relay's own Chrome profile lives (default `./.relay-profile`). |
 | `CHROME_PATH` | relay agent | Explicit Chrome binary, if it is not in a standard location. |
 
 ### How often anything actually happens
@@ -526,6 +568,7 @@ solar-lens/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
 │   ├── poll.ts               builds providers from present secrets; polls; plant filter
 │   ├── db.ts                 D1 queries and the Env type
+│   ├── public-view.ts        strips vendor identifiers from public responses
 │   └── providers/
 │       ├── types.ts          Provider / Inverter / Reading / Metrics
 │       ├── units.ts          W / kWh / timestamp normalisation
@@ -539,6 +582,7 @@ solar-lens/
 ├── scripts/
 │   ├── wrangler.mjs             fills CF_D1_DATABASE_ID into a temp config
 │   ├── setup-relay.ps1          installs the relay on a machine, start to finish
+│   ├── relay-hidden.vbs         starts the relay with no console window
 │   ├── make-laptop-installer.ps1  writes a pre-filled installer for a 2nd machine
 │   ├── rotate-tokens.ps1        replaces API_TOKEN / INGEST_TOKEN in both places
 │   ├── probe-solis.mjs          one signed Solis request, raw response printed
@@ -551,6 +595,7 @@ solar-lens/
 │   ├── unit/queue.test.ts       vendor rate-limit queue
 │   ├── unit/history.test.ts     day-curve backfill normalisation
 │   ├── unit/pii.test.ts         what is stripped from a stored payload
+│   ├── unit/public-view.test.ts what a public response may and may not carry
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first
 ├── docs/api-notes.md         observed vendor field names and conventions
@@ -571,7 +616,12 @@ solar-lens/
 | Deploy: *register a workers.dev subdomain* | One-time account step; follow the printed link or pick a name in the dashboard, then deploy again. |
 | PowerShell: *The token '&&' is not valid* | Run the two commands on separate lines. |
 | A shared plant you don't own shows up | Set `INCLUDE_PLANTS` to the ids you want. |
-| Installer: *503 Backend.max_conn reached* | `raw.githubusercontent.com` is busy — nothing to do with your network or the repository. The generated installer retries five times; otherwise wait a minute and run it again. |
+| Installer: *503 Backend.max_conn reached* | `raw.githubusercontent.com` is having a bad day — nothing to do with your network. The installer only falls back to that host when the machine has no git; install Git and it uses `github.com` instead, which stays up when the CDN does not. |
+| `git pull`: *Not possible to fast-forward* | That checkout predates a history rewrite here, so it can never pull again. Re-run the installer, which resets it to `origin/main`, or do it by hand: `git fetch origin && git reset --hard origin/main`. |
+| *No mapping between account names and security IDs was done* | An older installer composed the task's account as `COMPUTERNAME\USERNAME`, which is wrong on a domain or Entra-joined machine. `git pull` and run the installer again. |
+| Task exists but `State: Ready`, no relay | Start it: `Start-ScheduledTask -TaskName 'SolarLens relay'`. If it drops straight back to `Ready`, `Get-ScheduledTaskInfo -TaskName 'SolarLens relay'` gives the result code the action returned. |
+| A console window appears at every logon | The task is registered to run `node.exe` directly. Re-run the installer; it registers `scripts\relay-hidden.vbs` instead. |
+| Relay pushed nothing for one interval after a restart | Older agents gave up for a whole cycle when Chrome lost a launch race at boot. Current ones retry twice and clear stale profile locks — `git pull` on that machine. |
 | Installer: *does not contain a method named 'Fill'* | You are on Windows PowerShell 5.1 and the script is older than this fix. `git pull` and re-run. |
 | Relay stopped after a token change | `INGEST_TOKEN` must match in Cloudflare **and** in `.dev.vars` on every relay machine. Use `scripts\rotate-tokens.ps1` so both move together, then restart the relay. |
 | You have lost `API_TOKEN` or `INGEST_TOKEN` | Cloudflare never reads a secret back. Replace it — see [Replacing a token](#replacing-a-token). |
