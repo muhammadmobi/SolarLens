@@ -85,8 +85,12 @@ $fetch = @"
 `$git=[bool](Get-Command git -ErrorAction SilentlyContinue);
 if (Test-Path `$s) {
   Write-Host '  Already installed here - checking for updates';
-  if (`$git) { Push-Location `$dir; git pull --ff-only | Out-Null;
-    if (`$LASTEXITCODE -eq 0) { Write-Host '  Up to date' } else { Write-Host '  Could not update - using the copy already here' };
+  if (`$git) { Push-Location `$dir; git pull --ff-only 2>`$null | Out-Null;
+    if (`$LASTEXITCODE -eq 0) { Write-Host '  Up to date' }
+    elseif (git status --porcelain) { Write-Host '  Edited locally - leaving this copy alone' -ForegroundColor Yellow }
+    else { Write-Host '  This copy has diverged from GitHub - resetting it to match';
+      git fetch origin 2>`$null | Out-Null; git reset --hard origin/main 2>`$null | Out-Null;
+      if (`$LASTEXITCODE -eq 0) { Write-Host '  Reset - now matching GitHub' } else { Write-Host '  Could not reset - using the copy already here' -ForegroundColor Yellow } };
     Pop-Location }
 } elseif (`$git) {
   Write-Host '  Getting the code from github.com';

@@ -114,7 +114,28 @@ if ((Test-Path $InstallDir) -and -not (Test-Path (Join-Path $InstallDir '.git'))
 if (Test-Path (Join-Path $InstallDir '.git')) {
   Push-Location $InstallDir
   try { Invoke-Native 'git' @('pull','--ff-only') 'git pull'; Ok 'Repository already present - updated' }
-  catch { Warn "Could not update the checkout ($_) - carrying on with what is there" }
+  catch {
+    # A fast-forward is not always possible, and on this repository that is
+    # expected rather than exceptional: its history has been rewritten and
+    # force-pushed, so any clone taken beforehand has commits that are no
+    # longer ancestors of the published branch. Such a checkout can never pull
+    # again, and would sit on stale code indefinitely while reporting only a
+    # warning - which is how a machine ended up running a month-old installer.
+    #
+    # Resetting is the right answer for a deployment checkout nobody edits, and
+    # the wrong one for a working copy, so it happens only when git itself
+    # confirms there is nothing local to lose.
+    $dirty = (& git status --porcelain) -join ''
+    if ($dirty) {
+      Warn "Could not update ($_), and there are local changes here - leaving them alone"
+    } else {
+      try {
+        Invoke-Native 'git' @('fetch','origin') 'git fetch'
+        Invoke-Native 'git' @('reset','--hard','origin/main') 'git reset'
+        Ok 'Checkout had diverged from the published history - reset to match it'
+      } catch { Warn "Could not reset the checkout ($_) - carrying on with what is there" }
+    }
+  }
   finally { Pop-Location }
 } else {
   $parent = Split-Path $InstallDir -Parent
