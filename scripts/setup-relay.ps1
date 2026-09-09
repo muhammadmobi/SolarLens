@@ -19,7 +19,11 @@ param(
   [string] $WorkerUrl  = '',
   [string] $IngestToken = '',
   [string] $PlantIds   = '',
-  [switch] $NoTask
+  [switch] $NoTask,
+  # Use the Chrome you already have open, with the logins already in it,
+  # instead of the agent running a second one of its own.
+  [switch] $UseMyChrome,
+  [int]    $DebugPort = 9222
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,8 +35,9 @@ $Repo = 'https://github.com/muhammadmobi/SolarLens.git'
 # notices - and Windows PowerShell turns any stderr from a native command into
 # an ErrorRecord. With ErrorActionPreference = Stop that aborts the script on a
 # command that actually succeeded, which is exactly how the first version of
-# this file failed at the clone step. So: no stderr redirection, and judge the
-# outcome by the exit code, which is the only thing that means anything here.
+# this file failed at the clone step. So: drop to Continue first, collect both
+# streams, and judge the outcome by the exit code - the only thing here that
+# means anything - printing what was said only when that code is non-zero.
 function Invoke-Native {
   # Not $Args: that is an automatic variable in PowerShell, and using the name
   # here silently breaks the splat below. It cost a debugging round to find.
@@ -84,9 +89,19 @@ foreach ($tool in @(
   }
 }
 
-$chrome = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
-if (Test-Path $chrome) { Ok 'Google Chrome found' }
-else { Warn 'Chrome not at the default path - set CHROME_PATH in .dev.vars if the relay cannot find it' }
+# Chrome installs per-machine or per-user depending on who ran the installer,
+# so look in all three places rather than assuming Program Files.
+$chrome = @(
+  "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+  "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
+  "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+
+if ($chrome) { Ok "Google Chrome found ($chrome)" }
+else {
+  $chrome = 'chrome.exe'
+  Warn 'Chrome is not in any of the usual places - set CHROME_PATH in .dev.vars if the relay cannot find it'
+}
 
 # --- 2. the code -----------------------------------------------------------
 Step 2 "Getting the code into $InstallDir"
@@ -157,35 +172,74 @@ try {
     "INGEST_TOKEN=$IngestToken"
   )
   if ($PlantIds) { $lines += "SOLIS_PLANT_IDS=$PlantIds" }
-  $lines += '# 1 hides the relay browser. Set 0 and run by hand if you ever need to log in again.'
-  $lines += 'RELAY_HEADLESS=0'
+  if ($UseMyChrome) {
+    $lines += '# Attach to the Chrome you already have open rather than running one.'
+    $lines += "RELAY_CDP=http://127.0.0.1:$DebugPort"
+  } else {
+    $lines += '# 1 hides the relay browser. Set 0 and run by hand if you ever need to log in again.'
+    $lines += 'RELAY_HEADLESS=0'
+  }
   foreach ($k in $existing.Keys) {
-    if ($k -notin @('SOLARLENS_URL','INGEST_TOKEN','SOLIS_PLANT_IDS','RELAY_HEADLESS')) {
+    if ($k -notin @('SOLARLENS_URL','INGEST_TOKEN','SOLIS_PLANT_IDS','RELAY_HEADLESS','RELAY_CDP')) {
       $lines += "$k=$($existing[$k])"
     }
   }
   Set-Content -Path $devVars -Value $lines -Encoding utf8
   Ok '.dev.vars written'
 
-  # --- 5. the one part a person has to do ---------------------------------
-  Step 5 'Signing in to SolisCloud'
+  # --- 5. the browser ------------------------------------------------------
+  if ($UseMyChrome) {
+    Step 5 'Using the Chrome you already have open'
 
-  $profileDir = Join-Path $InstallDir '.relay-profile'
-  if (Test-Path (Join-Path $profileDir 'Default')) {
-    Ok 'A saved session already exists - skipping the login step'
+    $reachable = $false
+    try {
+      Invoke-WebRequest -Uri "http://127.0.0.1:$DebugPort/json/version" -UseBasicParsing -TimeoutSec 4 | Out-Null
+      $reachable = $true
+    } catch { }
+
+    if ($reachable) {
+      Ok "Found a Chrome listening on port $DebugPort - the relay will use it, with your own SolisCloud login"
+    } else {
+      Warn "No Chrome is listening on port $DebugPort."
+      Write-Host ''
+      Write-Host '    Chrome only accepts outside control if it was STARTED with a debugging'
+      Write-Host '    port; the flag cannot be switched on afterwards. So you have to close'
+      Write-Host '    Chrome completely - every window - and start it like this:'
+      Write-Host ''
+      Write-Host "      & '$chrome' --remote-debugging-port=$DebugPort" -ForegroundColor Yellow
+      Write-Host ''
+      Write-Host '    Worth knowing before you do: that port lets any program on this machine'
+      Write-Host '    drive your browser and everything it is signed in to. The relay also'
+      Write-Host '    stops working whenever Chrome is closed. Running it in its own hidden'
+      Write-Host '    browser (the default, without -UseMyChrome) has neither drawback.'
+      Write-Host ''
+      Warn 'Set up anyway - start Chrome that way and the relay will connect on its next cycle.'
+    }
   } else {
-    Write-Host '    A Chrome window will open on SolisCloud. Sign in there.'
-    Write-Host '    The session is saved locally, so this happens once.'
-    Write-Host '    When the window shows your plant and the console says "pushed",'
-    Write-Host '    press Ctrl+C in this window to continue.' -ForegroundColor Yellow
-    Write-Host ''
-    npm run relay:solis
-  }
+    Step 5 'Signing in to SolisCloud'
 
-  # Hide it from now on.
-  (Get-Content $devVars) -replace '^RELAY_HEADLESS=0$', 'RELAY_HEADLESS=1' |
-    Set-Content $devVars -Encoding utf8
-  Ok 'Relay set to run hidden from now on'
+    $profileDir = Join-Path $InstallDir '.relay-profile'
+    if (Test-Path (Join-Path $profileDir 'Default')) {
+      Ok 'A saved session already exists - skipping the login step'
+    } else {
+      Write-Host '    A Chrome window will open on SolisCloud. Sign in there.'
+      Write-Host ''
+      Write-Host '    This is a browser of its own, not the one you use: Chrome refuses to'
+      Write-Host '    let two programs share one profile, so the agent cannot borrow your'
+      Write-Host '    everyday session. You sign in here once and never see it again -'
+      Write-Host '    after this it runs hidden. (Re-run with -UseMyChrome if you would'
+      Write-Host '    rather it attached to your own browser instead.)'
+      Write-Host ''
+      Write-Host '    When the console says "pushed", press Ctrl+C to continue.' -ForegroundColor Yellow
+      Write-Host ''
+      npm run relay:solis
+    }
+
+    # Hide it from now on.
+    (Get-Content $devVars) -replace '^RELAY_HEADLESS=0$', 'RELAY_HEADLESS=1' |
+      Set-Content $devVars -Encoding utf8
+    Ok 'Relay set to run hidden from now on'
+  }
 
   # --- 6. start it on every logon -----------------------------------------
   if ($NoTask) {
