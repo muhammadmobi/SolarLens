@@ -88,10 +88,21 @@ echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "`$ErrorActionPreference='Stop'; `$f=Join-Path `$env:TEMP 'solarlens-setup-relay.ps1'; `$got=`$false; foreach (`$i in 1..10) { try { Invoke-WebRequest '$raw' -OutFile `$f -UseBasicParsing -TimeoutSec 30; `$got=`$true; break } catch { Write-Host ('  GitHub is busy (attempt ' + `$i + ' of 10) - waiting 6s and trying again') -ForegroundColor DarkGray; Start-Sleep -Seconds 6 } }; if (-not `$got) { Write-Host 'Could not download the setup script after ten tries. This is GitHub being busy, not your connection - wait a few minutes and run this file again.' -ForegroundColor Red; exit 1 }; & `$f -WorkerUrl '$url' -IngestToken '$token'$plantArg"
 
+if errorlevel 1 (
+  echo.
+  echo  Setup did not finish. The message above says why.
+  echo.
+  pause
+  exit /b 1
+)
+
 echo.
-echo  Finished. You can delete this file now.
+echo  Finished. The relay is running hidden and will start itself at every logon.
+echo  You can delete this file now.
 echo.
-pause
+echo  Closing in 20 seconds - press a key to close it sooner.
+timeout /t 20
+exit /b 0
 "@
 
 Set-Content -Path $OutFile -Value $body -Encoding ascii

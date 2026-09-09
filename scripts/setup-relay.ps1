@@ -224,15 +224,24 @@ try {
     } else {
       Write-Host '    A Chrome window will open on SolisCloud. Sign in there.'
       Write-Host ''
-      Write-Host '    This is a browser of its own, not the one you use: Chrome refuses to'
-      Write-Host '    let two programs share one profile, so the agent cannot borrow your'
-      Write-Host '    everyday session. You sign in here once and never see it again -'
-      Write-Host '    after this it runs hidden. (Re-run with -UseMyChrome if you would'
-      Write-Host '    rather it attached to your own browser instead.)'
+      Write-Host '    It is a browser of its own, not the one you use. Chrome will not let'
+      Write-Host '    two programs share one profile, so the agent cannot borrow the session'
+      Write-Host '    in your everyday browser. You sign in here once; after this it runs'
+      Write-Host '    hidden and you never see it again.'
       Write-Host ''
-      Write-Host '    When the console says "pushed", press Ctrl+C to continue.' -ForegroundColor Yellow
+      Write-Host '    Nothing to press afterwards - it closes itself once the first'
+      Write-Host '    reading has been sent.' -ForegroundColor Yellow
       Write-Host ''
-      npm run relay:solis
+
+      # RELAY_ONCE so it exits by itself. The old instruction was "press Ctrl+C
+      # when it says pushed", which on Windows raises "Terminate batch job
+      # (Y/N)?" inside the .cmd wrapper and leaves setup stopped half-way.
+      $env:RELAY_ONCE = '1'
+      try { npm run relay:solis } finally { Remove-Item Env:\RELAY_ONCE -ErrorAction SilentlyContinue }
+      if ($LASTEXITCODE -ne 0) {
+        Die 'The first reading was not sent - the SolisCloud sign-in did not complete. Run this again.'
+      }
+      Ok 'Signed in, and the first reading is through'
     }
 
     # Hide it from now on.

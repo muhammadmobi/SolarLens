@@ -411,15 +411,42 @@ async function cycle() {
   }
 }
 
-process.on('SIGINT', async () => {
-  log('stopping');
+async function shutdown(code) {
   // A browser we attached to belongs to whoever opened it; close only our tab.
   if (attached) await page?.close().catch(() => {});
   else if (ctx) await ctx.close().catch(() => {});
-  process.exit(0);
-});
+  process.exit(code);
+}
 
-log(`relay -> ${SOLARLENS_URL}  every ${INTERVAL_MS / 60000} min  plants=${PLANTS.length ? PLANTS.join(',') : 'auto'}  ${CDP ? `attached to ${CDP}` : `profile=${PROFILE}`}`);
+process.on('SIGINT', async () => { log('stopping'); await shutdown(0); });
+
+/**
+ * RELAY_ONCE runs a single cycle and exits, which is what the installer wants.
+ *
+ * Setup used to start the ordinary endless relay and tell the operator to press
+ * Ctrl+C once it printed "pushed". That is a poor instruction - it asks someone
+ * to interrupt a program that looks like it is working - and on Windows it is
+ * worse than untidy: Ctrl+C inside a batch file raises "Terminate batch job
+ * (Y/N)?", so the installer stopped half-finished with a console sitting open
+ * waiting for an answer nobody expected to give.
+ *
+ * One cycle, an exit code that says whether it worked, and no keystroke.
+ */
+const ONCE = process.env.RELAY_ONCE === '1';
+
+log(`relay -> ${SOLARLENS_URL}  ${ONCE ? 'one cycle' : `every ${INTERVAL_MS / 60000} min`}  plants=${PLANTS.length ? PLANTS.join(',') : 'auto'}  ${CDP ? `attached to ${CDP}` : `profile=${PROFILE}`}`);
+
+if (ONCE) {
+  try {
+    await cycle();
+    log('first reading pushed - setup can continue');
+    await shutdown(0);
+  } catch (e) {
+    log(`cycle failed: ${e.message}`);
+    await shutdown(1);
+  }
+}
+
 for (;;) {
   try { await cycle(); } catch (e) { log(`cycle failed: ${e.message}`); }
   await sleep(INTERVAL_MS);
