@@ -1598,7 +1598,7 @@
       ['Status', `<span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>`],
       tempC != null ? ['Temperature', `${tempC.toFixed(1)} °C`] : null,
       m.gridStatus ? ['Grid', esc(String(m.gridStatus).toLowerCase())] : null,
-      m.weatherText ? ['Weather', `${esc(m.weatherText)}${m.tempNowC != null ? ` · ${Math.round(m.tempNowC)} °C now` : ''}${m.tempMinC != null && m.tempMaxC != null ? ` · ${Math.round(m.tempMinC)}–${Math.round(m.tempMaxC)} °C` : ''}`] : null,
+      m.weatherText ? ['Weather', `${esc(m.weatherText)}${m.tempMinC != null && m.tempMaxC != null ? ` · ${Math.round(m.tempMinC)}–${Math.round(m.tempMaxC)} °C` : ''}`] : null,
       m.sunrise && m.sunset ? ['Sun', `${esc(m.sunrise)} – ${esc(m.sunset)}`] : null,
       ['Updated', inv.ts ? `${esc(when(inv.ts))} · ${esc(ago(inv.ts))}` : 'never'],
     ]);
@@ -1708,7 +1708,7 @@
       $('wx-sep').hidden = !hasWx;
       if (hasWx) {
         $('fleet-wx').textContent =
-          `${wx.weatherText}${wx.tempNowC != null ? ` · ${Math.round(wx.tempNowC)}°` : ''}${wx.tempMinC != null && wx.tempMaxC != null ? ` (${Math.round(wx.tempMinC)}–${Math.round(wx.tempMaxC)}°)` : ''}`;
+          `${wx.weatherText}${wx.tempMinC != null && wx.tempMaxC != null ? ` (${Math.round(wx.tempMinC)}–${Math.round(wx.tempMaxC)}°)` : ''}`;
       }
       // The tab carries the count, so a fault is visible from any page.
       const n = alertCount();

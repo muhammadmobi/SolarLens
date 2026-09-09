@@ -102,8 +102,6 @@ export interface Metrics {
   weatherText: string | null;
   tempMinC: number | null;
   tempMaxC: number | null;
-  /** Temperature right now, which only the weather lookup can supply. */
-  tempNowC: number | null;
   sunrise: string | null;
   sunset: string | null;
   batteryStatus: string | null;
@@ -119,7 +117,7 @@ export function emptyMetrics(): Metrics {
     battChargeTodayKwh: null, battDischargeTodayKwh: null,
     battChargeTotalKwh: null, battDischargeTotalKwh: null,
     selfUseTodayKwh: null, fullLoadHours: null,
-    weatherText: null, tempMinC: null, tempMaxC: null, tempNowC: null, sunrise: null, sunset: null,
+    weatherText: null, tempMinC: null, tempMaxC: null, sunrise: null, sunset: null,
     batteryStatus: null, gridStatus: null,
   };
 }

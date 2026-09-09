@@ -3,7 +3,6 @@ import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { daily, insertReading, latest, latestPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
 import { plantFilter, pollAll } from './poll';
-import { stampWeather } from './weather';
 import type { Inverter, Reading } from './providers/types';
 import {
   deviceFromCollector,
@@ -266,7 +265,6 @@ app.post('/api/ingest/station', async (c) => {
       : solarmanStationReading(inv, body.raw, source);
   if (!inv.name) inv.name = inv.plantName = plantId;
   await upsertInverter(c.env.DB, inv);
-  await stampWeather(c.env, reading);
   const stored = await insertReading(c.env.DB, reading);
   // The relay is how SolisCloud data arrives, so it belongs in the poll log
   // beside the cloud poller. Without this the footer only ever mentioned

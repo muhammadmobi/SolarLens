@@ -113,6 +113,17 @@ the announcement.
 - Branch protection on `main`: pull requests required, linear history, no force
   pushes, no deletions.
 
+### Removed
+
+- **The Google Weather API lookup.** Google Maps Platform requires a billing
+  account, and a dashboard for two inverters is not worth a billing
+  relationship. SolisCloud already ships a condition, a min/max and sunrise and
+  sunset with every station snapshot, for free, and that is what the header
+  shows. The only thing lost is a current temperature, and SolarMan — which
+  ships no weather of its own — no longer borrows any. `GOOGLE_WEATHER_KEY`,
+  `SITE_LAT` and `SITE_LON` are gone with it; the last two were the site's
+  coordinates, so that is a privacy improvement as much as a billing one.
+
 ### Changed
 
 - **The energy flow diagram redrawn.** The house is now the load itself —

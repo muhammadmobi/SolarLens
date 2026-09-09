@@ -15,11 +15,6 @@ export interface Env {
   SOLARMAN_WEB_ACCESS_TOKEN?: string;
   /** Comma-separated vendor plant ids to poll; unset = every plant the accounts can see. */
   INCLUDE_PLANTS?: string;
-  /** Google Maps Platform key with the Weather API enabled; unset = no lookup. */
-  GOOGLE_WEATHER_KEY?: string;
-  /** Site coordinates, for the vendor that ships none with its payload. */
-  SITE_LAT?: string;
-  SITE_LON?: string;
   API_TOKEN?: string;
   INGEST_TOKEN?: string;
 }

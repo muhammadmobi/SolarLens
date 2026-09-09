@@ -218,26 +218,6 @@ Secrets go in with `npx wrangler secret put NAME` (production) or in `.dev.vars`
 | `SOLARMAN_APP_ID`, `SOLARMAN_APP_SECRET`, `SOLARMAN_EMAIL`, `SOLARMAN_PASSWORD_SHA256` | SolarMan official | From SolarMan support + your login. |
 | `SOLARMAN_WEB_REFRESH_TOKEN`, `SOLARMAN_WEB_ACCESS_TOKEN` | SolarMan fallback | Used only when the official keys are absent. |
 | `INCLUDE_PLANTS` | optional | Comma-separated vendor plant/station ids to poll. Unset = every plant visible to the accounts, including plants shared into them. |
-| `GOOGLE_WEATHER_KEY` | optional | Google Maps Platform key with the **Weather API** enabled. Unset = no lookup, and whatever weather the vendor sent stands. |
-| `SITE_LAT`, `SITE_LON` | optional | Where the array is, for the weather lookup. Only needed for a provider that ships no coordinates of its own — SolisCloud includes them, SolarMan does not. |
-
-### Weather
-
-SolisCloud sends a condition and a min/max with every station snapshot; SolarMan sends none at all. Rather than show one system's sky and leave the other blank, SolarLens can look the weather up once for the site and stamp it onto both systems.
-
-Enable the **Weather API** in a [Google Cloud project](https://console.cloud.google.com/apis/library/weather.googleapis.com), create an API key, restrict it to that one API, then:
-
-```bash
-npx wrangler secret put GOOGLE_WEATHER_KEY
-npx wrangler secret put SITE_LAT     # only if no provider reports coordinates
-npx wrangler secret put SITE_LON
-```
-
-Each lookup is cached for 30 minutes in the `kv` table, so the five-minute poll costs about 48 calls a day per site rather than 288 — comfortably inside the Maps Platform free allowance. A failed or slow lookup is swallowed: the poll still stores its reading.
-
-`wrangler.jsonc` is committed with `${CF_D1_DATABASE_ID}` where your database id goes, so no account-specific id lives in the repository. Wrangler does not substitute environment variables in its own config, so `npm run dev`, `npm run deploy` and `npm run db:*` go through `scripts/wrangler.mjs`, which fills the placeholder from the environment (falling back to `.dev.vars`) and hands wrangler a generated, gitignored copy. For anything else, `npm run cf -- <args>` passes straight through — `npm run cf -- tail`, say. Put the id in `.dev.vars` as `CF_D1_DATABASE_ID=`; `npx wrangler d1 create solar-lens` prints it.
-
-Cron cadence and the D1 binding live in `wrangler.jsonc`. Five minutes matches how often the vendors themselves refresh; faster polling buys nothing but rate-limit risk (SolisCloud allows 3 calls per 5 s per IP).
 
 ## Local development
 
@@ -261,7 +241,7 @@ npm run test:unit:coverage  # vitest + v8 coverage, enforces thresholds
 npm run test:e2e            # playwright (add --ui for the inspector)
 ```
 
-**104 unit tests** and **150 end-to-end tests** (75 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**86 unit tests** and **150 end-to-end tests** (75 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -273,7 +253,7 @@ npm run test:e2e            # playwright (add --ui for the inspector)
 
 ### Unit tests — `tests/unit/`
 
-Eight files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
+Seven files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
 - **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
@@ -281,7 +261,6 @@ Eight files, one concern each. They are all pure-function tests against fixtures
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
-- **`weather.test.ts`** — coordinate extraction from each vendor's payload shape (and `0,0` treated as "unset"), the two Google responses mapped onto one shape in the site's own timezone, the cache serving instead of paying for a call, and — the point of the module — a weather outage never taking the poll down with it.
 
 ### End-to-end tests — `tests/e2e/`
 
@@ -297,7 +276,7 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| `src/providers/` + `src/weather.ts` | **60%** | **52%** | **51%** | **60%** |
+| `src/providers/` | **60%** | **52%** | **51%** | **60%** |
 | `units.ts` | 96% | 97% | 100% | 100% |
 | `weather.ts` | 95% | 83% | 100% | 98% |
 | `queue.ts` | 100% | 100% | 100% | 100% |
@@ -370,7 +349,6 @@ solar-lens/
 │   ├── unit/units.test.ts       W / kWh / timestamp scaling
 │   ├── unit/normalize.test.ts   both vendor normalisers, signs and statuses
 │   ├── unit/queue.test.ts       vendor rate-limit queue
-│   ├── unit/weather.test.ts     coordinates, mapping, cache, failure handling
 │   ├── unit/history.test.ts     day-curve backfill normalisation
 │   ├── unit/pii.test.ts         what is stripped from a stored payload
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile

@@ -1,6 +1,5 @@
 import type { Env } from './db';
 import { insertReading, logPoll, tokenStore, upsertDevice, upsertInverter } from './db';
-import { stampWeather } from './weather';
 import { SolisCloudProvider } from './providers/soliscloud';
 import { SolarmanProvider } from './providers/solarman';
 import { SolarmanWebProvider } from './providers/solarman-web';
@@ -81,10 +80,7 @@ async function pollProvider(env: Env, p: Provider): Promise<PollSummary> {
         if (!inv.name) inv.name = plant.name;
         await upsertInverter(env.DB, inv);
         inverters++;
-        if (reading) {
-          await stampWeather(env, reading);
-          if (await insertReading(env.DB, reading)) newReadings++;
-        }
+        if (reading && (await insertReading(env.DB, reading))) newReadings++;
       }
     }
     await logPoll(env.DB, p.id, true, `plants=${plants.length} inverters=${inverters} new=${newReadings}`);

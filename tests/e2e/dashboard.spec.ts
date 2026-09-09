@@ -25,7 +25,7 @@ function inverters(overrides: Partial<Record<'solis' | 'solarman', Record<string
         gridImportTodayKwh: 0, gridExportTodayKwh: 0, gridImportTotalKwh: 0, gridExportTotalKwh: 0,
         battChargeTodayKwh: null, battDischargeTodayKwh: null, battChargeTotalKwh: null, battDischargeTotalKwh: null,
         selfUseTodayKwh: null, fullLoadHours: 4.94, batteryStatus: null, gridStatus: null,
-        weatherText: 'Clear', tempNowC: 29, tempMinC: 24, tempMaxC: 31, sunrise: '05:45', sunset: '18:25' }),
+        weatherText: 'Clear', tempMinC: 24, tempMaxC: 31, sunrise: '05:45', sunset: '18:25' }),
       raw: JSON.stringify({ power: 5.08, powerStr: 'kW', state: 1, sno: 'ABC123', fullHour: 4.94 }),
       ...(overrides.solis ?? {}),
     },
@@ -721,11 +721,11 @@ test.describe('Weather', () => {
     await stubApi(page);
     await page.goto('/');
     await expect(page.locator('#wx-item')).toBeVisible();
-    await expect(page.locator('#fleet-wx')).toHaveText('Clear · 29° (24–31°)');
+    await expect(page.locator('#fleet-wx')).toHaveText('Clear (24–31°)');
 
     await page.goto('/#/system/' + encodeURIComponent(SOLIS));
     const diag = page.locator('section.card', { has: page.locator('h3', { hasText: 'Status & diagnostics' }) });
-    await expect(diag).toContainText('29 °C now');
+    await expect(diag).toContainText('24–31 °C');
     await expect(diag).toContainText('05:45 – 18:25');
     await expect(page.locator('.card').filter({ has: page.locator('h3', { hasText: 'Energy' }) }))
       .toContainText('Full-load hours');
