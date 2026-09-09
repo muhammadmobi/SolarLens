@@ -278,7 +278,14 @@ try {
     Step 6 'Starting the relay automatically at logon'
 
     $node = (Get-Command node).Source
-    $me   = "$env:COMPUTERNAME\$env:USERNAME"
+
+    # Ask Windows who is running this rather than assembling a name from
+    # COMPUTERNAME and USERNAME. That composition is only right on a machine
+    # whose accounts are local: a domain or Entra-joined laptop resolves its
+    # user as DOMAIN\name or AzureAD\name, and registration fails with "No
+    # mapping between account names and security IDs was done" - which is
+    # exactly what happened on the first work laptop this was run on.
+    $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
     # Started through a one-line WSH launcher rather than directly, because
     # node.exe is a console application: run it from the task and a black
@@ -295,15 +302,49 @@ try {
       Warn 'relay-hidden.vbs is missing - the relay will run in a visible console window'
       $action = New-ScheduledTaskAction -Execute $node -Argument 'agent\solis-relay.mjs' -WorkingDirectory $InstallDir
     }
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
-    $set     = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-                 -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 2) `
-                 -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
-    $princ   = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName 'SolarLens relay' -Action $action -Trigger $trigger `
-      -Settings $set -Principal $princ -Force `
-      -Description 'Relays SolisCloud readings to the SolarLens Worker. Runs hidden.' | Out-Null
-    Ok 'Scheduled task "SolarLens relay" registered'
+    $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+             -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 2) `
+             -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+
+    # Two ways to name the account, tried in order. The first pins the task to
+    # this user; the second omits the principal entirely and lets Task
+    # Scheduler use whoever registered it, which needs no name to resolve at
+    # all. The fallback exists because account naming is the part of this that
+    # varies between a home machine and a managed one.
+    $attempts = @(
+      @{ What = "for $me";                  User = $me },
+      @{ What = 'for the current user';     User = $null }
+    )
+
+    $registered = $false
+    foreach ($a in $attempts) {
+      try {
+        $p = @{
+          TaskName = 'SolarLens relay'; Action = $action; Settings = $set; Force = $true
+          Description = 'Relays SolisCloud readings to the SolarLens Worker. Runs hidden.'
+          Trigger = if ($a.User) { New-ScheduledTaskTrigger -AtLogOn -User $a.User }
+                    else         { New-ScheduledTaskTrigger -AtLogOn }
+        }
+        if ($a.User) {
+          $p.Principal = New-ScheduledTaskPrincipal -UserId $a.User -LogonType Interactive -RunLevel Limited
+        }
+        Register-ScheduledTask @p -ErrorAction Stop | Out-Null
+      } catch {
+        Warn "Could not register the task $($a.What): $($_.Exception.Message.Split([char]10)[0])"
+        continue
+      }
+      # Register-ScheduledTask has reported success here while leaving no task
+      # behind, so the only trustworthy answer comes from asking for it back.
+      if (Get-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue) {
+        $registered = $true
+        Ok "Scheduled task `"SolarLens relay`" registered $($a.What)"
+        break
+      }
+      Warn "The task did not exist after registering it $($a.What)"
+    }
+    if (-not $registered) {
+      Die "Could not register the scheduled task. The relay is installed and works if you start it by hand (npm run relay:solis in $InstallDir), but it will not start itself at logon."
+    }
 
     Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
       Where-Object { $_.CommandLine -like '*solis-relay*' } |
@@ -313,7 +354,7 @@ try {
     $running = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
       Where-Object { $_.CommandLine -like '*solis-relay*' }).Count
     if ($running -gt 0) { Ok 'Relay is running now, hidden, and will start itself at every logon' }
-    else { Warn 'The task did not start the relay - open Task Scheduler and look at "SolarLens relay"' }
+    else { Die 'The task was registered but did not start the relay. Open Task Scheduler, find "SolarLens relay" and run it by hand to see what it says.' }
   }
 
   Write-Host "`nDone." -ForegroundColor Green
