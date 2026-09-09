@@ -63,7 +63,51 @@ if (-not $OutFile) {
 }
 
 $plantArg = if ($plants) { " -PlantIds '$plants'" } else { '' }
-$raw = 'https://raw.githubusercontent.com/muhammadmobi/SolarLens/main/scripts/setup-relay.ps1'
+$raw  = 'https://raw.githubusercontent.com/muhammadmobi/SolarLens/main/scripts/setup-relay.ps1'
+$repo = 'https://github.com/muhammadmobi/SolarLens.git'
+$dir  = 'C:\source\SolarLens'   # matches setup-relay.ps1's own default
+
+# Three ways to reach the code, tried in order of reliability.
+#
+# The first version only knew the third: fetch one file from
+# raw.githubusercontent.com. That host answered 503 ten times in a row on the
+# machine this was meant to set up, and the installer had nothing else to try -
+# it gave up on a repository that was perfectly reachable, because it was
+# asking the wrong server for it. github.com was answering 200 throughout.
+#
+#   1. A checkout already here      - use it, and git pull if that works.
+#   2. git clone from github.com    - a different host, and the one that stayed
+#                                     up all day while the CDN did not.
+#   3. The single file over HTTPS   - last resort, for a machine with no git.
+$fetch = @"
+`$ErrorActionPreference='Continue';
+`$dir='$dir'; `$s=Join-Path `$dir 'scripts\setup-relay.ps1';
+`$git=[bool](Get-Command git -ErrorAction SilentlyContinue);
+if (Test-Path `$s) {
+  Write-Host '  Already installed here - checking for updates';
+  if (`$git) { Push-Location `$dir; git pull --ff-only | Out-Null;
+    if (`$LASTEXITCODE -eq 0) { Write-Host '  Up to date' } else { Write-Host '  Could not update - using the copy already here' };
+    Pop-Location }
+} elseif (`$git) {
+  Write-Host '  Getting the code from github.com';
+  git clone --quiet '$repo' `$dir | Out-Null;
+  if (Test-Path `$s) { Write-Host '  Done' }
+}
+if (-not (Test-Path `$s)) {
+  Write-Host '  No git here - trying a direct download instead';
+  `$f=Join-Path `$env:TEMP 'solarlens-setup-relay.ps1';
+  foreach (`$i in 1..4) { try { Invoke-WebRequest '$raw' -OutFile `$f -UseBasicParsing -TimeoutSec 25; break } catch { Write-Host ('  GitHub file server not responding (' + `$i + ' of 4)') -ForegroundColor DarkGray; Start-Sleep -Seconds 5 } };
+  if (Test-Path `$f) { `$s=`$f }
+}
+if (-not (Test-Path `$s)) {
+  Write-Host '';
+  Write-Host 'Could not get the setup files.' -ForegroundColor Red;
+  if (-not `$git) { Write-Host 'Git is not installed here, and the GitHub file server is not responding.' -ForegroundColor Yellow; Write-Host 'Install Git from https://git-scm.com/download/win and run this file again - it only needs github.com after that.' -ForegroundColor Yellow }
+  else { Write-Host 'github.com could not be reached. Check the internet connection and try again.' -ForegroundColor Yellow };
+  exit 1
+}
+& `$s -InstallDir `$dir -WorkerUrl '$url' -IngestToken '$token'$plantArg
+"@ -replace "`r?`n", ' '
 
 # Written as one PowerShell -Command line so the file stays a plain .cmd that
 # Windows will run on a double-click. Values are in single quotes: PowerShell
@@ -86,7 +130,7 @@ echo  Setting up the SolarLens relay on this machine.
 echo  Nothing to type until a Chrome window opens on the SolisCloud login.
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "`$ErrorActionPreference='Stop'; `$f=Join-Path `$env:TEMP 'solarlens-setup-relay.ps1'; `$got=`$false; foreach (`$i in 1..10) { try { Invoke-WebRequest '$raw' -OutFile `$f -UseBasicParsing -TimeoutSec 30; `$got=`$true; break } catch { Write-Host ('  GitHub is busy (attempt ' + `$i + ' of 10) - waiting 6s and trying again') -ForegroundColor DarkGray; Start-Sleep -Seconds 6 } }; if (-not `$got) { Write-Host 'Could not download the setup script after ten tries. This is GitHub being busy, not your connection - wait a few minutes and run this file again.' -ForegroundColor Red; exit 1 }; & `$f -WorkerUrl '$url' -IngestToken '$token'$plantArg"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$fetch"
 
 if errorlevel 1 (
   echo.
