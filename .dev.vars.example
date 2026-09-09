@@ -1,5 +1,12 @@
 # Copy to .dev.vars (gitignored) and fill in. Never commit real values.
 
+# --- Cloudflare ---
+# The id printed by `npx wrangler d1 create solar-lens`. Not a credential, but
+# it identifies your account, so wrangler.jsonc holds a ${CF_D1_DATABASE_ID}
+# placeholder and scripts/wrangler.mjs fills it in from here at run time.
+# Without this line every `npm run dev|deploy|db:remote|cf` fails.
+CF_D1_DATABASE_ID=
+
 # --- SolisCloud: Service -> API Management -> Activate Now ---
 SOLIS_KEY_ID=
 SOLIS_KEY_SECRET=
@@ -14,7 +21,10 @@ SOLARMAN_PASSWORD_SHA256=
 
 # --- SolarMan web-session fallback (used only when the official keys above are absent) ---
 # Log in to https://home.solarmanpv.com in a browser, then DevTools -> Application ->
-# Local Storage -> home.solarmanpv.com and copy the refresh token. Unofficial; may break.
+# Cookies -> home.solarmanpv.com. Two cookies hold JWTs ("eyJ..."): the persistent
+# one (expiry months out) is the refresh token, the Session one is the access
+# token. Do not log out of that browser afterwards - it revokes both.
+# Unofficial; may break whenever the portal changes.
 SOLARMAN_WEB_REFRESH_TOKEN=
 SOLARMAN_WEB_ACCESS_TOKEN=
 
@@ -42,3 +52,8 @@ SOLIS_PLANT_IDS=
 # the separate profile (add RELAY_HEADLESS=1 there to hide its window).
 RELAY_CDP=
 RELAY_HEADLESS=
+
+# Minutes between relay pushes (default 5), and an explicit Chrome binary if it
+# is not installed in one of the usual places. Both optional.
+RELAY_INTERVAL_MIN=
+CHROME_PATH=

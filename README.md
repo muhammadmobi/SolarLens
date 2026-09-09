@@ -22,8 +22,8 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 1. [How it works](#how-it-works)
 2. [Data sources and how each authenticates](#data-sources-and-how-each-authenticates)
 3. [Quick start (≈10 minutes)](#quick-start-10-minutes)
-4. [Getting credentials](#getting-credentials)
-5. [SolisCloud relay agent](#soliscloud-relay-agent)
+4. [Getting credentials](#getting-credentials) — [SolisCloud](#soliscloud-official-api-key) · [SolarMan](#solarman-official-business-api) · [SolarMan fallback](#solarman-browser-session-fallback)
+5. [SolisCloud relay agent](#soliscloud-relay-agent) — [one command on Windows](#one-command-on-windows) · [more than one machine](#running-it-on-more-than-one-machine) · [replacing a token](#replacing-a-token)
 6. [Configuration reference](#configuration-reference)
 7. [Local development](#local-development)
 8. [Testing](#testing)
@@ -105,17 +105,37 @@ npx wrangler login
 npx wrangler d1 create solar-lens
 ```
 
-Paste the printed `database_id` into `wrangler.jsonc` (keep the binding name `DB`), then apply the schema:
+That prints a `database_id`. It is not a credential — nobody can touch the
+database without your Cloudflare login — but it identifies your account, so
+this repository keeps it out of version control. Put it in `.dev.vars`
+instead, which is gitignored:
 
 ```bash
-npm run db:remote
+cp .dev.vars.example .dev.vars
+```
+
+and set the line:
+
+```
+CF_D1_DATABASE_ID=<the id wrangler just printed>
+```
+
+`wrangler.jsonc` carries the placeholder `${CF_D1_DATABASE_ID}`, and
+`scripts/wrangler.mjs` substitutes your real id into a temporary, gitignored
+copy of the config each time you run a command. **Because of that, use the npm
+scripts rather than `npx wrangler` directly** — `npm run cf -- <anything>`
+passes any wrangler command through the wrapper:
+
+```bash
+npm run db:remote                 # apply the schema to the deployed database
+npm run cf -- d1 info solar-lens  # the general escape hatch
 ```
 
 **2. Set your secrets** — each command prompts for the value; nothing is stored in the repo.
 
 ```bash
-npx wrangler secret put API_TOKEN       # gates the dashboard and /api/*
-npx wrangler secret put INGEST_TOKEN    # gates the push endpoints used by local agents
+npm run cf -- secret put API_TOKEN       # gates the dashboard and /api/*
+npm run cf -- secret put INGEST_TOKEN    # gates the push endpoints used by local agents
 ```
 
 Generate strong tokens with:
@@ -124,19 +144,32 @@ Generate strong tokens with:
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
 ```
 
+Keep both somewhere you can find them again — a password manager, not a file
+on the machine. Cloudflare will never show a secret back to you, so a lost
+token can only be replaced, not recovered (see
+[Replacing a token](#replacing-a-token)). Put the same values in `.dev.vars`
+as well: the relay agent and `npm run dev` read them from there.
+
 Then add whichever provider credentials you have (see [Getting credentials](#getting-credentials)):
 
 ```bash
-npx wrangler secret put SOLIS_KEY_ID
-npx wrangler secret put SOLIS_KEY_SECRET
+npm run cf -- secret put SOLIS_KEY_ID
+npm run cf -- secret put SOLIS_KEY_SECRET
 # and/or
-npx wrangler secret put SOLARMAN_APP_ID
-npx wrangler secret put SOLARMAN_APP_SECRET
-npx wrangler secret put SOLARMAN_EMAIL
-npx wrangler secret put SOLARMAN_PASSWORD_SHA256
+npm run cf -- secret put SOLARMAN_APP_ID
+npm run cf -- secret put SOLARMAN_APP_SECRET
+npm run cf -- secret put SOLARMAN_EMAIL
+npm run cf -- secret put SOLARMAN_PASSWORD_SHA256
 # or the SolarMan browser-session fallback
-npx wrangler secret put SOLARMAN_WEB_REFRESH_TOKEN
+npm run cf -- secret put SOLARMAN_WEB_REFRESH_TOKEN
 ```
+
+If you have neither vendor's API keys yet, that is the normal starting point —
+both are approvals you have to request. Skip to
+[Getting credentials](#getting-credentials) for how to ask, and use the
+[SolarMan browser-session fallback](#solarman-browser-session-fallback) and the
+[SolisCloud relay agent](#soliscloud-relay-agent) to have real data on screen
+the same day.
 
 **3. Deploy**
 
@@ -148,7 +181,14 @@ The first deploy asks you to register a `workers.dev` subdomain (a one-time name
 
 **4. Open the dashboard**
 
-Visit `https://solar-lens.<your-subdomain>.workers.dev/auth?t=<API_TOKEN>` once on each device. That sets an `HttpOnly` cookie; from then on the plain URL just opens. The first data arrives on the next 5-minute cron tick, or immediately with:
+Visit `https://solar-lens.<your-subdomain>.workers.dev/auth?t=<API_TOKEN>` once on each device. That sets an `HttpOnly` cookie good for a year; from then on the plain URL just opens.
+
+> A device that has not done this shows **"This dashboard is token-protected.
+> Open `/auth?t=<API_TOKEN>` once on this device."** That is the gate working,
+> not a fault. Every phone, tablet and laptop needs the link once, and each
+> browser counts separately.
+
+The first data arrives on the next 5-minute cron tick, or immediately with:
 
 ```bash
 curl -X POST -H "Authorization: Bearer <API_TOKEN>" https://solar-lens.<your-subdomain>.workers.dev/api/poll
@@ -191,33 +231,153 @@ Password login is deliberately *not* automated: the portal requires a Cloudflare
 
 ## SolisCloud relay agent
 
-While Solis has not enabled API access on your account, run this on any machine with Google Chrome:
+SolarMan reaches the Worker on its own: its portal hands out an ordinary bearer
+token that can be replayed from anywhere, so Cloudflare talks to SolarMan
+directly and nothing of yours has to be running. SolisCloud cannot work that
+way. Its portal signs every request with a secret buried in its own JavaScript,
+so a copied token is worthless off the page that made it. Until Solis approves
+an API key for your account, the way to get Solis data is to let the real
+portal make the calls in a real browser and forward what comes back.
+
+That is the relay agent: a small script that drives a logged-in Chrome on a
+machine of yours and POSTs each response to `/api/ingest/station`. **It only
+produces Solis data while that machine is awake.** SolarMan keeps updating
+regardless.
+
+### One command on Windows
+
+Double-click **`setup-relay.cmd`**, or run it from a terminal:
 
 ```bash
-SOLARLENS_URL=https://solar-lens.<your-subdomain>.workers.dev INGEST_TOKEN=<INGEST_TOKEN> npm run relay:solis
+setup-relay.cmd
 ```
 
-(PowerShell: set `$env:SOLARLENS_URL = "…"` and `$env:INGEST_TOKEN = "…"` first.)
+It installs anything missing (Node, Git, Chrome, via winget), clones the
+repository if it is not already there, asks for your Worker URL and
+`INGEST_TOKEN`, walks you through one SolisCloud login, and registers a
+scheduled task so the relay starts itself at every logon and keeps running
+after you close the terminal.
 
-- The first run opens a Chrome window on the SolisCloud login page. Sign in once; the session is kept in `./.relay-profile` (gitignored) so later runs — including headless ones with `RELAY_HEADLESS=1` — need no interaction.
-- Every 5 minutes (`RELAY_INTERVAL_MIN`) it opens each plant page, waits for the portal's own `detailMix` response, and POSTs it to `/api/ingest/station`. The Worker normalises it with the **same code path** as the cloud poller, so field mapping and sign conventions can never drift between the two routes.
-- Set `SOLIS_PLANT_IDS` to limit it to specific plants; otherwise it relays every plant on the account.
+Useful switches:
+
+| Switch | Effect |
+|---|---|
+| `-InstallDir <path>` | Where to put the checkout (default `%USERPROFILE%\SolarLens`) |
+| `-WorkerUrl`, `-IngestToken`, `-PlantIds` | Answer the prompts up front |
+| `-NoTask` | Set everything up but do not register the scheduled task |
+| `-UseMyChrome` | Attach to the Chrome you already have open instead of running a second one — see below |
+| `-DebugPort <n>` | Which port `-UseMyChrome` connects on (default 9222) |
+
+### On macOS or Linux, or by hand
+
+```bash
+git clone https://github.com/<you>/SolarLens.git && cd SolarLens && npm install
+cp .dev.vars.example .dev.vars      # set SOLARLENS_URL and INGEST_TOKEN
+npm run relay:solis
+```
+
+The first run opens a Chrome window on the SolisCloud login page. Sign in once;
+the session is kept in `./.relay-profile` (gitignored), so later runs need no
+interaction. Then set `RELAY_HEADLESS=1` in `.dev.vars` and it runs invisibly.
+To keep it alive: `pm2 start agent/solis-relay.mjs --name solis-relay`, or a
+`systemd --user` unit, or Windows Task Scheduler if you skipped the installer.
+
+### How it behaves
+
+- Every 5 minutes (`RELAY_INTERVAL_MIN`) it opens each plant page, waits for the portal's own `detailMix` response, and POSTs it. The Worker normalises it with the **same code path** as the cloud poller, so field mapping and sign conventions can never drift between the two routes.
+- Set `SOLIS_PLANT_IDS` to limit it to specific plants; otherwise it relays every plant the account can see, including plants shared into it by someone else.
 - Readings arrive tagged `source: soliscloud-relay`; the dashboard shows "via soliscloud-relay" under the panel.
+- It reads `.dev.vars` itself, and clears its own stale Chrome profile lock if a previous run was killed.
 
-To keep it running: Windows Task Scheduler ("At log on", run `node agent\solis-relay.mjs` in the repo folder with the env vars set), `pm2 start agent/solis-relay.mjs --name solis-relay`, or a `systemd --user` unit on Linux.
+### Running it on more than one machine
+
+Encouraged, and the reason the ingest endpoint is idempotent. Run the same
+setup on a second computer — a work laptop, a desktop that is on at different
+hours — with the same Worker URL and `INGEST_TOKEN`. A reading that arrives
+twice is stored once, and whichever machine is awake backfills the part of the
+day the others missed. Two machines with complementary schedules cover far more
+of the day than either alone.
+
+### `-UseMyChrome`, and why it is not the default
+
+By default the relay runs a Chrome of its own with its own profile. That is not
+an oversight: Chrome refuses to let two programs share one profile directory, so
+the agent genuinely cannot borrow the browser you are using.
+
+`-UseMyChrome` takes the other route — it attaches over the DevTools protocol to
+a Chrome you started yourself, and uses the SolisCloud login already in it. The
+cost is real and worth understanding before choosing it:
+
+- Chrome only accepts that connection if it was **started** with
+  `--remote-debugging-port=9222`. The flag cannot be switched on afterwards, so
+  you must close every Chrome window and relaunch it that way.
+- While that port is open, any program on the machine can drive your browser and
+  everything it is signed in to.
+- The relay stops whenever you close Chrome.
+
+The separate hidden browser has none of those drawbacks, which is why it is the
+default. `-UseMyChrome` exists for people who would rather not have a second
+browser profile at all.
+
+### Replacing a token
+
+Cloudflare never shows a secret back, so a token you have lost — or one that has
+leaked — can only be replaced. On Windows:
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\rotate-tokens.ps1 -Ingest
+```
+
+`-Ingest` sets a new `INGEST_TOKEN` in Cloudflare, writes it to `.dev.vars` and
+restarts the relay. `-Api` does the same for `API_TOKEN` and prints the fresh
+`/auth?t=…` link — note that it signs out every device, since the cookie *is*
+the token. Cloudflare is updated first, so a failure leaves the old token
+working everywhere rather than half-changed.
+
+Elsewhere, do the same three steps by hand: `npm run cf -- secret put <NAME>`,
+update `.dev.vars`, restart the relay.
 
 ## Configuration reference
 
-Secrets go in with `npx wrangler secret put NAME` (production) or in `.dev.vars` (local, gitignored — copy from `.dev.vars.example`).
+Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars` (local, gitignored — copy from `.dev.vars.example`).
+
+**Read by the Worker, in Cloudflare:**
 
 | Name | Required | Purpose |
 |---|---|---|
-| `API_TOKEN` | yes | Gates `/api/*` and the dashboard cookie. Without it the API is open (local dev only). |
-| `INGEST_TOKEN` | for agents | Gates `/api/ingest` and `/api/ingest/station`. |
-| `SOLIS_KEY_ID`, `SOLIS_KEY_SECRET` | Solis official | From SolisCloud API Management. |
+| `API_TOKEN` | yes | Gates `/api/*` and the dashboard cookie. Without it the API is open (local dev only), and `/api/health` reports `authDisabled`. |
+| `INGEST_TOKEN` | for agents | Gates `/api/ingest`, `/api/ingest/station` and `/api/ingest/history`. |
+| `SOLIS_KEY_ID`, `SOLIS_KEY_SECRET` | Solis official | From SolisCloud API Management. Present = the Worker polls Solis directly and the relay becomes optional. |
 | `SOLARMAN_APP_ID`, `SOLARMAN_APP_SECRET`, `SOLARMAN_EMAIL`, `SOLARMAN_PASSWORD_SHA256` | SolarMan official | From SolarMan support + your login. |
 | `SOLARMAN_WEB_REFRESH_TOKEN`, `SOLARMAN_WEB_ACCESS_TOKEN` | SolarMan fallback | Used only when the official keys are absent. |
 | `INCLUDE_PLANTS` | optional | Comma-separated vendor plant/station ids to poll. Unset = every plant visible to the accounts, including plants shared into them. |
+
+**Read locally only, from `.dev.vars` — never sent to Cloudflare:**
+
+| Name | Used by | Purpose |
+|---|---|---|
+| `CF_D1_DATABASE_ID` | `scripts/wrangler.mjs` | Your D1 id, substituted into a temporary config so the real one stays out of git. Every `npm run` wrangler script needs it. |
+| `SOLARLENS_URL` | relay agent | Where to POST readings, e.g. `https://solar-lens.<your-subdomain>.workers.dev`. |
+| `SOLIS_PLANT_IDS` | relay agent | Which Solis plants to relay. Unset = all of them. |
+| `RELAY_HEADLESS` | relay agent | `1` runs the relay browser invisibly. Set `0` and run by hand when you need to log in again. |
+| `RELAY_CDP` | relay agent | Attach to an already-running Chrome, e.g. `http://127.0.0.1:9222`, instead of starting one. Set by `setup-relay.cmd -UseMyChrome`. |
+| `RELAY_INTERVAL_MIN` | relay agent | Minutes between pushes (default 5). |
+| `CHROME_PATH` | relay agent | Explicit Chrome binary, if it is not in a standard location. |
+
+### How often anything actually happens
+
+Three separate intervals, easily confused:
+
+| What | How often | Set where |
+|---|---|---|
+| Worker polls the vendor clouds | 5 min | `triggers.crons` in `wrangler.jsonc` |
+| Relay agent pushes Solis readings | 5 min | `RELAY_INTERVAL_MIN` |
+| Open dashboard re-fetches | 10 min, and never in a hidden tab | `REFRESH_MS` in `public/index.html` |
+
+A system is drawn as offline once its newest sample is older than
+`STALE_AFTER_S` (25 min). That figure has to stay comfortably above the poll
+interval, or a perfectly healthy inverter reads as offline in the minutes
+before the next poll.
 
 ## Local development
 
@@ -227,7 +387,13 @@ npm run db:local                 # schema into the local D1
 npm run dev                      # http://localhost:8787
 ```
 
-`npm run seed:local` inserts a day of synthetic readings so the UI has something to draw without any credentials. With `wrangler dev` running, trigger the cron handler by hand at `http://localhost:8787/__scheduled`, then inspect rows with `npx wrangler d1 execute solar-lens --local --command "SELECT * FROM readings ORDER BY ts DESC LIMIT 5"`.
+`npm run seed:local` inserts a day of synthetic readings so the UI has something to draw without any credentials. With `npm run dev` running, trigger the cron handler by hand at `http://localhost:8787/__scheduled`, then inspect rows with:
+
+```bash
+npm run cf -- d1 execute solar-lens --local --command "SELECT * FROM readings ORDER BY ts DESC LIMIT 5"
+```
+
+> On Windows, quoting a SQL string through the npm script can lose the quotes and turn `>` into a redirect. If a query behaves strangely there, put it in a `.sql` file and use `--file`, or call `npx wrangler … --config .wrangler.local.jsonc` directly once the wrapper has generated that file.
 
 `npm run probe:solis` signs and sends a single `userStationList` request with the keys in `.dev.vars` and prints the raw response — the fastest way to confirm your Solis key works before it goes near the cron.
 

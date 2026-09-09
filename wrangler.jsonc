@@ -18,8 +18,11 @@
     "binding": "ASSETS"
   },
 
-  // Your D1 database. `npx wrangler d1 create solar-lens` prints the id - paste
-  // it here. Keep the binding name "DB": the Worker code reads env.DB.
+  // Your D1 database. `npx wrangler d1 create solar-lens` prints the id; put it
+  // in .dev.vars as CF_D1_DATABASE_ID rather than here, and scripts/wrangler.mjs
+  // substitutes it into a gitignored copy of this file at run time - which is
+  // why the npm scripts, not bare `npx wrangler`, are what you run. Keep the
+  // binding name "DB": the Worker code reads env.DB.
   "d1_databases": [
     {
       "binding": "DB",
