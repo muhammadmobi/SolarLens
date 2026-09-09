@@ -93,13 +93,25 @@ try {
     $task = Get-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue
     if ($task) {
       Stop-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue
-      Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-        Where-Object { $_.CommandLine -like '*solis-relay*' } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+      # The wscript wrapper as well as node: leave it running and Task Scheduler
+      # still thinks the task is live, so the restart below is a no-op.
+      foreach ($p in @(
+        @{ Name = 'wscript.exe'; Match = '*relay-hidden.vbs*' },
+        @{ Name = 'node.exe';    Match = '*solis-relay*' }
+      )) {
+        Get-CimInstance Win32_Process -Filter "Name='$($p.Name)'" |
+          Where-Object { $_.CommandLine -like $p.Match } |
+          ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+      }
+      Start-Sleep -Seconds 3
       Start-ScheduledTask -TaskName 'SolarLens relay'
-      Start-Sleep -Seconds 10
-      $running = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-        Where-Object { $_.CommandLine -like '*solis-relay*' }).Count
+      $running = 0
+      foreach ($i in 1..15) {
+        Start-Sleep -Seconds 2
+        $running = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+          Where-Object { $_.CommandLine -like '*solis-relay*' }).Count
+        if ($running -gt 0) { break }
+      }
       if ($running -gt 0) { Ok 'Relay restarted' }
       else { Warn 'The relay did not come back - start it with: npm run relay:solis' }
     } else {

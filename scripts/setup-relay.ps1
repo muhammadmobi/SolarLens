@@ -346,15 +346,39 @@ try {
       Die "Could not register the scheduled task. The relay is installed and works if you start it by hand (npm run relay:solis in $InstallDir), but it will not start itself at logon."
     }
 
-    Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-      Where-Object { $_.CommandLine -like '*solis-relay*' } |
-      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    # Stop the task before killing anything. Killing only node.exe leaves the
+    # wscript wrapper alive, Task Scheduler still counts the task as running,
+    # and Start-ScheduledTask on an already-running task does nothing at all -
+    # then the wrapper notices its child is gone and exits, leaving the task
+    # Ready and no relay. That silence is what a bare "did not start" hid.
+    Stop-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue
+    foreach ($p in @(
+      @{ Name = 'wscript.exe'; Match = '*relay-hidden.vbs*' },
+      @{ Name = 'node.exe';    Match = '*solis-relay*' }
+    )) {
+      Get-CimInstance Win32_Process -Filter "Name='$($p.Name)'" |
+        Where-Object { $_.CommandLine -like $p.Match } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    }
+    Start-Sleep -Seconds 3
+
     Start-ScheduledTask -TaskName 'SolarLens relay'
-    Start-Sleep -Seconds 10
-    $running = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-      Where-Object { $_.CommandLine -like '*solis-relay*' }).Count
+    # Poll rather than sleep once: wscript has to start, then node, then
+    # Playwright has to find Chrome, and on a cold machine ten seconds is not
+    # always enough to see any of it.
+    $running = 0
+    foreach ($i in 1..15) {
+      Start-Sleep -Seconds 2
+      $running = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+        Where-Object { $_.CommandLine -like '*solis-relay*' }).Count
+      if ($running -gt 0) { break }
+    }
     if ($running -gt 0) { Ok 'Relay is running now, hidden, and will start itself at every logon' }
-    else { Die 'The task was registered but did not start the relay. Open Task Scheduler, find "SolarLens relay" and run it by hand to see what it says.' }
+    else {
+      $code = (Get-ScheduledTaskInfo -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue).LastTaskResult
+      $hex = '0x{0:X}' -f $code
+      Die "The task was registered but did not start the relay (last result $hex). Open Task Scheduler, find `"SolarLens relay`" and run it by hand to see what it says."
+    }
   }
 
   Write-Host "`nDone." -ForegroundColor Green
