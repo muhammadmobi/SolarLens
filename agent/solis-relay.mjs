@@ -27,6 +27,29 @@
  *   RELAY_HEADLESS      "1" to run without a window (only after the session exists)
  *   RELAY_PROFILE       Chrome profile dir (default ./.relay-profile)
  *   CHROME_PATH         explicit Chrome binary; default uses the installed Google Chrome
+ *   RELAY_CDP           attach to a Chrome you already have open instead of
+ *                       launching one, e.g. http://127.0.0.1:9222 - see below
+ *
+ * Using your own Chrome instead of a second one
+ * ---------------------------------------------
+ * Chrome refuses to let two processes share one profile directory, so this
+ * agent cannot simply open the profile your everyday browser is using: the
+ * launch fails with "Opening in existing browser session". The way round it is
+ * not to launch a browser at all, but to attach to the one already running.
+ *
+ * Start your Chrome with a debugging port once:
+ *
+ *   chrome.exe --remote-debugging-port=9222
+ *
+ * then run the agent with RELAY_CDP=http://127.0.0.1:9222. It will use that
+ * browser, with your own logins, and open one tab of its own to work in.
+ *
+ * Two things to weigh before choosing this. A debugging port lets any program
+ * on this machine drive your browser - every tab, every logged-in session - so
+ * it is not something to leave on casually. And the agent's navigation happens
+ * in your window: a tab appears and moves around every few minutes, and closing
+ * Chrome stops the relay. The default separate profile has neither problem, and
+ * RELAY_HEADLESS=1 hides its window entirely once you have logged in once.
  */
 import { chromium } from 'playwright-core';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -64,6 +87,8 @@ const PLANTS = (process.env.SOLIS_PLANT_IDS ?? '').split(',').map((s) => s.trim(
 const INTERVAL_MS = Math.max(1, Number(process.env.RELAY_INTERVAL_MIN ?? 5)) * 60_000;
 const HEADLESS = process.env.RELAY_HEADLESS === '1';
 const PROFILE = resolve(process.env.RELAY_PROFILE ?? '.relay-profile');
+const CDP = process.env.RELAY_CDP ?? '';
+let attached = null;
 const PORTAL = 'https://www.soliscloud.com';
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -120,6 +145,15 @@ async function killStaleProfileHolders() {
 }
 
 async function launchContext() {
+  // Attach to a browser that is already running, rather than starting one.
+  // Its profile - and so its logins - are whatever that browser already has.
+  if (CDP) {
+    const browser = await chromium.connectOverCDP(CDP);
+    const existing = browser.contexts()[0];
+    if (!existing) throw new Error(`${CDP}: connected, but that browser has no context to use`);
+    attached = browser;
+    return existing;
+  }
   return chromium.launchPersistentContext(PROFILE, {
     headless: HEADLESS,
     viewport: { width: 1280, height: 800 },
@@ -135,6 +169,13 @@ async function ensureBrowser() {
   try {
     ctx = await launchContext();
   } catch (e) {
+    if (CDP) {
+      throw new Error(
+        `${CDP}: could not attach - ${e.message}\n` +
+        `Start Chrome with --remote-debugging-port=${new URL(CDP).port}, or unset RELAY_CDP ` +
+        `to let the agent run its own browser.`,
+      );
+    }
     // The one failure worth retrying, because the cause is ours to clear.
     if (!/already in use|existing browser session/i.test(e.message)) throw e;
     const killed = await killStaleProfileHolders();
@@ -143,7 +184,10 @@ async function ensureBrowser() {
     await sleep(2000);
     ctx = await launchContext();
   }
-  page = ctx.pages()[0] ?? (await ctx.newPage());
+  // When we launched the browser, its one blank tab is ours to use. When we
+  // attached to somebody's browser, every open tab belongs to them - so take a
+  // new one rather than navigating away from what they are reading.
+  page = CDP ? await ctx.newPage() : (ctx.pages()[0] ?? (await ctx.newPage()));
   page.on('response', onResponse);
 }
 
@@ -325,9 +369,15 @@ async function cycle() {
   }
 }
 
-process.on('SIGINT', async () => { log('stopping'); if (ctx) await ctx.close().catch(() => {}); process.exit(0); });
+process.on('SIGINT', async () => {
+  log('stopping');
+  // A browser we attached to belongs to whoever opened it; close only our tab.
+  if (attached) await page?.close().catch(() => {});
+  else if (ctx) await ctx.close().catch(() => {});
+  process.exit(0);
+});
 
-log(`relay -> ${SOLARLENS_URL}  every ${INTERVAL_MS / 60000} min  plants=${PLANTS.length ? PLANTS.join(',') : 'auto'}  profile=${PROFILE}`);
+log(`relay -> ${SOLARLENS_URL}  every ${INTERVAL_MS / 60000} min  plants=${PLANTS.length ? PLANTS.join(',') : 'auto'}  ${CDP ? `attached to ${CDP}` : `profile=${PROFILE}`}`);
 for (;;) {
   try { await cycle(); } catch (e) { log(`cycle failed: ${e.message}`); }
   await sleep(INTERVAL_MS);

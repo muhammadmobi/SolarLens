@@ -33,3 +33,12 @@ SOLARLENS_URL=
 # Which plants the relay agent pushes. Unset = every plant on the account,
 # including any shared into it - set this if the account can see someone else's.
 SOLIS_PLANT_IDS=
+
+# Attach the relay to a Chrome you already have open, instead of it launching
+# its own. Requires that Chrome to have been started with
+#   chrome.exe --remote-debugging-port=9222
+# Uses your own logins, but the relay's tab appears in your window and a
+# debugging port lets any local program drive your browser. Leave unset to keep
+# the separate profile (add RELAY_HEADLESS=1 there to hide its window).
+RELAY_CDP=
+RELAY_HEADLESS=
