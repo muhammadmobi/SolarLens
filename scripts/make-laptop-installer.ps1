@@ -86,7 +86,7 @@ echo  Setting up the SolarLens relay on this machine.
 echo  Nothing to type until a Chrome window opens on the SolisCloud login.
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "`$ErrorActionPreference='Stop'; `$f=Join-Path `$env:TEMP 'solarlens-setup-relay.ps1'; `$got=`$false; foreach (`$i in 1..5) { try { Invoke-WebRequest '$raw' -OutFile `$f -UseBasicParsing -TimeoutSec 30; `$got=`$true; break } catch { Write-Host ('  download attempt ' + `$i + ' failed, retrying...') -ForegroundColor DarkGray; Start-Sleep -Seconds 4 } }; if (-not `$got) { Write-Host 'Could not download the setup script. GitHub may be busy - wait a minute and run this file again.' -ForegroundColor Red; exit 1 }; & `$f -WorkerUrl '$url' -IngestToken '$token'$plantArg"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "`$ErrorActionPreference='Stop'; `$f=Join-Path `$env:TEMP 'solarlens-setup-relay.ps1'; `$got=`$false; foreach (`$i in 1..10) { try { Invoke-WebRequest '$raw' -OutFile `$f -UseBasicParsing -TimeoutSec 30; `$got=`$true; break } catch { Write-Host ('  GitHub is busy (attempt ' + `$i + ' of 10) - waiting 6s and trying again') -ForegroundColor DarkGray; Start-Sleep -Seconds 6 } }; if (-not `$got) { Write-Host 'Could not download the setup script after ten tries. This is GitHub being busy, not your connection - wait a few minutes and run this file again.' -ForegroundColor Red; exit 1 }; & `$f -WorkerUrl '$url' -IngestToken '$token'$plantArg"
 
 echo.
 echo  Finished. You can delete this file now.
