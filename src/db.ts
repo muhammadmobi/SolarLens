@@ -426,3 +426,14 @@ export function tokenStore(db: D1Database): TokenStore {
     },
   };
 }
+
+/**
+ * Every known inverter id, ordered, for building the public alias map.
+ *
+ * Two rows on a normal system, so this is cheap enough to call on any request
+ * that has to hide an id it did not already load the inverters for.
+ */
+export async function inverterIds(db: D1Database): Promise<string[]> {
+  const { results } = await db.prepare('SELECT id FROM inverters ORDER BY id').all<{ id: string }>();
+  return results.map((r) => r.id);
+}

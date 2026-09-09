@@ -181,12 +181,12 @@ The first deploy asks you to register a `workers.dev` subdomain (a one-time name
 
 **4. Open the dashboard**
 
-Visit `https://solar-lens.<your-subdomain>.workers.dev/auth?t=<API_TOKEN>` once on each device. That sets an `HttpOnly` cookie good for a year; from then on the plain URL just opens.
-
-> A device that has not done this shows **"This dashboard is token-protected.
-> Open `/auth?t=<API_TOKEN>` once on this device."** That is the gate working,
-> not a fault. Every phone, tablet and laptop needs the link once, and each
-> browser counts separately.
+Open `https://solar-lens.<your-subdomain>.workers.dev`. That is all — on any
+phone, tablet or laptop, with nothing to copy first. Readings are public by
+design, with vendor identifiers stripped from every response; see
+[Reads are public; writes are not](#reads-are-public-writes-are-not) for exactly
+what that publishes and how to put a login in front of it if your site needs
+one.
 
 The first data arrives on the next 5-minute cron tick, or immediately with:
 
@@ -506,7 +506,7 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |
 | `GET /api/devices` | API_TOKEN | hardware inventory |
 | `POST /api/ingest/devices` | INGEST_TOKEN | push raw vendor device records (`{provider, plantId, inverters[], collectors[]}`); normalised server-side |
-| `GET /auth?t=` | — | set the dashboard cookie |
+| `GET /auth?t=` | — | set the cookie the write routes accept |
 
 Auth is a bearer header (`Authorization: Bearer …`) or the cookie set by `/auth`.
 
@@ -561,7 +561,7 @@ solar-lens/
 
 | Symptom | Cause / fix |
 |---|---|
-| Dashboard says *unauthorized* | Open `/auth?t=<API_TOKEN>` once on that device. |
+| Dashboard says *unauthorized* | Reads are public, so this means the deployment is older than that change. Run `npm run deploy`. |
 | Footer: *no provider credentials configured* | No provider secrets present. Set at least one route's secrets and redeploy or `POST /api/poll`. |
 | `soliscloud: HTTP 408` | Your clock is > 15 min off SolisCloud's. Fix the system clock (Workers are fine; this affects local probes/agents). |
 | `soliscloud: HTTP 403/401` on official API | Key not activated, or API access not enabled on the account. Check Basic Settings → API Management. |
@@ -582,14 +582,54 @@ Headers on every response: a Content-Security-Policy that is strict about where 
 
 Vendor errors are stripped of query strings before they reach `poll_log` — SolarMan's token endpoint takes the account's `appId` in the URL, and that log is kept for a week, served by `/api/health` and printed in the footer. No credential should travel that far because a DNS lookup failed.
 
-The dashboard cookie is `HttpOnly`, `Secure` and `SameSite=Lax`. Read and push routes use separate tokens, so an agent key cannot read your data. Vendor payloads are stripped of the account holder's name, email and the site's coordinates before storage, and every vendor-controlled string is escaped before it reaches the page.
+### Reads are public; writes are not
 
-**With `API_TOKEN` unset the API is open.** That is deliberate for local development, and no longer silent: the Worker logs it and the dashboard shows a banner. Set the secret before pointing anything at the public URL.
+`GET /api/*` answers anybody. That is a deliberate choice, not an oversight:
+the dashboard is meant to be opened on a phone, a work laptop or a relative's
+tablet without first copying a token onto each one, and a per-device unlock step
+is a tax that gets paid every time and forgotten exactly when it matters.
+
+What that choice costs is bounded rather than accepted:
+
+- **Vendor identifiers never leave the Worker.** `src/public-view.ts` strips
+  them from every response. Station and plant ids become positional aliases
+  (`s1`, `s2`), serial numbers are masked to their last four characters, and the
+  stored raw vendor payload is not served at all. A station id, a plant id and a
+  serial are account-level handles — what a vendor's support desk asks for, what
+  a warranty is keyed on — and none of them is needed to draw a chart.
+- Aliases are positional rather than hashed **on purpose**. A SolarMan station
+  id is eight digits, so a hash of one can be reversed by trying all hundred
+  million of them.
+- **Nothing readable can spend money or change data.** `POST /api/poll` makes
+  live vendor calls, so it keeps the `API_TOKEN` gate; `/api/ingest/*` keeps its
+  own `INGEST_TOKEN`. An agent key still cannot read, and a reader still cannot
+  write.
+- Read endpoints send `Cache-Control: public, max-age=60`, so a burst of
+  requests is answered at the edge instead of against D1. A public URL can be
+  requested by anything at any rate, and this project has exhausted the free
+  tier's row budget twice already.
+
+What it does *not* protect is the measurements themselves. **Anyone with the URL
+can see your generation and consumption**, and a consumption curve says when a
+building is occupied. If that matters for your site, put
+[Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
+in front of the Worker — it covers the `workers.dev` URL, needs no code change
+here, and gives a normal sign-in page instead of a token to copy.
+
+`API_TOKEN` still exists for the write routes, and `/auth?t=<token>` still sets
+the `HttpOnly`, `Secure`, `SameSite=Lax` cookie those routes accept. Vendor
+payloads are stripped of the account holder's name, email and the site's
+coordinates before storage, and every vendor-controlled string is escaped before
+it reaches the page.
+
+> **Plant names are still published.** They are what the dashboard labels each
+> system with, so they are the one identifying string deliberately left in. If
+> yours name a person or a business, rename the plant in the vendor portal.
 
 One third-party request remains: the page loads its web font from Google, which sees the viewer's IP. Self-hosting it (Manrope is OFL-licensed) or dropping to the system font stack removes that.
 
 - Nothing identifying belongs in the repo: credentials, tokens and plant ids live only in `wrangler secret`, the Cloudflare dashboard, or the gitignored `.dev.vars`. `captures/`, `.capture-profile/` and `.relay-profile/` (browser sessions) are gitignored too.
-- A public `workers.dev` URL is gated by `API_TOKEN`; without it anyone could read your production data. `INGEST_TOKEN` separately gates writes from agents.
+- The `workers.dev` URL serves readings to anyone who opens it, with vendor identifiers stripped. `INGEST_TOKEN` and `API_TOKEN` gate the routes that write or spend quota.
 - The SolarMan portal login sends your password in clear text in the form body. The capture helper redacts it, but never paste DevTools request bodies anywhere.
 - Unofficial routes reuse *your* browser session against *your* data only. Vendor terms may restrict automation; the official APIs are the durable path and everything here prefers them when their secrets are present.
 

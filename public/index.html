@@ -410,7 +410,6 @@
       <span class="sep" id="wx-sep" hidden></span>
       <div class="fitem" id="wx-item" hidden><span class="flabel">Weather</span><span class="num small" id="fleet-wx">—</span></div>
     </div>
-    <span class="openwarn" id="openwarn" hidden title="Set the API_TOKEN secret and redeploy to close it">⚠ No API token — this dashboard is open to anyone with the link</span>
     <span class="livedot" id="updated"><i></i>loading…</span>
     <button class="themebtn" id="theme" type="button" aria-label="Change theme">🖥️</button>
   </div>
@@ -1645,7 +1644,10 @@
     const hash = location.hash || '#/';
     for (const a of $('nav').children) a.classList.toggle('on', a.getAttribute('href') === hash);
     if (state.error === 'unauthorized') {
-      $('view').innerHTML = `<div class="card"><div class="empty">This dashboard is token-protected. Open <code>/auth?t=&lt;API_TOKEN&gt;</code> once on this device.</div></div>`;
+      // Reads are public, so this should not happen. It is kept because a
+      // deployment mid-rollout can still answer 401, and a blank page would
+      // say nothing about why.
+      $('view').innerHTML = `<div class="card"><div class="empty">The server refused this request. If it persists, redeploy.</div></div>`;
       return;
     }
     if (!state.latest) return; // first paint waits for data
@@ -1727,7 +1729,6 @@
       // that logs on a cron, with nothing at all about the relay.
       // An open dashboard is worth interrupting for: it is not a state anyone
       // chooses on a deployment that is reachable from the internet.
-      $('openwarn').hidden = !health?.authDisabled;
 
       const feeds = health?.feeds?.length ? health.feeds : (health?.polls?.length ? [health.polls[0]] : []);
       if (feeds.length) {

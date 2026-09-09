@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { daily, insertReading, latest, latestPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
+import { daily, insertReading, inverterIds, latest, latestPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
+import { aliasFor, publicDevices, publicInverters, publicRows } from './public-view';
 import { plantFilter, pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
 import {
@@ -96,18 +97,23 @@ app.get('/auth', (c) => {
   return c.redirect('/');
 });
 
-// Read endpoints: gated by API_TOKEN when it is set; open (local dev) when it is not.
+/**
+ * Reads are open; writes are not.
+ *
+ * The dashboard is meant to be opened on a phone, a work laptop or a relative's
+ * tablet without anybody copying a token first, so GET /api/* answers everyone.
+ * What that costs is bounded deliberately: the payloads go through
+ * ./public-view, which strips the vendor identifiers, and nothing here can
+ * change data or spend quota. /api/poll can - it makes live vendor calls - so
+ * it keeps the API_TOKEN gate, and /api/ingest/* keeps its own INGEST_TOKEN.
+ */
 app.use('/api/*', async (c, next) => {
-  // Push endpoints carry their own INGEST_TOKEN check; everything under /api/ingest/ is theirs.
   if (c.req.path === '/api/ingest' || c.req.path.startsWith('/api/ingest/')) return next();
+  if (c.req.method === 'GET') return next();
+
   const token = c.env.API_TOKEN;
-  // No token configured means no gate. That is the documented local-dev
-  // affordance, but it fails open: a deploy that lost the secret would serve
-  // the whole dataset to anyone who found the URL, silently. So it is said out
-  // loud - in the log, and in /api/health, which the dashboard turns into a
-  // banner - rather than left to be discovered.
   if (!token) {
-    console.warn('API_TOKEN is not set: /api/* is unauthenticated');
+    console.warn('API_TOKEN is not set: the write endpoints under /api/* are unauthenticated');
     return next();
   }
   const given = bearer(c.req.header('Authorization')) ?? getCookie(c, COOKIE) ?? '';
@@ -115,9 +121,21 @@ app.use('/api/*', async (c, next) => {
   return next();
 });
 
+/**
+ * A minute of edge caching on the read endpoints.
+ *
+ * The data only moves when the cron does, so a second request inside the same
+ * minute can be answered without touching D1. That is not a nicety: the free
+ * tier's row budget has been exhausted twice by this project already, and a
+ * public URL can be requested by anything at any rate.
+ */
+const CACHE = 'public, max-age=60';
+
 app.get('/api/latest', async (c) => {
   const rows = await latest(c.env.DB);
-  return c.json({ now: nowSec(), inverters: rows });
+  const alias = aliasFor(rows.map((r) => r.id));
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: nowSec(), inverters: publicInverters(rows, alias) });
 });
 
 app.get('/api/series', async (c) => {
@@ -126,7 +144,9 @@ app.get('/api/series', async (c) => {
   if (!Number.isFinite(from) || !Number.isFinite(to) || to - from > 31 * 24 * 3600) {
     return c.json({ error: 'bad range (max 31 days)' }, 400);
   }
-  return c.json({ from, to, points: await series(c.env.DB, from, to) });
+  const [points, ids] = await Promise.all([series(c.env.DB, from, to), inverterIds(c.env.DB)]);
+  c.header('Cache-Control', CACHE);
+  return c.json({ from, to, points: publicRows(points, aliasFor(ids)) });
 });
 
 app.get('/api/health', async (c) => {
@@ -136,10 +156,9 @@ app.get('/api/health', async (c) => {
   // folded out of the same rows. 200 covers well over a day of both feeds.
   const polls = await recentPolls(c.env.DB, 200);
   const feeds = latestPerProvider(polls);
-  // The dashboard turns this into a banner. An unauthenticated deployment is
-  // not something anyone should have to notice for themselves.
   // The footer shows every feed; the table below it wants only the recent few.
-  return c.json({ now: nowSec(), polls: polls.slice(0, 20), feeds, authDisabled: !c.env.API_TOKEN });
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: nowSec(), polls: polls.slice(0, 20), feeds });
 });
 
 /**
@@ -154,7 +173,9 @@ app.get('/api/history', async (c) => {
   if (!Number.isFinite(tz) || Math.abs(tz) > 900) return c.json({ error: 'tz out of range' }, 400);
   const to = nowSec();
   const from = to - days * 86400;
-  return c.json({ now: to, days, rows: await daily(c.env.DB, from, to, tz) });
+  const [rows, ids] = await Promise.all([daily(c.env.DB, from, to, tz), inverterIds(c.env.DB)]);
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: to, days, rows: publicRows(rows, aliasFor(ids)) });
 });
 
 app.post('/api/poll', async (c) => {
@@ -225,7 +246,11 @@ app.post('/api/ingest/devices', async (c) => {
   return c.json({ stored: devices.length, ids: devices.map((d) => d.id) });
 });
 
-app.get('/api/devices', async (c) => c.json({ now: nowSec(), devices: await listDevices(c.env.DB) }));
+app.get('/api/devices', async (c) => {
+  const [devices, ids] = await Promise.all([listDevices(c.env.DB), inverterIds(c.env.DB)]);
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: nowSec(), devices: publicDevices(devices, aliasFor(ids)) });
+});
 
 app.post('/api/ingest/station', async (c) => {
   const token = c.env.INGEST_TOKEN;

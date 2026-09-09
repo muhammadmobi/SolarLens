@@ -13,6 +13,37 @@ the announcement.
 
 ## [Unreleased]
 
+### Changed
+
+- **The dashboard opens without a login.** `GET /api/*` now answers everyone, so
+  the URL works on a phone, a second laptop or a relative's tablet with nothing
+  to copy first. The per-device `/auth?t=<API_TOKEN>` unlock was a tax paid on
+  every new device and forgotten exactly when it mattered — and, because the
+  cookie *is* the token, a token lost from `.dev.vars` locked out every device
+  that had not already been unlocked.
+
+  The cost is bounded rather than accepted. A new `src/public-view.ts` strips
+  vendor identifiers from every response before it leaves the Worker: station
+  and plant ids become positional aliases (`s1`, `s2`), serial numbers are
+  masked to their last four characters, and the stored raw vendor payload is not
+  served at all. The aliases are positional rather than hashed on purpose — a
+  SolarMan station id is eight digits, so a hash of one can be reversed by
+  trying all hundred million of them.
+
+  Nothing readable can spend money or change data: `POST /api/poll` keeps the
+  `API_TOKEN` gate because it makes live vendor calls, and `/api/ingest/*` keeps
+  its own `INGEST_TOKEN`. Read endpoints now send `Cache-Control: public,
+  max-age=60` so a burst is answered at the edge rather than against D1, whose
+  free-tier row budget this project has exhausted twice.
+
+  What this does not hide is the measurements. Anyone with the URL can see
+  generation and consumption, and a consumption curve says when a building is
+  occupied. Sites that mind can put Cloudflare Access in front of the Worker,
+  which covers the `workers.dev` URL and needs no change here.
+
+- Plant names are still published: they are what each system is labelled with on
+  screen. Rename the plant in the vendor portal if yours names a person.
+
 ### Added
 
 - **Light / dark theme toggle** in the top-right corner. Three states — follow
