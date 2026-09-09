@@ -298,6 +298,32 @@ twice is stored once, and whichever machine is awake backfills the part of the
 day the others missed. Two machines with complementary schedules cover far more
 of the day than either alone.
 
+`setup-relay.cmd` still stops three times to ask for the Worker URL, the ingest
+token and the plant ids, which means carrying those values across and typing a
+43-character token correctly. To skip that, generate a personalised installer
+**on the machine that already works**:
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\make-laptop-installer.ps1
+```
+
+It reads those three values out of your `.dev.vars` and writes
+`setup-solarlens-relay.cmd` to your Desktop (or wherever `-OutFile` says) with
+them already filled in. Copy it to the other machine and double-click it: it
+installs what is missing, fetches the code, configures itself, and registers
+the scheduled task without asking you anything.
+
+The one step that stays manual is the SolisCloud login, in the browser window
+it opens. That is not an omission — the relay works by driving a logged-in
+browser session, and no script can type your password into a login form for
+you.
+
+> **The generated file contains your ingest token in plain text.** That is why
+> it is written outside the repository. The token only permits pushing
+> readings — it cannot read your dashboard and cannot reach your Cloudflare
+> account — but carry the file on a USB stick rather than emailing it, and
+> delete it from both machines once the setup is done.
+
 ### `-UseMyChrome`, and why it is not the default
 
 By default the relay runs a Chrome of its own with its own profile. That is not
@@ -500,7 +526,6 @@ solar-lens/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
 │   ├── poll.ts               builds providers from present secrets; polls; plant filter
 │   ├── db.ts                 D1 queries and the Env type
-│   ├── weather.ts            optional Google Weather lookup, cached per site
 │   └── providers/
 │       ├── types.ts          Provider / Inverter / Reading / Metrics
 │       ├── units.ts          W / kWh / timestamp normalisation
@@ -510,7 +535,16 @@ solar-lens/
 │       └── solarman-web.ts   browser-session fallback (refresh token)
 ├── public/index.html         the dashboard (no build step)
 ├── agent/solis-relay.mjs     local Chrome relay for SolisCloud
-├── scripts/                  probe, seed, capture, static server for e2e
+├── setup-relay.cmd           double-click entry point for the relay installer
+├── scripts/
+│   ├── wrangler.mjs             fills CF_D1_DATABASE_ID into a temp config
+│   ├── setup-relay.ps1          installs the relay on a machine, start to finish
+│   ├── make-laptop-installer.ps1  writes a pre-filled installer for a 2nd machine
+│   ├── rotate-tokens.ps1        replaces API_TOKEN / INGEST_TOKEN in both places
+│   ├── probe-solis.mjs          one signed Solis request, raw response printed
+│   ├── seed-local.mjs           a day of synthetic readings for the local DB
+│   ├── capture-portals.mjs      saves portal responses as test fixtures
+│   └── serve-static.mjs         serves public/ for the e2e run
 ├── tests/
 │   ├── unit/units.test.ts       W / kWh / timestamp scaling
 │   ├── unit/normalize.test.ts   both vendor normalisers, signs and statuses
@@ -537,6 +571,10 @@ solar-lens/
 | Deploy: *register a workers.dev subdomain* | One-time account step; follow the printed link or pick a name in the dashboard, then deploy again. |
 | PowerShell: *The token '&&' is not valid* | Run the two commands on separate lines. |
 | A shared plant you don't own shows up | Set `INCLUDE_PLANTS` to the ids you want. |
+| Installer: *503 Backend.max_conn reached* | `raw.githubusercontent.com` is busy — nothing to do with your network or the repository. The generated installer retries five times; otherwise wait a minute and run it again. |
+| Installer: *does not contain a method named 'Fill'* | You are on Windows PowerShell 5.1 and the script is older than this fix. `git pull` and re-run. |
+| Relay stopped after a token change | `INGEST_TOKEN` must match in Cloudflare **and** in `.dev.vars` on every relay machine. Use `scripts\rotate-tokens.ps1` so both move together, then restart the relay. |
+| You have lost `API_TOKEN` or `INGEST_TOKEN` | Cloudflare never reads a secret back. Replace it — see [Replacing a token](#replacing-a-token). |
 
 ## Security and privacy
 
