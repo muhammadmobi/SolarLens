@@ -303,6 +303,76 @@
   .flowstats .v { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 2px; }
   .flowstats .v.import { color: var(--solarman); }
   .flowstats .v.export { color: var(--ok); }
+  /* ---------- overview: one column per system, one screenful ----------
+     The three stacked bands - flow, then figures, then curve, each full width
+     and each repeated per system - came to 2,889px on a 1440x900 laptop, so
+     nothing below the first diagram was visible and the two systems could
+     never be compared. They are columns now. The height is won back mostly by
+     printing each reading once: producing now, house load, grid and battery
+     are in the diagram, so the tiles below it do not repeat them. */
+  .ovgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 16px; }
+  .ovsys {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .ovhead { display: flex; align-items: center; gap: 10px; padding: 13px 18px 10px; text-decoration: none; color: inherit; }
+  .ovhead:hover .ovname { text-decoration: underline; text-underline-offset: 3px; }
+  .ovname { font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--accent); }
+  .ovchip {
+    font-size: 10.5px; padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+    border: 1px solid var(--line); color: var(--muted); background: var(--surface-2);
+  }
+  .ovwhen { margin-left: auto; display: flex; align-items: center; gap: 9px; font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+  /* The diagram absorbs the slack, the chart does not. Two systems differ in
+     how much they have to say - a hybrid has a battery row and a self-powered
+     bar the on-grid inverter does not - and if that difference lands on the
+     charts they end up different heights, which is precisely the comparison
+     this layout exists to make. So the chart is pinned and the diagram, which
+     is a picture and scales happily, takes what is left. */
+  .ovflow {
+    flex: 1 1 auto; min-height: 0; padding: 0 12px;
+    display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  }
+  .ovflow svg { display: block; width: 100%; flex: 1 1 auto; min-height: 0; }
+  .ovtiles {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
+    background: var(--line-soft); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
+    margin-top: 10px; flex: 0 0 auto;
+  }
+  .ovtiles > div { background: var(--surface); padding: 9px 13px 10px; min-width: 0; }
+  .ovtiles .k {
+    color: var(--faint); font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ovtiles .v {
+    font-weight: 700; font-size: 17px; margin-top: 2px; font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ovtiles .v.sm { font-size: 14px; }
+  .ovtiles .v.import { color: var(--solarman); }
+  .ovtiles .v.export { color: var(--ok); }
+  .ovchart { display: block; flex: 0 0 auto; height: clamp(150px, 23vh, 210px); padding: 4px 10px 8px; text-decoration: none; }
+  .ovchart svg { display: block; width: 100%; height: 100%; }
+
+  /* Four tiles across needs about 150px each to hold "Discharged today" and a
+     five-digit lifetime figure without truncating. Below that, two. */
+  @media (max-width: 720px) {
+    .ovtiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ovhead { flex-wrap: wrap; }
+    .ovwhen { margin-left: 0; }
+  }
+
+  /* Wide screens get the whole thing in one screenful; narrow ones stack the
+     columns and scroll, because there is no honest way to fit two systems on
+     a phone. 1080px is where two 430px columns plus the gap stop fitting. */
+  @media (min-width: 1080px) {
+    body.ovfit { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+    body.ovfit .wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; max-width: 1560px; padding-bottom: 0; }
+    body.ovfit #view { flex: 1 1 auto; min-height: 0; display: flex; }
+    body.ovfit .ovgrid { flex: 1 1 auto; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    body.ovfit footer { margin: 10px 0 12px; }
+  }
+
   .chartgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px 22px; }
   .chartmini { min-width: 0; }
   .chartmini .combined { height: 200px; }
@@ -547,6 +617,7 @@
   const battText = (v) => v === null || v === undefined ? '—'
     : Math.abs(v) < 50 ? 'idle' : v >= 0 ? `charging ${fmtWs(v)}` : `discharging ${fmtWs(-v)}`;
 
+  /** The battery donut on the system detail page. */
   function ring(soc) {
     const r = 21, c = 2 * Math.PI * r, off = c * (1 - Math.min(100, Math.max(0, soc)) / 100);
     return `<svg class="ring" viewBox="0 0 54 54" aria-hidden="true">
@@ -729,8 +800,17 @@
   }
 
   /** One system's own day curve, drawn at chart size rather than sparkline size. */
-  function systemChart(inv, pts, id) {
-    const W = 1000, H = 230, L = 62, R = 16, T = 26, B = 30;
+  /**
+   * A day curve with both axes labelled.
+   *
+   * The height argument is a viewBox height, not a pixel size: the SVG scales
+   * to whatever box CSS gives it, and the aspect ratio decides how much of that
+   * box it fills. Drawn 1000x230 inside a half-width column, the curve comes
+   * out short and floating in empty space, so the overview asks for a taller
+   * ratio than the full-width Power tab needs.
+   */
+  function systemChart(inv, pts, id, viewH = 230) {
+    const W = 1000, H = viewH, L = 62, R = 16, T = 26, B = 30;
     const t0 = startOfToday(), t1 = t0 + 86400;
     const c = colorFor(inv.provider);
     if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
@@ -829,92 +909,7 @@
   }
 
   // ---------- overview ----------
-  /** The figure set shown inside each system card on the overview. */
-  function flowStats(inv, omitBattery = false) {
-    const m = parse(inv.metrics) ?? {};
-    const devs = devicesFor(inv);
-    const invDev = devs.find((d) => d.kind === 'inverter');
-    const logger = devs.find((d) => d.kind === 'datalogger');
-    const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
-    const strings = parse(invDev?.strings);
-    const g = inv.grid_power_w;
-    const stat = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls ?? ''}">${v}</div></div>`;
-    const cells = [
-      stat('Produced today', fmtKwh(inv.today_kwh)),
-      m.genMonthKwh != null ? stat('This month', fmtKwh(m.genMonthKwh)) : '',
-      stat('Lifetime', fmtKwh(inv.total_kwh)),
-      stat('Grid', g == null ? '—' : (g >= 0 ? `↓ ${fmtWs(g)}` : `↑ ${fmtWs(-g)}`), g > 0 ? 'import' : g < 0 ? 'export' : ''),
-      stat('House load', fmtWs(inv.load_power_w)),
-      // The card shows a battery ring already, so the figure would be a repeat.
-      !omitBattery && hasBattery(inv, m) ? stat('Battery', `${inv.battery_soc != null ? Math.round(inv.battery_soc) + '% · ' : ''}${battText(inv.battery_power_w)}`) : '',
-      (() => {
-        if (!strings || !strings.length) return '';
-        const live = strings.filter((x) => (x.powerW ?? 0) > 0).length;
-        // "2 producing" was counting an unused MPPT input as a working string.
-        return stat('PV strings', live === strings.length ? `${live} producing` : `${live} of ${strings.length} producing`);
-      })(),
-      tempC != null ? stat('Temperature', `${tempC.toFixed(1)} °C`) : '',
-      (() => { const b = parse(invDev?.battery); return b?.tempC != null ? stat('Battery temp', `${b.tempC} °C`) : ''; })(),
-      invDev?.model ? stat('Model', esc(invDev.model)) : '',
-      logger ? stat('Datalogger', esc(signalLabel(logger))) : '',
-    ].filter(Boolean).join('');
-    return `<div class="flowstats">${cells}</div>`;
-  }
-
-  function sysCard(inv, pts) {
-    const st = statusOf(inv);
-    const [pv, pu] = fmtW(inv.ac_power_w);
-    const m = parse(inv.metrics);
-    const accent = colorFor(inv.provider);
-    const g = inv.grid_power_w;
-    return `<a class="sys" style="--accent:${accent}" href="#/system/${encodeURIComponent(inv.id)}">
-      <div class="sys-head">
-        <div>
-          <div class="vendor">${esc(providerName(inv.provider))}</div>
-          <div class="sys-name">${esc(inv.name)}</div>
-          <div class="sys-plant">${esc(inv.plant_name && inv.plant_name !== inv.name ? inv.plant_name : '')}</div>
-        </div>
-        <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
-      </div>
-      <div class="herolabel">Producing now</div>
-      <div class="hero">
-        <span class="val">${pv}</span><span class="unit">${pu}</span>
-        <span class="cap">${inv.capacity_w ? `of ${fmtWs(inv.capacity_w)} rated` : ''}</span>
-      </div>
-      <div class="freshness ${st.stale ? 'stale' : ''}"${inv.ts ? ` title="${esc(when(inv.ts))}"` : ''}>${inv.ts ? (st.stale ? `⚠ last update ${ago(inv.ts)}` : `updated ${ago(inv.ts)}`) : ''}</div>
-      ${flowStats(inv, true)}
-      ${battPanel(inv, m)}
-    </a>`;
-  }
-
-  /**
-   * The battery at a glance: charge level, what it is doing right now, how warm
-   * it is, and today's two energy figures. A hybrid's pack is half the story of
-   * the system, so the overview card says more about it than a bare wattage.
-   */
-  function battPanel(inv, m) {
-    if (!hasBattery(inv, m)) return '';
-    const bat = parse(devicesFor(inv).find((d) => d.kind === 'inverter')?.battery);
-    const state = inv.battery_power_w == null ? null
-      : inv.battery_power_w > 50 ? 'charging'
-      : inv.battery_power_w < -50 ? 'discharging' : 'idle';
-    const rows = [
-      // The heading already says charging/discharging/idle, so this row carries
-      // the number: signed, + into the pack and - out of it.
-      ['Power', inv.battery_power_w == null ? '—'
-        : `${inv.battery_power_w > 0 ? '+' : '−'}${fmtWs(Math.abs(inv.battery_power_w))}`],
-      bat?.tempC != null ? ['Pack temperature', `${bat.tempC} °C`] : null,
-      m.battChargeTodayKwh != null ? ['Charged today', fmtKwh(m.battChargeTodayKwh)] : null,
-      m.battDischargeTodayKwh != null ? ['Discharged today', fmtKwh(m.battDischargeTodayKwh)] : null,
-    ].filter(Boolean);
-    return `<div class="batt">
-      ${ring(inv.battery_soc ?? 0)}
-      <div class="battinfo">
-        <div class="k">Battery${state ? ` · ${state}` : ''}</div>
-        <div class="battgrid">${rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${v}</b></div>`).join('')}</div>
-      </div>
-    </div>`;
-  }
+  // ---------- overview ----------
 
   /**
    * Two curves that sit almost on top of each other are two curves you cannot
@@ -1001,6 +996,66 @@
     }
   }
 
+  /**
+   * The figures under a system's flow diagram on the overview.
+   *
+   * Deliberately not everything the system knows. Producing now, house load,
+   * grid direction and battery charge are all drawn in the diagram directly
+   * above, and repeating them as figures is what made the old figures band
+   * taller than the window. Model and datalogger signal are gone too: they
+   * never change, and the Devices tab is where hardware belongs.
+   *
+   * The count is trimmed to a multiple of four so the grid never ends in a
+   * ragged row. A hybrid has five battery figures and so keeps twelve; an
+   * on-grid inverter has none and keeps eight. What gets cut when a system
+   * carries more than twelve is the tail of the shared list, which is ordered
+   * with the most-looked-at first.
+   */
+  function overviewTiles(inv, pts) {
+    const m = parse(inv.metrics) ?? {};
+    const devs = devicesFor(inv);
+    const invDev = devs.find((d) => d.kind === 'inverter');
+    const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
+    const strings = parse(invDev?.strings);
+    const bat = parse(invDev?.battery);
+    const tile = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls ?? ''}">${v}</div></div>`;
+
+    const peak = pts.reduce((best, p) => (p.ac_power_w ?? 0) > (best?.ac_power_w ?? -1) ? p : best, null);
+
+    const core = [
+      tile('Produced today', fmtKwh(inv.today_kwh)),
+      m.genMonthKwh != null ? tile('This month', fmtKwh(m.genMonthKwh)) : '',
+      inv.total_kwh != null ? tile('Lifetime', fmtKwh(inv.total_kwh)) : '',
+      peak && peak.ac_power_w ? tile('Peak today', `<span title="at ${esc(when(peak.ts))}">${fmtWs(peak.ac_power_w)}</span>`) : '',
+      // Yield divided by rated power: the one figure that compares a 12 kW
+      // array with a 3.5 kW one fairly, which is the whole point of this page.
+      m.fullLoadHours != null ? tile('Full-load hours', `${Number(m.fullLoadHours).toFixed(2)} h`) : '',
+      (() => {
+        if (!strings || !strings.length) return '';
+        const live = strings.filter((x) => (x.powerW ?? 0) > 0).length;
+        return tile('PV strings', live === strings.length ? `${live} producing` : `${live} of ${strings.length}`, 'sm');
+      })(),
+      tempC != null ? tile('Inverter temp', `${tempC.toFixed(1)} °C`) : '',
+      m.genYearKwh != null ? tile('This year', fmtKwh(m.genYearKwh)) : '',
+    ].filter(Boolean);
+
+    const batt = !hasBattery(inv, m) ? [] : [
+      m.selfUseTodayKwh != null ? tile('Self-use today', fmtKwh(m.selfUseTodayKwh)) : '',
+      // "23 W out" rather than "−23 W": a minus sign makes the reader work out
+      // which way the power is going.
+      inv.battery_power_w != null ? tile('Battery power', Math.abs(inv.battery_power_w) < 50 ? 'idle'
+        : `${fmtWs(Math.abs(inv.battery_power_w))} ${inv.battery_power_w > 0 ? 'in' : 'out'}`) : '',
+      bat?.tempC != null ? tile('Battery temp', `${bat.tempC} °C`) : '',
+      m.battChargeTodayKwh != null ? tile('Charged today', fmtKwh(m.battChargeTodayKwh)) : '',
+      m.battDischargeTodayKwh != null ? tile('Discharged today', fmtKwh(m.battDischargeTodayKwh)) : '',
+    ].filter(Boolean);
+
+    const target = Math.min(12, Math.floor((core.length + batt.length) / 4) * 4);
+    const cells = [...core.slice(0, Math.max(0, target - batt.length)), ...batt];
+    if (!cells.length) return '';
+    return `<div class="ovtiles">${cells.join('')}</div>`;
+  }
+
   function renderOverview() {
     const invs = state.latest?.inverters ?? [];
     const byInv = {};
@@ -1010,35 +1065,27 @@
       return;
     }
 
-    // Each system gets its own box in every band, so two systems are never
-    // squeezed into one card: flow first, then the figures, then the curve.
-    const band = (title, inner) =>
-      `<h2 class="band">${esc(title)}</h2><div class="sysgrid">${inner}</div>`;
-
-    const boxTitle = (inv) =>
-      `<div class="mini-name" style="color:${colorFor(inv.provider)}">${esc(inv.name)}</div>`;
-
-    const flows = invs.map((inv) => {
+    const cols = invs.map((inv, i) => {
       const st = statusOf(inv);
-      return `<a class="flowlink" href="#/system/${encodeURIComponent(inv.id)}">
-      <section class="card"><div class="body">
-        ${boxTitle(inv)}
+      const pts = byInv[inv.id] || [];
+      const m = parse(inv.metrics) ?? {};
+      return `<section class="ovsys" style="--accent:${colorFor(inv.provider)}">
+        <a class="ovhead" href="#/system/${encodeURIComponent(inv.id)}">
+          <span class="ovname">${esc(inv.name)}</span>
+          <span class="ovchip">${inv.capacity_w ? `${esc(fmtWs(inv.capacity_w))} · ` : ''}${esc(providerName(inv.provider))}</span>
+          <span class="ovwhen">
+            <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
+            ${inv.ts ? `<span${` title="${esc(when(inv.ts))}"`}>${esc(ago(inv.ts))}</span>` : ''}
+          </span>
+        </a>
         ${st.offline ? `<div class="flowstale">⚠ offline · last update ${esc(inv.ts ? `${when(inv.ts)} (${ago(inv.ts)})` : 'never')}</div>` : ''}
-        ${flowSvg(inv, parse(inv.metrics) ?? {})}
-      </div></section></a>`;
+        <div class="ovflow">${flowSvg(inv, m)}</div>
+        ${overviewTiles(inv, pts)}
+        <a class="ovchart" href="#/power">${systemChart(inv, pts, 'ov' + i, 330)}</a>
+      </section>`;
     }).join('');
 
-    const charts = invs.map((inv, i) => `<a class="flowlink" href="#/power">
-      <section class="card"><div class="body">
-        ${boxTitle(inv)}${systemChart(inv, byInv[inv.id] || [], 'ov' + i)}
-      </div></section></a>`).join('');
-
-    const cards = invs.map((inv) => sysCard(inv, byInv[inv.id] || [])).join('');
-
-    $('view').innerHTML =
-      band('Energy flow', flows) +
-      band('Systems', cards) +
-      band('Today · AC output', charts);
+    $('view').innerHTML = `<div class="ovgrid">${cols}</div>`;
   }
 
   // ---------- alerts ----------
@@ -1643,6 +1690,7 @@
   function route() {
     const hash = location.hash || '#/';
     for (const a of $('nav').children) a.classList.toggle('on', a.getAttribute('href') === hash);
+    document.body.classList.remove('ovfit');
     if (state.error === 'unauthorized') {
       // Reads are public, so this should not happen. It is kept because a
       // deployment mid-rollout can still answer 401, and a blank page would
@@ -1658,8 +1706,19 @@
     if (hash === '#/history') return renderHistory();
     // The Flow tab is gone: its diagrams live on the overview now, but an
     // old bookmark should still land somewhere sensible.
-    if (hash === '#/flow') { location.replace('#/'); return renderOverview(); }
+    if (hash === '#/flow') { location.replace('#/'); return overviewRoute(); }
     if (hash === '#/power') return renderPower();
+    overviewRoute();
+  }
+
+  /**
+   * Only the overview claims the whole window. Every other tab is a list that
+   * can legitimately be longer than the screen, so the class goes on for this
+   * route and comes off for the rest - a body locked to 100vh on the Devices
+   * tab would simply hide rows.
+   */
+  function overviewRoute() {
+    document.body.classList.add('ovfit');
     renderOverview();
   }
 

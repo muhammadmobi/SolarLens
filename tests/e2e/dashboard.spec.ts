@@ -159,20 +159,21 @@ test.describe('Overview', () => {
     await stubApi(page);
     await page.goto('/');
 
-    const panels = page.locator('a.sys');
+    const panels = page.locator('.ovsys');
     await expect(panels).toHaveCount(2);
     await expect(panels.nth(0)).toContainText('SolisCloud');
     await expect(panels.nth(0)).toContainText('Demo Solis Plant');
-    await expect(panels.nth(0).locator('.hero .val')).toHaveText('5.08');
-    await expect(panels.nth(0).locator('.hero .unit')).toHaveText('kW');
-    await expect(panels.nth(0)).toContainText('5.08 kW');
+    // Producing now is drawn in the diagram and nowhere else. It used to be
+    // there and repeated as a figure below, which is most of why the old
+    // three-band overview came out taller than the window.
+    await expect(panels.nth(0).locator('svg.flow')).toContainText('5.08 kW');
+    await expect(panels.nth(0).locator('.ovtiles')).not.toContainText('Producing now');
 
     await expect(panels.nth(1)).toContainText('SolarMan');
-    await expect(panels.nth(1).locator('.hero .val')).toHaveText('278');
+    await expect(panels.nth(1).locator('svg.flow')).toContainText('278 W');
     await expect(panels.nth(1)).toContainText('91 W');
     // A few watts of battery drift renders as idle, not as discharging.
     await expect(panels.nth(1)).toContainText('idle');
-    await expect(panels.nth(1).locator('.ring text')).toHaveText('100%');
 
     await expect(page.locator('#fleet-power')).toHaveText('5.36 kW');
     // The word "today" is now a label above the figure, not part of it.
@@ -186,17 +187,37 @@ test.describe('Overview', () => {
     await expect(page.locator('#poll-status')).toContainText('SolarMan ok');
   });
 
-  test('only the hybrid shows a battery ring; the on-grid plant has none', async ({ page }) => {
+  test('only the hybrid gets battery tiles; the on-grid plant gets none', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await expect(page.locator('a.sys').nth(0).locator('.batt')).toHaveCount(0);
-    await expect(page.locator('a.sys').nth(1).locator('.batt')).toHaveCount(1);
+    const tiles = (n: number) => page.locator('.ovsys').nth(n).locator('.ovtiles');
+    await expect(tiles(0)).not.toContainText('Battery');
+    await expect(tiles(1)).toContainText('Battery power');
+    await expect(tiles(1)).toContainText('Charged today');
+    await expect(tiles(1)).toContainText('Discharged today');
+    // Four across, and trimmed to a multiple of four so the grid never ends in
+    // a ragged row: eight for the on-grid inverter, twelve once there is a
+    // battery to describe.
+    await expect(tiles(0).locator('> div')).toHaveCount(8);
+    await expect(tiles(1).locator('> div')).toHaveCount(12);
+  });
+
+  test('the whole overview fits one screen, which is the point of the layout', async ({ page }, testInfo) => {
+    await stubApi(page);
+    await page.goto('/');
+    await expect(page.locator('.ovsys')).toHaveCount(2);
+    const fits = await page.evaluate(() =>
+      document.documentElement.scrollHeight <= window.innerHeight + 2);
+    // Two systems side by side need the width for it. A phone stacks and
+    // scrolls, and pretending otherwise would mean hiding readings.
+    if (testInfo.project.name === 'mobile') expect(fits).toBe(false);
+    else expect(fits).toBe(true);
   });
 
   test('renders the divider layout: side by side on desktop, stacked on narrow screens', async ({ page }, testInfo) => {
     await stubApi(page);
     await page.goto('/');
-    const [a, b] = await page.locator('a.sys').all();
+    const [a, b] = await page.locator('.ovsys').all();
     const ba = await a.boundingBox();
     const bb = await b.boundingBox();
     expect(ba && bb).toBeTruthy();
@@ -211,13 +232,12 @@ test.describe('Overview', () => {
   test('a system whose sample is older than 15 minutes reads offline', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
     await page.goto('/');
-    const solis = page.locator('a.sys').nth(0);
-    await expect(solis.locator('.freshness')).toContainText('last update');
+    const solis = page.locator('.ovsys').nth(0);
+    await expect(solis.locator('.flowstale')).toContainText('last update');
     await expect(solis.locator('.pill')).toHaveClass(/warn/);
     await expect(solis.locator('.pill')).toHaveText('offline');
     // Offline output is zero, not the 5.08 kW it managed before it dropped.
-    await expect(solis.locator('.hero .val')).toHaveText('0');
-    await expect(solis.locator('.herolabel')).toHaveText('Producing now');
+    await expect(solis.locator('svg.flow')).toContainText('0 W');
   });
 
   test('the vendor calling a plant offline is enough on its own', async ({ page }) => {
@@ -225,9 +245,9 @@ test.describe('Overview', () => {
     // the datalogger drops, well before our own staleness window runs out.
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 60, status: 'offline' } }) });
     await page.goto('/');
-    const solis = page.locator('a.sys').nth(0);
+    const solis = page.locator('.ovsys').nth(0);
     await expect(solis.locator('.pill')).toHaveText('offline');
-    await expect(solis.locator('.hero .val')).toHaveText('0');
+    await expect(solis.locator('svg.flow')).toContainText('0 W');
   });
 
   test('an offline system counts as zero in the fleet total and is named', async ({ page }) => {
@@ -266,10 +286,12 @@ test.describe('Overview', () => {
     await expect(page.locator('#poll-status')).toContainText('HTTP 401');
   });
 
-  test('explains the token gate when the API answers 401', async ({ page }) => {
+  test('says something useful when the API answers 401', async ({ page }) => {
+    // Reads are public now, so this only happens against a deployment older
+    // than that change - but a blank page would say nothing about why.
     await stubApi(page, { status: 401 });
     await page.goto('/');
-    await expect(page.locator('.empty')).toContainText('/auth?t=');
+    await expect(page.locator('.empty')).toContainText('refused this request');
     await expect(page.locator('#updated')).toHaveText('unauthorized');
   });
 
@@ -572,14 +594,16 @@ test.describe('Battery', () => {
   test('the overview panel says charge level, what the pack is doing, and how warm it is', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    const batt = page.locator('a.sys').nth(1).locator('.batt');
-    await expect(batt.locator('.ring text')).toHaveText('100%');
-    // A pack drifting a few watts is idle, and the heading says so.
-    await expect(batt.locator('.k')).toHaveText('Battery · idle');
-    await expect(batt).toContainText('Pack temperature');
-    await expect(batt).toContainText('32.5 °C');
-    await expect(batt).toContainText('Charged today');
-    await expect(batt).toContainText('0.6 kWh');
+    const sys = page.locator('.ovsys').nth(1);
+    // Charge level and what the pack is doing are in the diagram; the tiles
+    // carry the figures a picture cannot show.
+    await expect(sys.locator('svg.flow')).toContainText('100%');
+    await expect(sys.locator('svg.flow')).toContainText('idle');
+    const tiles = sys.locator('.ovtiles');
+    await expect(tiles).toContainText('Battery temp');
+    await expect(tiles).toContainText('32.5 °C');
+    await expect(tiles).toContainText('Charged today');
+    await expect(tiles).toContainText('0.6 kWh');
   });
 
   test('derives equivalent full cycles and labels them as derived', async ({ page }) => {
@@ -741,26 +765,30 @@ test.describe('Weather', () => {
 });
 
 test.describe('Energy flow on the overview', () => {
-  test('each system gets its own flow box, in its own band, before the figures', async ({ page }) => {
+  test('each system is one column: diagram, then figures, then its day curve', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    const bands = page.locator('h2.band');
-    await expect(bands).toHaveText(['Energy flow', 'Systems', 'Today · AC output']);
-    // One diagram per system, each in its own card rather than sharing one.
+    // The three full-width bands are gone. Each system owns a column, and the
+    // order inside it is the order you read: the picture, the numbers, the day.
+    await expect(page.locator('h2.band')).toHaveCount(0);
+    await expect(page.locator('.ovsys')).toHaveCount(2);
     await expect(page.locator('svg.flow')).toHaveCount(2);
+    const order = await page.locator('.ovsys').nth(0).evaluate((el) =>
+      [...el.children].map((c) => c.className.split(' ')[0]));
+    expect(order).toEqual(['ovhead', 'ovflow', 'ovtiles', 'ovchart']);
   });
 
   test('an offline system draws a dead diagram and says why', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { ts: NOW - 3600 } }) });
     await page.goto('/');
-    const box = page.locator('a.flowlink').nth(0);
+    const box = page.locator('.ovsys').nth(0);
     await expect(box.locator('.flowstale')).toContainText('offline');
     await expect(box.locator('.flowstale')).toContainText('last update');
     // Every arm now carries a real zero, so nothing is drawn live and no pip
     // travels: the picture agrees with the figures instead of contradicting them.
     await expect(box.locator('svg.flow .wire.live')).toHaveCount(0);
     await expect(box.locator('svg.flow .pip')).toHaveCount(0);
-    await expect(page.locator('a.flowlink').nth(1).locator('svg.flow .pip').first()).toBeVisible();
+    await expect(page.locator('.ovsys').nth(1).locator('svg.flow .pip').first()).toBeVisible();
   });
 
   test('the flow tab is gone and an old #/flow link lands on the overview', async ({ page }) => {
@@ -768,7 +796,7 @@ test.describe('Energy flow on the overview', () => {
     await page.goto('/');
     await expect(page.locator('nav a')).toHaveText([/Overview/, /Power/, /Historical Data/, /Alerts/, /Devices/]);
     await page.goto('/#/flow');
-    await expect(page.locator('h2.band').first()).toHaveText('Energy flow');
+    await expect(page.locator('.ovsys')).toHaveCount(2);
   });
 
   test('both systems draw at the same size, whatever hardware they have', async ({ page }) => {
@@ -781,12 +809,17 @@ test.describe('Energy flow on the overview', () => {
     // card just looks cut off beside the taller one.
     expect(new Set(boxes).size).toBe(1);
 
-    // Matching heights is a same-row property: stacked on a phone, the hybrid's
-    // card is taller because it carries a self-powered bar, and that is fine.
-    const rects = await page.locator('a.flowlink').evaluateAll(
+    // Side by side, the two columns match and so do their charts. The hybrid
+    // has more to say - a battery row and a self-powered bar - and that
+    // difference is absorbed by the diagram, deliberately, because two charts
+    // of different heights are the one thing this layout must not produce.
+    const rects = await page.locator('.ovsys').evaluateAll(
       (els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ y: Math.round(r.y), h: Math.round(r.height) })));
     if (Math.abs(rects[0].y - rects[1].y) < 2) {
       expect(Math.abs(rects[0].h - rects[1].h)).toBeLessThanOrEqual(2);
+      const charts = await page.locator('.ovchart').evaluateAll(
+        (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+      expect(Math.abs(charts[0] - charts[1])).toBeLessThanOrEqual(2);
     } else {
       expect(rects[1].y).toBeGreaterThan(rects[0].y + rects[0].h - 2); // stacked
     }
@@ -799,13 +832,13 @@ test.describe('Energy flow on the overview', () => {
     // 5.08 kW of a 12 kW array; 278 W of a 3.5 kW one. The percentage is what
     // makes those two comparable at a glance, so it rides on the title.
     await expect(labels.nth(0)).toHaveText('Solar · 42%');
-    await expect(page.locator('a.flowlink').nth(1).locator('.lbl').first()).toHaveText('Solar · 8%');
+    await expect(page.locator('.ovsys').nth(1).locator('.lbl').first()).toHaveText('Solar · 8%');
   });
 
   test('no percentage where there is no rating to divide by', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { capacity_w: null } }) });
     await page.goto('/');
-    await expect(page.locator('a.flowlink').nth(0).locator('.lbl').first()).toHaveText('Solar');
+    await expect(page.locator('.ovsys').nth(0).locator('.lbl').first()).toHaveText('Solar');
   });
 
   test('each diagram owns its arrow markers, so accents cannot leak', async ({ page }) => {
@@ -826,19 +859,19 @@ test.describe('Energy flow on the overview', () => {
     expect(dangling).toEqual([]);
   });
 
-  test('a flow box opens that system detail', async ({ page }) => {
+  test('a column header opens that system detail', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await page.locator('a.flowlink').first().click();
+    await page.locator('.ovhead').first().click();
     await expect(page).toHaveURL(/#\/system\//);
     await expect(page.locator('.card h3')).toContainText(['Identity & hardware']);
   });
 
-  test('clicking a system card still opens its detail', async ({ page }) => {
+  test('the day curve links through to the Power tab, where it is full width', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await page.locator('a.sys').nth(0).click();
-    await expect(page).toHaveURL(/#\/system\//);
+    await page.locator('.ovchart').first().click();
+    await expect(page).toHaveURL(/#\/power/);
   });
 });
 test.describe('AC output page', () => {
@@ -848,18 +881,18 @@ test.describe('AC output page', () => {
     // Overlapping curves hide each other, so each system gets its own box.
     await expect(page.locator('svg.combined')).toHaveCount(2);
     await expect(page.locator('#combined')).toHaveCount(0);
-    const charts = page.locator('h2.band').filter({ hasText: 'AC output' })
-      .locator('xpath=following-sibling::div[1]').locator('a.flowlink');
+    // One curve per column, each inside the system it belongs to.
+    const charts = page.locator('.ovchart');
     await expect(charts).toHaveCount(2);
-    await expect(charts.nth(0)).toContainText('Demo Solis Plant');
-    await expect(charts.nth(1)).toContainText('Demo Hybrid');
+    await expect(page.locator('.ovsys').nth(0)).toContainText('Demo Solis Plant');
+    await expect(page.locator('.ovsys').nth(1)).toContainText('Demo Hybrid');
   });
 
   test('has its own nav entry and draws the combined day chart', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
     // The overview's chart boxes link through to the full page.
-    await expect(page.locator('a.flowlink[href="#/power"]').first()).toBeVisible();
+    await expect(page.locator('a.ovchart[href="#/power"]').first()).toBeVisible();
     await page.locator('nav').getByRole('link', { name: 'Power', exact: true }).click();
     await expect(page).toHaveURL(/#\/power$/);
     await expect(page.locator('#legend .legitem')).toContainText(['Demo Solis Plant', 'Demo Hybrid', 'Fleet total']);
@@ -905,11 +938,11 @@ test.describe('System detail', () => {
   test('opens from a panel and keeps a linkable URL', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await page.locator('a.sys').nth(0).click();
+    await page.locator('.ovhead').nth(0).click();
     await expect(page).toHaveURL(/#\/system\//);
     await expect(page.locator('.sys-name')).toContainText('Demo Solis Plant');
     await page.locator('a.back').click();
-    await expect(page.locator('a.sys')).toHaveCount(2);
+    await expect(page.locator('.ovsys')).toHaveCount(2);
   });
 
   test('on-grid system: hardware, datalogger, PV strings, and no battery block', async ({ page }) => {
