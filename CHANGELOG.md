@@ -15,6 +15,39 @@ the announcement.
 
 ### Changed
 
+- **The overview is one screenful.** It was three full-width bands — energy
+  flow, then figures, then the day curve — each repeated per system, which came
+  to 2,889px of page in a 794px window on a 1440×900 laptop. Nothing below the
+  first diagram was visible without scrolling, and the two systems could never
+  be seen at once, which is the entire reason for putting them on one page.
+
+  Each system is a column now: its diagram, its figures, its curve. Most of the
+  height comes back not from dropping readings but from **printing each one
+  once** — producing now, house load, grid direction and battery charge were
+  drawn in the diagram and then repeated as figures underneath it, which is
+  most of what made the figures band 1,002px tall.
+
+  The figures are tiles, four across, trimmed to a multiple of four so the grid
+  never ends in a ragged row: eight for an on-grid inverter, twelve once there
+  is a battery to describe. **This year** and **full-load hours** appear for the
+  first time — both were already in the database, and full-load hours is the one
+  figure that compares a 12 kW array with a 3.5 kW one fairly. **Model** and
+  **datalogger signal** are gone from this page: they never change, and the
+  Devices tab is where hardware belongs.
+
+  The two systems do not have the same amount to say, and that difference is
+  absorbed by the diagram rather than the chart, so both day curves are drawn at
+  exactly the same height. Two charts of different sizes side by side are the
+  one thing a comparison layout must not produce.
+
+  Only this tab claims the whole window. Every other one is a list that can
+  legitimately run longer than the screen. Below 1080px the columns stack and
+  the page scrolls again — two systems will not fit on a phone, and pretending
+  otherwise would mean hiding readings.
+
+  `sysCard`, `flowStats` and `battPanel` existed only to draw the band this
+  replaces, and are removed with it.
+
 - **The dashboard opens without a login.** `GET /api/*` now answers everyone, so
   the URL works on a phone, a second laptop or a relative's tablet with nothing
   to copy first. The per-device `/auth?t=<API_TOKEN>` unlock was a tax paid on
