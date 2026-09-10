@@ -37,7 +37,7 @@ function inverters(overrides: Partial<Record<'solis' | 'solarman', Record<string
       metrics: metrics({ genMonthKwh: 70.9, genYearKwh: 4002.1, genTotalKwh: 7450.8, loadTodayKwh: 4.8, loadTotalKwh: 6691.7,
         gridImportTodayKwh: 2.4, gridExportTodayKwh: 10.7, gridImportTotalKwh: 4699.2, gridExportTotalKwh: 4686.7,
         battChargeTodayKwh: 0.6, battDischargeTodayKwh: 0, battChargeTotalKwh: 1100.1, battDischargeTotalKwh: 354.3,
-        selfUseTodayKwh: 3, batteryStatus: 'STATIC', gridStatus: 'PURCHASE' }),
+        selfUseTodayKwh: 3, fullLoadHours: 4.94, batteryStatus: 'STATIC', gridStatus: 'PURCHASE' }),
       raw: JSON.stringify({ generationPower: 278, usePower: 307, batterySoc: 100, networkStatus: 'NORMAL' }),
       ...(overrides.solarman ?? {}),
     },
@@ -223,7 +223,7 @@ test.describe('Overview', () => {
 
     // A short window cannot hold a diagram, twelve figures and a readable
     // curve at once, so it scrolls rather than squeezing them into each other.
-    await page.setViewportSize({ width: 1440, height: 700 });
+    await page.setViewportSize({ width: 1440, height: 560 });
     await page.reload();
     await expect(page.locator('.ovsys')).toHaveCount(2);
     expect(await fits()).toBe(false);

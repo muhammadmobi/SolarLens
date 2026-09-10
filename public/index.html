@@ -342,7 +342,7 @@
     flex: 0 0 auto; padding: 0 12px;
     display: flex; flex-direction: column; gap: 4px;
   }
-  .ovflow svg { display: block; width: 100%; height: clamp(150px, 25vh, 236px); }
+  .ovflow svg { display: block; width: 100%; height: clamp(112px, 23vh, 236px); }
   .ovtiles {
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
     background: var(--line-soft); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
@@ -353,7 +353,7 @@
     grid-auto-rows: minmax(0, 1fr);
   }
   .ovtiles > div {
-    background: var(--surface); padding: 9px 13px 10px; min-width: 0;
+    background: var(--surface); padding: 7px 13px 8px; min-width: 0;
     display: flex; flex-direction: column; justify-content: center;
   }
   .ovtiles .k {
@@ -364,10 +364,13 @@
     font-weight: 700; font-size: 17px; margin-top: 2px; font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  /* The unit is not the figure. Setting it smaller and quieter lets a column
+     of tiles read as numbers instead of as a wall of text. */
+  .ovtiles .v small { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-left: 1px; }
   .ovtiles .v.sm { font-size: 14px; }
   .ovtiles .v.import { color: var(--solarman); }
   .ovtiles .v.export { color: var(--ok); }
-  .ovchart { display: block; flex: 0 0 auto; height: clamp(150px, 23vh, 210px); padding: 4px 10px 8px; text-decoration: none; }
+  .ovchart { display: block; flex: 0 0 auto; height: clamp(118px, 21vh, 210px); padding: 4px 10px 8px; text-decoration: none; }
   .ovchart svg { display: block; width: 100%; height: 100%; }
 
   /* Four tiles across needs about 150px each to hold "Discharged today" and a
@@ -385,7 +388,7 @@
      one the diagram, twelve figures and a readable curve genuinely do not go
      together, and squeezing them until they collide is worse than a short
      scroll. */
-  @media (min-width: 1080px) and (min-height: 820px) {
+  @media (min-width: 1080px) and (min-height: 660px) {
     body.ovfit { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
     body.ovfit .wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; max-width: 1560px; padding-bottom: 0; }
     body.ovfit #view { flex: 1 1 auto; min-height: 0; display: flex; }
@@ -1038,36 +1041,52 @@
     const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
     const strings = parse(invDev?.strings);
     const bat = parse(invDev?.battery);
+    // The unit is set smaller and quieter than the figure, so a column of
+    // tiles reads as numbers rather than as a wall of text.
+    // The space is inside the tag on purpose: it keeps the text "0.6 kWh"
+    // when the tile is read out, copied, or asserted on in a test.
+    const num = (v, unit) => `${v}<small> ${esc(unit)}</small>`;
     const tile = (k, v, cls) => `<div><div class="k">${esc(k)}</div><div class="v ${cls ?? ''}">${v}</div></div>`;
+
+    // kWh past four digits is unreadable at a glance; 49.1 MWh is not.
+    const energy = (k) => k === null || k === undefined ? '—'
+      : k >= 1000 ? num((k / 1000).toFixed(k >= 10000 ? 1 : 2), 'MWh')
+      : num(k >= 100 ? k.toFixed(0) : k.toFixed(1), 'kWh');
+    const power = (w) => { const [v, u] = fmtW(w); return num(v, u); };
 
     const peak = pts.reduce((best, p) => (p.ac_power_w ?? 0) > (best?.ac_power_w ?? -1) ? p : best, null);
 
+    // A hybrid has five battery figures to add, and four rows would not fit,
+    // so it gives up the least-consulted of the three long-run totals. Dropping
+    // from the tail instead would have cost it the inverter temperature.
+    const battery = hasBattery(inv, m);
+
     const core = [
-      tile('Produced today', fmtKwh(inv.today_kwh)),
-      m.genMonthKwh != null ? tile('This month', fmtKwh(m.genMonthKwh)) : '',
-      inv.total_kwh != null ? tile('Lifetime', fmtKwh(inv.total_kwh)) : '',
-      peak && peak.ac_power_w ? tile('Peak today', `<span title="at ${esc(when(peak.ts))}">${fmtWs(peak.ac_power_w)}</span>`) : '',
+      tile('Produced today', energy(inv.today_kwh)),
+      m.genMonthKwh != null ? tile('This month', energy(m.genMonthKwh)) : '',
+      !battery && m.genYearKwh != null ? tile('This year', energy(m.genYearKwh)) : '',
+      inv.total_kwh != null ? tile('Lifetime', energy(inv.total_kwh)) : '',
+      peak && peak.ac_power_w ? tile('Peak today', `<span title="at ${esc(when(peak.ts))}">${power(peak.ac_power_w)}</span>`) : '',
       // Yield divided by rated power: the one figure that compares a 12 kW
       // array with a 3.5 kW one fairly, which is the whole point of this page.
-      m.fullLoadHours != null ? tile('Full-load hours', `${Number(m.fullLoadHours).toFixed(2)} h`) : '',
+      m.fullLoadHours != null ? tile('Full-load hours', num(Number(m.fullLoadHours).toFixed(2), 'h')) : '',
       (() => {
         if (!strings || !strings.length) return '';
         const live = strings.filter((x) => (x.powerW ?? 0) > 0).length;
         return tile('PV strings', live === strings.length ? `${live} producing` : `${live} of ${strings.length}`, 'sm');
       })(),
-      tempC != null ? tile('Inverter temp', `${tempC.toFixed(1)} °C`) : '',
-      m.genYearKwh != null ? tile('This year', fmtKwh(m.genYearKwh)) : '',
+      tempC != null ? tile('Inverter temp', num(tempC.toFixed(1), '°C')) : '',
     ].filter(Boolean);
 
-    const batt = !hasBattery(inv, m) ? [] : [
-      m.selfUseTodayKwh != null ? tile('Self-use today', fmtKwh(m.selfUseTodayKwh)) : '',
+    const batt = !battery ? [] : [
+      m.selfUseTodayKwh != null ? tile('Self-use today', energy(m.selfUseTodayKwh)) : '',
       // "23 W out" rather than "−23 W": a minus sign makes the reader work out
       // which way the power is going.
       inv.battery_power_w != null ? tile('Battery power', Math.abs(inv.battery_power_w) < 50 ? 'idle'
-        : `${fmtWs(Math.abs(inv.battery_power_w))} ${inv.battery_power_w > 0 ? 'in' : 'out'}`) : '',
-      bat?.tempC != null ? tile('Battery temp', `${bat.tempC} °C`) : '',
-      m.battChargeTodayKwh != null ? tile('Charged today', fmtKwh(m.battChargeTodayKwh)) : '',
-      m.battDischargeTodayKwh != null ? tile('Discharged today', fmtKwh(m.battDischargeTodayKwh)) : '',
+        : `${power(Math.abs(inv.battery_power_w))}<small> ${inv.battery_power_w > 0 ? 'in' : 'out'}</small>`) : '',
+      bat?.tempC != null ? tile('Battery temp', num(bat.tempC, '°C')) : '',
+      m.battChargeTodayKwh != null ? tile('Charged today', energy(m.battChargeTodayKwh)) : '',
+      m.battDischargeTodayKwh != null ? tile('Discharged today', energy(m.battDischargeTodayKwh)) : '',
     ].filter(Boolean);
 
     const target = Math.min(12, Math.floor((core.length + batt.length) / 4) * 4);
