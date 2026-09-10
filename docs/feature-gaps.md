@@ -94,7 +94,7 @@ station on SolarMan. No account identifiers appear in this document.
 | Large-screen / TV mode | ● | ○ | ○ |
 | Native mobile app | ● | ● | ◐ responsive web; no PWA install yet |
 | Remote control (charge schedules, export limit, firmware) | ● | ◐ | ○ **deliberately not** — read-only by design |
-| Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● token-gated JSON API |
+| Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API, reads open, writes gated |
 
 ---
 
@@ -124,7 +124,11 @@ station on SolarMan. No account identifiers appear in this document.
 3. **Full sample retention in your own database**, including the untouched vendor payload.
 4. **Honest staleness** — a panel says when its number was last updated and turns amber when a
    feed goes quiet, instead of showing a confidently stale zero.
-5. **A token-gated JSON API** over your own data, with no vendor approval process.
+5. **A JSON API** over your own data, with no vendor approval process. Reads answer anyone,
+   with vendor station ids, plant ids and serial numbers stripped from every response; writes
+   need a token.
+6. **Both systems on one screen without scrolling** — a column each, sized to a laptop window,
+   so the two are compared rather than remembered.
 
 ---
 
@@ -132,14 +136,15 @@ station on SolarMan. No account identifiers appear in this document.
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | Self-sufficiency / self-consumption ratios | One derived figure from data already stored | S |
+| 1 | Self-sufficiency as a ratio | Self-use is shown in kWh on the overview; the *percentage* of load it covers is still only instantaneous | S |
 | 2 | Plant-timezone-correct "today" | "Today" currently uses the *viewer's* midnight; plants carry their own timezone | S |
 | 3 | PWA install | Phone use without a browser tab | S |
 
 ## 5. Out of scope, by decision
 
-- **History pages, charts beyond today, CSV export, scheduled reports.** Data is still stored;
-  it is simply not presented.
+- **CSV export and scheduled reports.** History itself is presented — the Historical Data tab
+  gives produced, consumed, imported, exported, battery in and out, peak and sample count per
+  day — but there is no way to get it out of the browser.
 - **Weather, CO₂/trees, earnings and tariffs.**
 - **Notifications** (email/push/webhook on outage or fault).
 - **Battery on the on-grid system** — it has none, so the block is hidden rather than showing

@@ -202,16 +202,31 @@ test.describe('Overview', () => {
     await expect(tiles(1).locator('> div')).toHaveCount(12);
   });
 
-  test('the whole overview fits one screen, which is the point of the layout', async ({ page }, testInfo) => {
+  test('fits one screen when the window is big enough, and scrolls when it is not', async ({ page }, testInfo) => {
     await stubApi(page);
+    const fits = () => page.evaluate(() =>
+      document.documentElement.scrollHeight <= window.innerHeight + 2);
+
+    if (testInfo.project.name === 'mobile') {
+      await page.goto('/');
+      await expect(page.locator('.ovsys')).toHaveCount(2);
+      // Two systems will not fit a phone, and pretending otherwise would mean
+      // hiding readings.
+      expect(await fits()).toBe(false);
+      return;
+    }
+
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');
     await expect(page.locator('.ovsys')).toHaveCount(2);
-    const fits = await page.evaluate(() =>
-      document.documentElement.scrollHeight <= window.innerHeight + 2);
-    // Two systems side by side need the width for it. A phone stacks and
-    // scrolls, and pretending otherwise would mean hiding readings.
-    if (testInfo.project.name === 'mobile') expect(fits).toBe(false);
-    else expect(fits).toBe(true);
+    expect(await fits()).toBe(true);
+
+    // A short window cannot hold a diagram, twelve figures and a readable
+    // curve at once, so it scrolls rather than squeezing them into each other.
+    await page.setViewportSize({ width: 1440, height: 700 });
+    await page.reload();
+    await expect(page.locator('.ovsys')).toHaveCount(2);
+    expect(await fits()).toBe(false);
   });
 
   test('renders the divider layout: side by side on desktop, stacked on narrow screens', async ({ page }, testInfo) => {
@@ -774,8 +789,8 @@ test.describe('Energy flow on the overview', () => {
     await expect(page.locator('.ovsys')).toHaveCount(2);
     await expect(page.locator('svg.flow')).toHaveCount(2);
     const order = await page.locator('.ovsys').nth(0).evaluate((el) =>
-      [...el.children].map((c) => c.className.split(' ')[0]));
-    expect(order).toEqual(['ovhead', 'ovflow', 'ovtiles', 'ovchart']);
+      [...el.querySelector('.ovmain')!.children].map((c) => c.className.split(' ')[0]));
+    expect(order).toEqual(['ovhead', 'ovflow', 'ovtiles']);
   });
 
   test('an offline system draws a dead diagram and says why', async ({ page }) => {
@@ -817,9 +832,22 @@ test.describe('Energy flow on the overview', () => {
       (els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ y: Math.round(r.y), h: Math.round(r.height) })));
     if (Math.abs(rects[0].y - rects[1].y) < 2) {
       expect(Math.abs(rects[0].h - rects[1].h)).toBeLessThanOrEqual(2);
-      const charts = await page.locator('.ovchart').evaluateAll(
-        (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
-      expect(Math.abs(charts[0] - charts[1])).toBeLessThanOrEqual(2);
+      // Diagram and chart both match across the two columns. The hybrid has
+      // four more figures to show, and that difference is taken by the tile
+      // grid - one system's row of eight simply gets more air than the other's
+      // row of twelve - rather than by shrinking its picture or its curve.
+      for (const sel of ['.ovflow svg', '.ovchart']) {
+        const hs = await page.locator(sel).evaluateAll(
+          (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+        expect(Math.abs(hs[0] - hs[1])).toBeLessThanOrEqual(2);
+      }
+      // And nothing collides: the figures always end above the curve.
+      const clash = await page.locator('.ovsys').evaluateAll((els) => els.filter((el) => {
+        const t = el.querySelector('.ovtiles')!.getBoundingClientRect();
+        const c = el.querySelector('.ovchart')!.getBoundingClientRect();
+        return t.bottom > c.top + 1;
+      }).length);
+      expect(clash).toBe(0);
     } else {
       expect(rects[1].y).toBeGreaterThan(rects[0].y + rects[0].h - 2); // stacked
     }
@@ -859,12 +887,18 @@ test.describe('Energy flow on the overview', () => {
     expect(dangling).toEqual([]);
   });
 
-  test('a column header opens that system detail', async ({ page }) => {
+  test('anything above the chart opens that system detail', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await page.locator('.ovhead').first().click();
+    // The whole card was a link before this layout; a reader who wants more
+    // about a figure clicks the figure, not a title bar above it.
+    await page.locator('.ovsys').first().locator('.ovtiles > div').first().click();
     await expect(page).toHaveURL(/#\/system\//);
     await expect(page.locator('.card h3')).toContainText(['Identity & hardware']);
+
+    await page.goBack();
+    await page.locator('.ovsys').first().locator('svg.flow').click({ position: { x: 8, y: 8 } });
+    await expect(page).toHaveURL(/#\/system\//);
   });
 
   test('the day curve links through to the Power tab, where it is full width', async ({ page }) => {
@@ -938,7 +972,7 @@ test.describe('System detail', () => {
   test('opens from a panel and keeps a linkable URL', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await page.locator('.ovhead').nth(0).click();
+    await page.locator('.ovsys').nth(0).locator('.ovhead').click();
     await expect(page).toHaveURL(/#\/system\//);
     await expect(page.locator('.sys-name')).toContainText('Demo Solis Plant');
     await page.locator('a.back').click();
