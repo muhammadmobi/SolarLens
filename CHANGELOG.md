@@ -17,7 +17,8 @@ the announcement.
 
 - **The overview is one screenful.** It was three full-width bands — energy
   flow, then figures, then the day curve — each repeated per system, which came
-  to 2,889px of page in a 794px window on a 1440×900 laptop. Nothing below the
+  to 1,695px of page in a 900px window on a 1440×900 laptop, and 2,889px once
+  the window narrows enough for the columns to stack. Nothing below the
   first diagram was visible without scrolling, and the two systems could never
   be seen at once, which is the entire reason for putting them on one page.
 
@@ -25,7 +26,7 @@ the announcement.
   height comes back not from dropping readings but from **printing each one
   once** — producing now, house load, grid direction and battery charge were
   drawn in the diagram and then repeated as figures underneath it, which is
-  most of what made the figures band 1,002px tall.
+  most of what made the figures band the tallest of the three.
 
   The figures are tiles, four across, trimmed to a multiple of four so the grid
   never ends in a ragged row: eight for an on-grid inverter, twelve once there
