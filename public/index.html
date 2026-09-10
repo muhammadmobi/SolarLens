@@ -315,15 +315,18 @@
     background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
     box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   }
+  /* The link wrapper takes only the height its contents need. Left to grow it
+     shares the spare space with the chart, and the curve - the one part that
+     gets better with more room - ends up smaller than the air above it. */
   .ovmain {
-    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column; flex: 0 0 auto;
     text-decoration: none; color: inherit;
   }
   .ovmain:hover .ovname { text-decoration: underline; text-underline-offset: 3px; }
   .ovmain:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; border-radius: var(--r); }
   .ovchart:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; border-radius: var(--r); }
-  .ovhead { display: flex; align-items: center; gap: 10px; padding: 13px 18px 10px; flex: 0 0 auto; }
-  .ovname { font-weight: 800; font-size: 16px; letter-spacing: -.01em; color: var(--accent); }
+  .ovhead { display: flex; align-items: center; gap: 10px; padding: 14px 18px 0; flex: 0 0 auto; }
+  .ovname { font-weight: 700; font-size: 16px; letter-spacing: -.01em; color: var(--accent); }
   .ovchip {
     font-size: 10.5px; padding: 2px 9px; border-radius: 999px; white-space: nowrap;
     border: 1px solid var(--line); color: var(--muted); background: var(--surface-2);
@@ -334,20 +337,20 @@
      column the plan view shrinks until its own labels cannot be read, and a
      hybrid - which has more to draw - ends up with a picture half the size of
      the on-grid one beside it. A row keeps every figure at full size. */
-  .ovnodes { display: flex; align-items: flex-start; justify-content: center; gap: 2px; padding: 2px 4px 12px; }
+  .ovnodes { display: flex; align-items: flex-start; justify-content: center; gap: 2px; padding: 4px 14px 14px; }
   .ovnode { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: 0 1 120px; min-width: 0; }
   .ovring {
-    width: clamp(38px, 3.2vw, 52px); height: clamp(38px, 3.2vw, 52px); border-radius: 50%;
+    width: clamp(40px, 3.4vw, 52px); height: clamp(40px, 3.4vw, 52px); border-radius: 50%;
     border: 2px solid var(--line); background: var(--surface-2);
-    display: grid; place-items: center; font-size: clamp(15px, 1.35vw, 21px);
+    display: grid; place-items: center; font-size: clamp(16px, 1.4vw, 21px);
   }
   .ovnode.live .ovring { border-color: var(--accent); }
   .ovnode .ovlab {
-    font-size: 9.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
     color: var(--faint); text-align: center; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   }
-  .ovnode .ovval { font-size: clamp(13px, 1.15vw, 17px); font-weight: 800; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .ovnode .ovval { font-size: clamp(13px, 1.1vw, 16px); font-weight: 700; font-variant-numeric: tabular-nums; }
   .ovnode .ovval.good { color: var(--ok); }
   .ovnode .ovval.dim { color: var(--faint); }
   .ovnode .ovsub { font-size: 9.5px; color: var(--faint); white-space: nowrap; }
@@ -382,33 +385,32 @@
   .ovtiles {
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
     background: var(--line-soft); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
-    margin-top: 10px; flex: 1 1 auto; min-height: 0;
-    /* Rows may compress rather than push the chart out of the card when the
-       window is short - grid rows size to content by default, which is what
-       overflowed here. */
-    grid-auto-rows: minmax(0, 1fr);
+    /* The figures take the height they need and the curve takes what is left,
+       which is the way round the reviewed design had it: a chart is worth more
+       to a reader than air between two rows of numbers. Rows may still
+       compress on a short window rather than pushing the curve out of the
+       card - grid rows size to their content by default, which is what once
+       drew the figures straight over the chart. */
+    flex: 0 1 auto; grid-auto-rows: minmax(0, auto);
   }
-  .ovtiles > div {
-    background: var(--surface); padding: 7px 13px 8px; min-width: 0;
-    display: flex; flex-direction: column; justify-content: center;
-  }
+  .ovtiles > div { background: var(--surface); padding: 11px 14px; min-width: 0; }
   .ovtiles .k {
-    color: var(--faint); font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--faint); font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .ovtiles .v {
-    font-weight: 700; font-size: 17px; margin-top: 2px; font-variant-numeric: tabular-nums;
+    font-weight: 700; font-size: 18px; line-height: 1.4; letter-spacing: -.02em; margin-top: 3px; font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   /* The unit is not the figure. Setting it smaller and quieter lets a column
      of tiles read as numbers instead of as a wall of text. */
-  .ovtiles .v small { font-size: 11.5px; font-weight: 600; color: var(--muted); margin-left: 1px; }
+  .ovtiles .v small { font-size: 11px; font-weight: 600; color: var(--muted); margin-left: 2px; }
   .ovtiles .v.sm { font-size: 14px; }
   .ovtiles .v.import { color: var(--solarman); }
   .ovtiles .v.export { color: var(--ok); }
   .ovchart {
-    display: flex; flex-direction: column; flex: 0 0 auto;
-    height: clamp(132px, 24vh, 232px); padding: 0 8px 6px; text-decoration: none; color: inherit;
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 120px;
+    padding: 0 8px 6px; text-decoration: none; color: inherit;
   }
   .ovchart svg { display: block; width: 100%; flex: 1 1 auto; min-height: 0; }
 
@@ -1187,7 +1189,6 @@
     const parts = [
       node('&#9728;&#65039;', pct === null ? 'Solar' : 'Solar · ' + pct + '%', fmtWs(solar), {
         live: solar > 0,
-        sub: inv.capacity_w ? 'of ' + fmtWs(inv.capacity_w) + ' rated' : '',
       }),
       arrow(solar > 0),
       node('&#127968;', 'House load', load === null ? '—' : fmtWs(load), {
@@ -1203,7 +1204,6 @@
         (soc === null || soc === undefined) ? '—' : Math.round(soc) + '%', {
           live: moving(batt),
           cls: (soc !== null && soc !== undefined) ? 'good' : 'dim',
-          sub: moving(batt) ? fmtWs(Math.abs(batt)) : '',
         }));
     }
 

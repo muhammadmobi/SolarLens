@@ -832,15 +832,18 @@ test.describe('Energy flow on the overview', () => {
       (els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ y: Math.round(r.y), h: Math.round(r.height) })));
     if (Math.abs(rects[0].y - rects[1].y) < 2) {
       expect(Math.abs(rects[0].h - rects[1].h)).toBeLessThanOrEqual(2);
-      // Diagram and chart both match across the two columns. The hybrid has
-      // four more figures to show, and that difference is taken by the tile
-      // grid - one system's row of eight simply gets more air than the other's
-      // row of twelve - rather than by shrinking its picture or its curve.
-      for (const sel of ['.ovnodes', '.ovchart']) {
-        const hs = await page.locator(sel).evaluateAll(
-          (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
-        expect(Math.abs(hs[0] - hs[1])).toBeLessThanOrEqual(2);
-      }
+      // The diagrams match. That is the one that has to: drawn at different
+      // sizes, the smaller system's picture reads as a rendering fault rather
+      // than as a system with less to show.
+      const flows = await page.locator('.ovnodes').evaluateAll(
+        (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+      expect(Math.abs(flows[0] - flows[1])).toBeLessThanOrEqual(2);
+
+      // The curves need not match - a hybrid spends four more figures' worth of
+      // height on its battery - but neither may be squeezed into a sliver.
+      const charts = await page.locator('.ovchart').evaluateAll(
+        (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+      for (const h of charts) expect(h).toBeGreaterThan(180);
       // And nothing collides: the figures always end above the curve.
       const clash = await page.locator('.ovsys').evaluateAll((els) => els.filter((el) => {
         const t = el.querySelector('.ovtiles')!.getBoundingClientRect();
