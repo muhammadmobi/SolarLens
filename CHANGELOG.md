@@ -35,15 +35,26 @@ the announcement.
   **datalogger signal** are gone from this page: they never change, and the
   Devices tab is where hardware belongs.
 
-  The two systems do not have the same amount to say, and that difference is
-  absorbed by the diagram rather than the chart, so both day curves are drawn at
-  exactly the same height. Two charts of different sizes side by side are the
-  one thing a comparison layout must not produce.
+  The two systems do not have the same amount to say — twelve figures against
+  eight, plus a self-powered bar — and that difference has to land somewhere.
+  It lands on the **tile grid**: diagram and chart are both pinned, so the two
+  pictures match and the two day curves match, and a row of eight simply gets
+  more air than a row of twelve. Letting it land on the diagram instead drew one
+  system's picture at 318px and the other's at 203px, which reads as a mistake
+  rather than as information; letting it land on the chart makes the two curves
+  different sizes, which defeats the comparison the layout exists for.
 
-  Only this tab claims the whole window. Every other one is a list that can
-  legitimately run longer than the screen. Below 1080px the columns stack and
-  the page scrolls again — two systems will not fit on a phone, and pretending
-  otherwise would mean hiding readings.
+  **Everything above the chart is one link to that system's detail page**, as
+  the whole card was before — a reader who wants more about a figure clicks the
+  figure, not a title bar above it. The chart is the exception and opens the
+  Power tab, where it is drawn full width.
+
+  Only this tab claims the whole window, and only when the window is worth
+  filling: below 1080px wide the columns stack, and below 820px tall the page
+  scrolls normally, because a diagram, twelve figures and a readable curve
+  genuinely do not fit in a short window and squeezing them until they collide
+  is worse than a short scroll. Every other tab is a list that can legitimately
+  run longer than the screen.
 
   `sysCard`, `flowStats` and `battPanel` existed only to draw the band this
   replaces, and are removed with it.

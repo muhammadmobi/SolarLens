@@ -10,7 +10,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Works with whatever access you have.** Official API keys are best; a browser-session fallback for SolarMan and a local relay agent for SolisCloud cover you while keys are pending.
 - **Honest about freshness.** Every panel shows *when* it was last updated. A system reads **offline** the moment either the vendor says so or nothing has arrived for 25 minutes — and an offline system's live figures are zero, not whatever it managed just before it dropped.
 - **Reads well in either theme.** A three-state toggle in the top-right corner follows your system, or forces light or dark; the choice is remembered and applied before first paint.
-- **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's hero number is set against its rated size.
+- **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's live output is set against its rated size.
 - **Open it and it is there.** No login, no token to copy onto each device — the readings are public by design, with vendor identifiers stripped from every response before it leaves the Worker.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
 
@@ -66,7 +66,7 @@ A single Cloudflare Worker does three jobs:
 1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1.
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
 3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Five tabs, plus a per-system page they all link into:
-   - **Overview** (`#/`) — one column per system, sized to fit a laptop screen without scrolling: the energy-flow diagram, then that system's figures as tiles, then its day curve. Producing now, house load, grid direction and battery charge live in the diagram and are not repeated as figures. Model and datalogger signal are not here at all — they never change, so they sit on Devices. Below 1080px the columns stack and the page scrolls, because two systems will not fit on a phone.
+   - **Overview** (`#/`) — one column per system, sized to fit a laptop screen without scrolling: the energy-flow diagram, then that system's figures as tiles, then its day curve. Producing now, house load, grid direction and battery charge live in the diagram and are not repeated as figures. Model and datalogger signal are not here at all — they never change, so they sit on Devices. Anything above the curve opens that system's detail page; the curve opens Power. Below 1080px wide the columns stack, and below 820px tall the page scrolls, because two systems will not fit on a phone and a short window cannot hold a diagram, twelve figures and a readable curve at once.
    - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry.
    - **Historical Data** (`#/history`) — day by day per system: produced, consumed, imported, exported, battery in and out, peak and sample count, with a bar per day. Columns appear only where that system measures the quantity, and the page says plainly that the record begins when SolarLens started collecting rather than when the array was installed.
    - **Alerts** (`#/alerts`) — everything either cloud says is wrong, one collapsible section per system. Nothing is invented: each row names the field it came from, so an empty section reads as "both vendors report normal" rather than "nobody looked". The tab carries a count badge.
@@ -135,7 +135,7 @@ npm run cf -- d1 info solar-lens  # the general escape hatch
 **2. Set your secrets** — each command prompts for the value; nothing is stored in the repo.
 
 ```bash
-npm run cf -- secret put API_TOKEN       # gates the dashboard and /api/*
+npm run cf -- secret put API_TOKEN       # gates the routes that write or spend quota
 npm run cf -- secret put INGEST_TOKEN    # gates the push endpoints used by local agents
 ```
 
@@ -411,7 +411,7 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 
 | Name | Required | Purpose |
 |---|---|---|
-| `API_TOKEN` | yes | Gates `/api/*` and the dashboard cookie. Without it the API is open (local dev only), and `/api/health` reports `authDisabled`. |
+| `API_TOKEN` | for `POST /api/poll` | Gates the routes that write or spend vendor quota. Reads are public by design. |
 | `INGEST_TOKEN` | for agents | Gates `/api/ingest`, `/api/ingest/station` and `/api/ingest/history`. |
 | `SOLIS_KEY_ID`, `SOLIS_KEY_SECRET` | Solis official | From SolisCloud API Management. Present = the Worker polls Solis directly and the relay becomes optional. |
 | `SOLARMAN_APP_ID`, `SOLARMAN_APP_SECRET`, `SOLARMAN_EMAIL`, `SOLARMAN_PASSWORD_SHA256` | SolarMan official | From SolarMan support + your login. |
@@ -539,18 +539,21 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /api/latest` | API_TOKEN | newest reading per inverter, with `metrics` |
-| `GET /api/series?from=&to=` | API_TOKEN | readings in a range (≤ 31 days) |
-| `GET /api/health` | API_TOKEN | recent poll log, the newest line per feed, and whether auth is disabled |
-| `GET /api/history?days=&tz=` | API_TOKEN | one row per inverter per day (`tz` is the caller UTC offset in minutes) |
-| `POST /api/poll` | API_TOKEN | poll all providers now |
+| `GET /api/latest` | open | newest reading per inverter, with `metrics` |
+| `GET /api/series?from=&to=` | open | readings in a range (≤ 31 days) |
+| `GET /api/health` | open | recent poll log and the newest line per feed |
+| `GET /api/history?days=&tz=` | open | one row per inverter per day (`tz` is the caller UTC offset in minutes) |
+| `GET /api/devices` | open | hardware inventory |
+| `POST /api/poll` | API_TOKEN | poll all providers now — makes live vendor calls, so it spends quota |
 | `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |
-| `GET /api/devices` | API_TOKEN | hardware inventory |
 | `POST /api/ingest/devices` | INGEST_TOKEN | push raw vendor device records (`{provider, plantId, inverters[], collectors[]}`); normalised server-side |
+| `POST /api/ingest/history` | INGEST_TOKEN | backfill a day curve; rejects a peak above 5× nameplate |
 | `GET /auth?t=` | — | set the cookie the write routes accept |
 
-Auth is a bearer header (`Authorization: Bearer …`) or the cookie set by `/auth`.
+**Every `GET` answers anyone**, with vendor identifiers stripped — see
+[Reads are public; writes are not](#reads-are-public-writes-are-not). Writes take
+a bearer header (`Authorization: Bearer …`) or the cookie set by `/auth`.
 
 ## Project layout
 
