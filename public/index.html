@@ -329,6 +329,46 @@
     border: 1px solid var(--line); color: var(--muted); background: var(--surface-2);
   }
   .ovwhen { margin-left: auto; display: flex; align-items: center; gap: 9px; font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+  /* ---------- overview energy flow ----------
+     A row of nodes rather than the detail page's plan view. In a half-width
+     column the plan view shrinks until its own labels cannot be read, and a
+     hybrid - which has more to draw - ends up with a picture half the size of
+     the on-grid one beside it. A row keeps every figure at full size. */
+  .ovnodes { display: flex; align-items: flex-start; justify-content: center; gap: 2px; padding: 2px 4px 12px; }
+  .ovnode { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: 0 1 120px; min-width: 0; }
+  .ovring {
+    width: clamp(38px, 3.2vw, 52px); height: clamp(38px, 3.2vw, 52px); border-radius: 50%;
+    border: 2px solid var(--line); background: var(--surface-2);
+    display: grid; place-items: center; font-size: clamp(15px, 1.35vw, 21px);
+  }
+  .ovnode.live .ovring { border-color: var(--accent); }
+  .ovnode .ovlab {
+    font-size: 9.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--faint); text-align: center; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+  .ovnode .ovval { font-size: clamp(13px, 1.15vw, 17px); font-weight: 800; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .ovnode .ovval.good { color: var(--ok); }
+  .ovnode .ovval.dim { color: var(--faint); }
+  .ovnode .ovsub { font-size: 9.5px; color: var(--faint); white-space: nowrap; }
+  .ovarrow {
+    flex: 1 1 auto; min-width: 12px; max-width: 84px; height: 2px; position: relative;
+    background: var(--line); margin-top: clamp(18px, 1.6vw, 25px);
+  }
+  .ovarrow::after {
+    content: ""; position: absolute; right: -1px; top: -4px;
+    border-left: 8px solid var(--line);
+    border-top: 5px solid transparent; border-bottom: 5px solid transparent;
+  }
+  .ovarrow.live { background: var(--accent); }
+  .ovarrow.live::after { border-left-color: var(--accent); }
+  .ovarrow.back { transform: scaleX(-1); }
+
+  /* The chart's caption above the drawing, not written across it: what the
+     reading is on the left, the day's peak on the right. */
+  .ovchart-head { display: flex; align-items: baseline; gap: 10px; padding: 4px 12px 2px; }
+  .ovchart-head .t { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+  .ovchart-head .p { margin-left: auto; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
   /* Diagram and chart are both pinned; the tiles take the slack.
      A hybrid has more to say than an on-grid inverter - twelve figures instead
      of eight, and a self-powered bar - and that difference has to land
@@ -338,11 +378,7 @@
      different sizes, which defeats the comparison the layout exists for. So it
      lands on the tile grid, where a row of eight simply gets more air than a
      row of twelve, and nothing looks broken. */
-  .ovflow {
-    flex: 0 0 auto; padding: 0 12px;
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .ovflow svg { display: block; width: 100%; height: clamp(112px, 23vh, 236px); }
+  .ovflow { flex: 0 0 auto; padding: 0 10px; }
   .ovtiles {
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px;
     background: var(--line-soft); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
@@ -370,8 +406,11 @@
   .ovtiles .v.sm { font-size: 14px; }
   .ovtiles .v.import { color: var(--solarman); }
   .ovtiles .v.export { color: var(--ok); }
-  .ovchart { display: block; flex: 0 0 auto; height: clamp(118px, 21vh, 210px); padding: 4px 10px 8px; text-decoration: none; }
-  .ovchart svg { display: block; width: 100%; height: 100%; }
+  .ovchart {
+    display: flex; flex-direction: column; flex: 0 0 auto;
+    height: clamp(132px, 24vh, 232px); padding: 0 8px 6px; text-decoration: none; color: inherit;
+  }
+  .ovchart svg { display: block; width: 100%; flex: 1 1 auto; min-height: 0; }
 
   /* Four tiles across needs about 150px each to hold "Discharged today" and a
      five-digit lifetime figure without truncating. Below that, two. */
@@ -832,8 +871,12 @@
    * out short and floating in empty space, so the overview asks for a taller
    * ratio than the full-width Power tab needs.
    */
-  function systemChart(inv, pts, id, viewH = 230) {
-    const W = 1000, H = viewH, L = 62, R = 16, T = 26, B = 30;
+  function systemChart(inv, pts, id, viewH = 230, opts = {}) {
+    // `bare` moves the reading's name and the day's peak out of the drawing and
+    // into HTML above it, where they are set in the page's own type instead of
+    // being scaled with the picture.
+    const bare = !!(opts && opts.bare);
+    const W = 1000, H = viewH, L = 62, R = 16, T = bare ? 12 : 26, B = 30;
     const t0 = startOfToday(), t1 = t0 + 86400;
     const c = colorFor(inv.provider);
     if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
@@ -862,7 +905,7 @@
       const px = x(peak.ts), py = y(peak.ac_power_w);
       out += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4" fill="${c}"/>`;
       const flip = px > W * 0.75;
-      out += `<text class="peaklab" x="${(px + (flip ? -10 : 10)).toFixed(1)}" y="${Math.max(T + 12, py - 10).toFixed(1)}" text-anchor="${flip ? 'end' : 'start'}">peak ${fmtWs(peak.ac_power_w)} · ${new Date(peak.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>`;
+      if (!bare) out += `<text class="peaklab" x="${(px + (flip ? -10 : 10)).toFixed(1)}" y="${Math.max(T + 12, py - 10).toFixed(1)}" text-anchor="${flip ? 'end' : 'start'}">peak ${fmtWs(peak.ac_power_w)} · ${new Date(peak.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>`;
     }
     out += `<circle cx="${x(last.ts).toFixed(1)}" cy="${y(last.ac_power_w).toFixed(1)}" r="3.5" fill="${c}" opacity=".55"/>`;
 
@@ -890,7 +933,7 @@
       out += `<rect class="nodata" x="${L}" y="${T}" width="${(x(pts[0].ts) - L).toFixed(1)}" height="${H - T - B}"/>`;
     }
 
-    out += `<text class="axis unit" x="6" y="${T - 10}">watts</text>`;
+    if (!bare) out += `<text class="axis unit" x="6" y="${T - 10}">watts</text>`;
     return `<svg class="combined" viewBox="0 0 ${W} ${H}">${out}</svg>`;
   }
 
@@ -1095,6 +1138,86 @@
     return `<div class="ovtiles">${cells.join('')}</div>`;
   }
 
+  /** The biggest sample of the day, or null before there are any. */
+  function peakOf(pts) {
+    return pts.reduce((best, p) => (p.ac_power_w ?? 0) > (best?.ac_power_w ?? -1) ? p : best, null);
+  }
+
+  /**
+   * The overview's energy flow: solar, the house, the battery if there is one,
+   * and the grid, left to right, with an arrow between each pair that lights
+   * only where power is actually moving.
+   *
+   * Not the detail page's plan view, which puts the house at the centre and
+   * hangs the other three arms off it. That drawing is the truer picture of how
+   * the system is wired and it needs the width to say so - squeezed into half a
+   * column it shrinks until its own labels cannot be read, and one system's
+   * picture ends up half the size of the other's. This row keeps every figure
+   * at full size and gives up only the arrangement, which is one click away.
+   *
+   * An offline system reads zero everywhere, so every arrow goes dark: the
+   * picture agrees with the figures instead of animating power that stopped
+   * moving an hour ago.
+   */
+  function overviewFlow(inv, m) {
+    const off = statusOf(inv).offline;
+    const val = (v) => (v === null || v === undefined) ? null : (off ? 0 : v);
+    const solar = val(inv.ac_power_w) ?? 0;
+    const load = val(inv.load_power_w);
+    const grid = val(inv.grid_power_w);
+    const batt = val(inv.battery_power_w);
+    const soc = inv.battery_soc;
+    // Tens of watts either way is meter drift, not a flow worth drawing.
+    const moving = (v) => v !== null && Math.abs(v) >= 50;
+
+    const pct = inv.capacity_w ? Math.round((solar / inv.capacity_w) * 100) : null;
+
+    const node = (icon, lab, value, opts) => {
+      const o = opts || {};
+      return '<div class="ovnode' + (o.live ? ' live' : '') + '">' +
+        '<div class="ovring">' + icon + '</div>' +
+        '<span class="ovlab">' + esc(lab) + '</span>' +
+        '<span class="ovval' + (o.cls ? ' ' + o.cls : '') + '">' + value + '</span>' +
+        (o.sub ? '<span class="ovsub">' + esc(o.sub) + '</span>' : '') +
+        '</div>';
+    };
+    const arrow = (live, back) =>
+      '<div class="ovarrow' + (live ? ' live' : '') + (back ? ' back' : '') + '"></div>';
+
+    const parts = [
+      node('&#9728;&#65039;', pct === null ? 'Solar' : 'Solar · ' + pct + '%', fmtWs(solar), {
+        live: solar > 0,
+        sub: inv.capacity_w ? 'of ' + fmtWs(inv.capacity_w) + ' rated' : '',
+      }),
+      arrow(solar > 0),
+      node('&#127968;', 'House load', load === null ? '—' : fmtWs(load), {
+        live: moving(load), cls: load === null ? 'dim' : '',
+      }),
+    ];
+
+    if (hasBattery(inv, m)) {
+      const state = !moving(batt) ? 'idle' : batt > 0 ? 'charging' : 'discharging';
+      // A pack that is discharging is feeding the house, so the arrow turns back.
+      parts.push(arrow(moving(batt), batt !== null && batt < 0));
+      parts.push(node('&#128267;', 'Battery · ' + state,
+        (soc === null || soc === undefined) ? '—' : Math.round(soc) + '%', {
+          live: moving(batt),
+          cls: (soc !== null && soc !== undefined) ? 'good' : 'dim',
+          sub: moving(batt) ? fmtWs(Math.abs(batt)) : '',
+        }));
+    }
+
+    // On the wire + is import, so a positive reading points back at the house.
+    const dir = !moving(grid) ? 'idle' : grid > 0 ? 'importing' : 'exporting';
+    parts.push(arrow(moving(grid), grid !== null && grid > 0));
+    parts.push(node('&#9889;', 'Grid · ' + dir,
+      grid === null ? '—' : fmtWs(Math.abs(grid)), {
+        live: moving(grid), cls: grid === null ? 'dim' : '',
+      }));
+
+    return '<div class="ovnodes">' + parts.join('') + '</div>';
+  }
+
   function renderOverview() {
     const invs = state.latest?.inverters ?? [];
     const byInv = {};
@@ -1108,6 +1231,7 @@
       const st = statusOf(inv);
       const pts = byInv[inv.id] || [];
       const m = parse(inv.metrics) ?? {};
+      const peak = peakOf(pts);
       // Everything above the chart is one link to this system's detail page,
       // the way the whole card was before: a reader who wants more about a
       // figure clicks the figure, not a title bar above it. The chart is the
@@ -1123,10 +1247,16 @@
             </span>
           </div>
           ${st.offline ? `<div class="flowstale">⚠ offline · last update ${esc(inv.ts ? `${when(inv.ts)} (${ago(inv.ts)})` : 'never')}</div>` : ''}
-          <div class="ovflow">${flowSvg(inv, m)}</div>
+          <div class="ovflow">${overviewFlow(inv, m)}</div>
           ${overviewTiles(inv, pts)}
         </a>
-        <a class="ovchart" href="#/power" title="Open the Power tab">${systemChart(inv, pts, 'ov' + i, 330)}</a>
+        <a class="ovchart" href="#/power" title="Open the Power tab">
+          <div class="ovchart-head">
+            <span class="t">Today · watts</span>
+            ${peak ? `<span class="p">peak ${fmtWs(peak.ac_power_w)} at ${esc(hhmm(peak.ts))}</span>` : ''}
+          </div>
+          ${systemChart(inv, pts, 'ov' + i, 300, { bare: true })}
+        </a>
       </section>`;
     }).join('');
 

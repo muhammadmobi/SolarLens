@@ -166,11 +166,11 @@ test.describe('Overview', () => {
     // Producing now is drawn in the diagram and nowhere else. It used to be
     // there and repeated as a figure below, which is most of why the old
     // three-band overview came out taller than the window.
-    await expect(panels.nth(0).locator('svg.flow')).toContainText('5.08 kW');
+    await expect(panels.nth(0).locator('.ovnodes')).toContainText('5.08 kW');
     await expect(panels.nth(0).locator('.ovtiles')).not.toContainText('Producing now');
 
     await expect(panels.nth(1)).toContainText('SolarMan');
-    await expect(panels.nth(1).locator('svg.flow')).toContainText('278 W');
+    await expect(panels.nth(1).locator('.ovnodes')).toContainText('278 W');
     await expect(panels.nth(1)).toContainText('91 W');
     // A few watts of battery drift renders as idle, not as discharging.
     await expect(panels.nth(1)).toContainText('idle');
@@ -252,7 +252,7 @@ test.describe('Overview', () => {
     await expect(solis.locator('.pill')).toHaveClass(/warn/);
     await expect(solis.locator('.pill')).toHaveText('offline');
     // Offline output is zero, not the 5.08 kW it managed before it dropped.
-    await expect(solis.locator('svg.flow')).toContainText('0 W');
+    await expect(solis.locator('.ovnodes')).toContainText('0 W');
   });
 
   test('the vendor calling a plant offline is enough on its own', async ({ page }) => {
@@ -262,7 +262,7 @@ test.describe('Overview', () => {
     await page.goto('/');
     const solis = page.locator('.ovsys').nth(0);
     await expect(solis.locator('.pill')).toHaveText('offline');
-    await expect(solis.locator('svg.flow')).toContainText('0 W');
+    await expect(solis.locator('.ovnodes')).toContainText('0 W');
   });
 
   test('an offline system counts as zero in the fleet total and is named', async ({ page }) => {
@@ -612,8 +612,8 @@ test.describe('Battery', () => {
     const sys = page.locator('.ovsys').nth(1);
     // Charge level and what the pack is doing are in the diagram; the tiles
     // carry the figures a picture cannot show.
-    await expect(sys.locator('svg.flow')).toContainText('100%');
-    await expect(sys.locator('svg.flow')).toContainText('idle');
+    await expect(sys.locator('.ovnodes')).toContainText('100%');
+    await expect(sys.locator('.ovnodes')).toContainText('idle');
     const tiles = sys.locator('.ovtiles');
     await expect(tiles).toContainText('Battery temp');
     await expect(tiles).toContainText('32.5 °C');
@@ -787,7 +787,7 @@ test.describe('Energy flow on the overview', () => {
     // order inside it is the order you read: the picture, the numbers, the day.
     await expect(page.locator('h2.band')).toHaveCount(0);
     await expect(page.locator('.ovsys')).toHaveCount(2);
-    await expect(page.locator('svg.flow')).toHaveCount(2);
+    await expect(page.locator('.ovnodes')).toHaveCount(2);
     const order = await page.locator('.ovsys').nth(0).evaluate((el) =>
       [...el.querySelector('.ovmain')!.children].map((c) => c.className.split(' ')[0]));
     expect(order).toEqual(['ovhead', 'ovflow', 'ovtiles']);
@@ -799,11 +799,10 @@ test.describe('Energy flow on the overview', () => {
     const box = page.locator('.ovsys').nth(0);
     await expect(box.locator('.flowstale')).toContainText('offline');
     await expect(box.locator('.flowstale')).toContainText('last update');
-    // Every arm now carries a real zero, so nothing is drawn live and no pip
-    // travels: the picture agrees with the figures instead of contradicting them.
-    await expect(box.locator('svg.flow .wire.live')).toHaveCount(0);
-    await expect(box.locator('svg.flow .pip')).toHaveCount(0);
-    await expect(page.locator('.ovsys').nth(1).locator('svg.flow .pip').first()).toBeVisible();
+    // Every arm carries a real zero, so no arrow is lit: the picture agrees
+    // with the figures instead of contradicting them.
+    await expect(box.locator('.ovarrow.live')).toHaveCount(0);
+    await expect(page.locator('.ovsys').nth(1).locator('.ovarrow.live').first()).toBeVisible();
   });
 
   test('the flow tab is gone and an old #/flow link lands on the overview', async ({ page }) => {
@@ -817,12 +816,13 @@ test.describe('Energy flow on the overview', () => {
   test('both systems draw at the same size, whatever hardware they have', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    const boxes = await page.locator('svg.flow').evaluateAll(
-      (svgs) => svgs.map((s) => s.getAttribute('viewBox')));
-    // A hybrid hangs a battery below the house and carries a self-powered bar;
-    // an on-grid plant has neither. Drawn at different heights, the shorter
-    // card just looks cut off beside the taller one.
-    expect(new Set(boxes).size).toBe(1);
+    // A hybrid has a battery node the on-grid plant does not. Laid out as a
+    // row they still occupy the same height, so neither picture is drawn
+    // smaller than the other - which is what happened when the plan view had
+    // to shrink to fit a half-width column.
+    const heights = await page.locator('.ovnodes').evaluateAll(
+      (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    expect(Math.abs(heights[0] - heights[1])).toBeLessThanOrEqual(2);
 
     // Side by side, the two columns match and so do their charts. The hybrid
     // has more to say - a battery row and a self-powered bar - and that
@@ -836,7 +836,7 @@ test.describe('Energy flow on the overview', () => {
       // four more figures to show, and that difference is taken by the tile
       // grid - one system's row of eight simply gets more air than the other's
       // row of twelve - rather than by shrinking its picture or its curve.
-      for (const sel of ['.ovflow svg', '.ovchart']) {
+      for (const sel of ['.ovnodes', '.ovchart']) {
         const hs = await page.locator(sel).evaluateAll(
           (els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
         expect(Math.abs(hs[0] - hs[1])).toBeLessThanOrEqual(2);
@@ -856,22 +856,24 @@ test.describe('Energy flow on the overview', () => {
   test('the solar node says what share of the array is working', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    const labels = page.locator('svg.flow .lbl');
+    const labels = page.locator('.ovnodes .ovlab');
     // 5.08 kW of a 12 kW array; 278 W of a 3.5 kW one. The percentage is what
     // makes those two comparable at a glance, so it rides on the title.
     await expect(labels.nth(0)).toHaveText('Solar · 42%');
-    await expect(page.locator('.ovsys').nth(1).locator('.lbl').first()).toHaveText('Solar · 8%');
+    await expect(page.locator('.ovsys').nth(1).locator('.ovlab').first()).toHaveText('Solar · 8%');
   });
 
   test('no percentage where there is no rating to divide by', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solis: { capacity_w: null } }) });
     await page.goto('/');
-    await expect(page.locator('.ovsys').nth(0).locator('.lbl').first()).toHaveText('Solar');
+    await expect(page.locator('.ovsys').nth(0).locator('.ovlab').first()).toHaveText('Solar');
   });
 
   test('each diagram owns its arrow markers, so accents cannot leak', async ({ page }) => {
     await stubApi(page);
-    await page.goto('/');
+    // The overview draws a row of HTML nodes; the plan view with markers in it
+    // is the system page's.
+    await page.goto('/#/system/' + encodeURIComponent(SOLIS));
     const ids = await page.locator('svg.flow marker').evaluateAll((ms) => ms.map((m) => m.id));
     // Marker ids are document-wide. Two diagrams sharing one id means
     // url(#that-id) resolves to whichever came first, and the second diagram
@@ -897,7 +899,7 @@ test.describe('Energy flow on the overview', () => {
     await expect(page.locator('.card h3')).toContainText(['Identity & hardware']);
 
     await page.goBack();
-    await page.locator('.ovsys').first().locator('svg.flow').click({ position: { x: 8, y: 8 } });
+    await page.locator('.ovsys').first().locator('.ovnodes').click({ position: { x: 8, y: 8 } });
     await expect(page).toHaveURL(/#\/system\//);
   });
 
