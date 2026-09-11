@@ -37,13 +37,16 @@ the announcement.
   Devices tab is where hardware belongs.
 
   The two systems do not have the same amount to say — twelve figures against
-  eight, plus a self-powered bar — and that difference has to land somewhere.
-  It lands on the **tile grid**: diagram and chart are both pinned, so the two
-  pictures match and the two day curves match, and a row of eight simply gets
-  more air than a row of twelve. Letting it land on the diagram instead drew one
-  system's picture at 318px and the other's at 203px, which reads as a mistake
-  rather than as information; letting it land on the chart makes the two curves
-  different sizes, which defeats the comparison the layout exists for.
+  eight — and that difference has to land somewhere. **The diagrams match and
+  the curves do not**, which is the way round that reads correctly: a picture
+  drawn two-thirds the size of the one beside it looks like a rendering fault,
+  while a shorter curve simply reflects a system with more figures above it.
+  Reaching that took two wrong turns, both caught by holding the built page next
+  to the reviewed design — first the diagram absorbed the slack and came out at
+  318px against 203px, then the figures were stretched to fill and the curve was
+  pinned at 216px, which spent on air between two rows of numbers what the chart
+  wanted. The figures now take the height they need and the curve takes the
+  rest, at 378px and 338px.
 
   **Everything above the chart is one link to that system's detail page**, as
   the whole card was before — a reader who wants more about a figure clicks the
@@ -51,7 +54,7 @@ the announcement.
   Power tab, where it is drawn full width.
 
   Only this tab claims the whole window, and only when the window is worth
-  filling: below 1080px wide the columns stack, and below 820px tall the page
+  filling: below 1080px wide the columns stack, and below 660px tall the page
   scrolls normally, because a diagram, twelve figures and a readable curve
   genuinely do not fit in a short window and squeezing them until they collide
   is worse than a short scroll. Every other tab is a list that can legitimately

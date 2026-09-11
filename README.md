@@ -66,7 +66,7 @@ A single Cloudflare Worker does three jobs:
 1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1.
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
 3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Five tabs, plus a per-system page they all link into:
-   - **Overview** (`#/`) — one column per system, sized to fit a laptop screen without scrolling: the energy-flow diagram, then that system's figures as tiles, then its day curve. Producing now, house load, grid direction and battery charge live in the diagram and are not repeated as figures. Model and datalogger signal are not here at all — they never change, so they sit on Devices. Anything above the curve opens that system's detail page; the curve opens Power. Below 1080px wide the columns stack, and below 820px tall the page scrolls, because two systems will not fit on a phone and a short window cannot hold a diagram, twelve figures and a readable curve at once.
+   - **Overview** (`#/`) — one column per system, sized to fit a laptop screen without scrolling: the energy-flow diagram, then that system's figures as tiles, then its day curve. Producing now, house load, grid direction and battery charge live in the diagram and are not repeated as figures. Model and datalogger signal are not here at all — they never change, so they sit on Devices. Anything above the curve opens that system's detail page; the curve opens Power. Below 1080px wide the columns stack, and below 660px tall the page scrolls, because two systems will not fit on a phone and a very short window cannot hold a diagram, twelve figures and a readable curve at once.
    - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry.
    - **Historical Data** (`#/history`) — day by day per system: produced, consumed, imported, exported, battery in and out, peak and sample count, with a bar per day. Columns appear only where that system measures the quantity, and the page says plainly that the record begins when SolarLens started collecting rather than when the array was installed.
    - **Alerts** (`#/alerts`) — everything either cloud says is wrong, one collapsible section per system. Nothing is invented: each row names the field it came from, so an empty section reads as "both vendors report normal" rather than "nobody looked". The tab carries a count badge.
@@ -475,14 +475,14 @@ npm run test:unit:coverage  # vitest + v8 coverage, enforces thresholds
 npm run test:e2e            # playwright (add --ui for the inspector)
 ```
 
-**86 unit tests** and **150 end-to-end tests** (75 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**100 unit tests** and **152 end-to-end tests** (76 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
 | Layer | Tool | Runs against | Why not the other one |
 |---|---|---|---|
 | Types | `tsc`, two projects | `src/` and `tests/` | Catches shape drift before a test can even start. The specs import the Worker's own `Reading` and `Metrics`, so changing a field breaks compilation rather than one assertion in the browser. |
-| Unit | Vitest | Pure modules: unit scaling, both vendor normalisers, the call queue, the weather lookup | Fast, no browser. These are the parts where a wrong answer is silent — a sign convention or a `kW`/`W` slip looks perfectly plausible on screen. |
+| Unit | Vitest | Pure modules: unit scaling, both vendor normalisers, the call queue, day-curve backfill, PII stripping, log redaction, and the public-view redactor | Fast, no browser. These are the parts where a wrong answer is silent — a sign convention or a `kW`/`W` slip looks perfectly plausible on screen. |
 | End-to-end | Playwright | The real `public/index.html`, served statically, with `/api/*` stubbed | The UI is a single dependency-free file with no components to unit-test. What matters is what a person sees, so that is what is asserted. |
 
 ### Unit tests — `tests/unit/`
@@ -498,7 +498,7 @@ Seven files, one concern each. They are all pure-function tests against fixtures
 
 ### End-to-end tests — `tests/e2e/`
 
-One spec file of 75 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
+One spec file of 76 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
 
 They assert what a person sees, grouped by what it is for: the overview and its layout at both widths, the theme toggle (including that the choice is applied before first paint), the labelled header totals, the energy-flow diagram (structure, direction from the signs, wire thickness tracking power, per-diagram marker ids), the battery panel and the derived cycle count, offline handling and zeroed figures, the Alerts tab, the collapsible Power sections and the clickable chart legend, the device inventory, raw telemetry filtering, and the token-gate guidance.
 
@@ -510,14 +510,31 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| `src/providers/` | **60%** | **52%** | **51%** | **60%** |
-| `units.ts` | 96% | 97% | 100% | 100% |
-| `weather.ts` | 95% | 83% | 100% | 98% |
-| `queue.ts` | 100% | 100% | 100% | 100% |
+| **Enforced** — `src/providers/` + `src/public-view.ts` | **57.7%** | **49.6%** | **53.8%** | **57.7%** |
+| &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 90% | **100%** | **100%** |
+| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp scaling | 96% | 97% | 100% | 100% |
+| &nbsp;&nbsp;`soliscloud.ts` | 65% | 55% | 56% | 66% |
+| &nbsp;&nbsp;`solarman.ts` | 56% | 47% | 35% | 54% |
+| &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 6% | 0% | 0% | 7% |
+| All of `src/`, Worker-only code included | 38.4% | 36.4% | 37.4% | 38.1% |
 
-The thresholds sit just under those figures, so a regression trips them and ordinary refactoring does not. **Raise them when you add tests; never lower them to turn a red build green.**
+Two figures, because there are two honest answers. The enforced one measures what
+a unit test can reach: pure functions over payloads. `index.ts` (request
+routing), `db.ts` (D1 SQL) and `poll.ts` (cron fan-out) need a Worker and a
+database, and the Playwright suite exercises them through HTTP instead — so
+counting them here would report a low number for code that *is* tested, just not
+here. The whole-`src/` row is in the table regardless, so the gap is visible
+rather than hidden behind a flattering scope. Per file:
 
-The gap to 100% is almost entirely the vendor HTTP clients — request signing, paging, token refresh — which need a live endpoint or a large mock to exercise, and which the normalisers behind them are already tested against. `src/index.ts` and `src/poll.ts` are excluded outright: they are Worker wiring (request routing, cron fan-out) covered end-to-end instead, and counting them would report a low number for code that is deliberately tested elsewhere.
+```bash
+npx vitest run --coverage --coverage.include=src/**/*.ts
+```
+
+The thresholds sit just under the enforced figures, so a regression trips them and ordinary refactoring does not. **Raise them when you add tests; never lower them to turn a red build green.**
+
+**`public-view.ts` sat outside the measured scope until 2026-09-11** — the one file deciding which vendor station ids, plant ids and serial numbers leave the Worker was the one file with no coverage number, despite carrying thirteen tests. It measures 100% of statements; the single uncovered branch is the fallback for an id the alias map has never seen.
+
+The rest of the gap is the vendor HTTP clients — request signing, paging, token refresh — which need a live endpoint or a large mock to exercise, and whose normalisers are already tested against real captured payloads. `solarman-web.ts` is the lowest at 6%: it is the unofficial browser-session fallback, reached only when the official keys are absent.
 
 Request signing itself (`crypto.subtle` MD5 + HMAC) only runs in the Workers runtime, so it is verified against the live API by `npm run probe:solis`.
 
