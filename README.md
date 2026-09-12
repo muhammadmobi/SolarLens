@@ -471,8 +471,10 @@ npm run cf -- d1 execute solar-lens --local --command "SELECT * FROM readings OR
 npm test                    # typecheck + unit + e2e — the whole gate
 npm run typecheck           # tsc over src/ and tests/
 npm run test:unit           # vitest
+npm run test:unit:watch     # vitest, re-running as you edit
 npm run test:unit:coverage  # vitest + v8 coverage, enforces thresholds
-npm run test:e2e            # playwright (add --ui for the inspector)
+npm run test:e2e            # playwright
+npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
 **122 unit tests** and **154 end-to-end tests** (77 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
@@ -606,7 +608,8 @@ solar-lens/
 ├── playwright.config.ts      two browser projects, static server, retries
 ├── migrations/               D1 schema, applied with `wrangler d1 migrations apply`
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
-│                              0005 electrical · 0006 battery · 0007 kv cache)
+│                              0005 electrical · 0006 battery · 0007 kv cache
+│                              0008 read indexes on readings.ts and poll_log)
 ├── src/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
 │   ├── poll.ts               builds providers from present secrets; polls; plant filter
@@ -619,7 +622,10 @@ solar-lens/
 │       ├── soliscloud.ts     official API adapter + station normaliser
 │       ├── solarman.ts       official API adapter + station normaliser
 │       └── solarman-web.ts   browser-session fallback (refresh token)
-├── public/index.html         the dashboard (no build step)
+├── public/
+│   ├── index.html            the dashboard (no build step)
+│   ├── _headers              the same CSP as src/index.ts, for edge-served requests
+│   └── icon.svg              app icon and favicon
 ├── agent/solis-relay.mjs     local Chrome relay for SolisCloud
 ├── setup-relay.cmd           double-click entry point for the relay installer
 ├── scripts/
@@ -638,7 +644,10 @@ solar-lens/
 │   ├── unit/queue.test.ts       vendor rate-limit queue
 │   ├── unit/history.test.ts     day-curve backfill normalisation
 │   ├── unit/pii.test.ts         what is stripped from a stored payload
+│   ├── unit/logging.test.ts     query strings redacted before they reach the log
 │   ├── unit/public-view.test.ts what a public response may and may not carry
+│   ├── unit/clients.test.ts     the vendor HTTP clients against a stubbed fetch
+│   ├── fixtures/               captured vendor payloads, scrubbed of identifiers
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first
 ├── docs/api-notes.md         observed vendor field names and conventions

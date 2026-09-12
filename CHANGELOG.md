@@ -150,6 +150,16 @@ The overview in one screen, and the vendor clients under test.
   project layout listed that same file and hid eight scripts behind the word
   "scripts".
 
+  A second pass over every checkable claim — routes against `src/index.ts`,
+  environment variables against what the code reads, tables against the
+  migrations, scripts against `package.json`, the two copies of the
+  Content-Security-Policy against each other — found the layout block still
+  missing six files that exist: migration `0008`, `public/_headers`,
+  `public/icon.svg`, and the `logging`, `clients` and fixture tests. Two npm
+  scripts were undocumented. Everything else held: the routes, the tables, the
+  env vars, the 5-minute cron, the 25-minute staleness cutoff, the five tabs,
+  and both security policies, which are byte-identical as the README claims.
+
 - **Two documented figures were wrong.** The measurement this layout was
   justified by was quoted as 2,889px "on a 1440×900 laptop" — real, but taken in
   a window about 725px wide, where the columns stack. At 1440×900 the old
