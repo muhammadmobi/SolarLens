@@ -21,7 +21,7 @@ const BASE_URL = 'https://globalapi.solarmanpv.com';
 
 // SolarMan's limits are undocumented but it is the same backend as SolisCloud,
 // so the same spacing keeps us well clear of whatever they enforce.
-const queue = new CallQueue(1500);
+export const queue = new CallQueue(1500);
 
 type Rec = Record<string, unknown>;
 

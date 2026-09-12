@@ -23,7 +23,7 @@ const BASE_URL = 'https://home.solarmanpv.com';
 const TOKEN_KEY = 'solarman-web';
 const REFRESH_KEY = 'solarman-web-refresh';
 
-const queue = new CallQueue(1500);
+export const queue = new CallQueue(1500);
 
 type Rec = Record<string, unknown>;
 

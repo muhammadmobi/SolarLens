@@ -10,7 +10,16 @@ export class CallQueue {
   private chain: Promise<void> = Promise.resolve();
   private lastStart = 0;
 
-  constructor(private readonly minGapMs: number) {}
+  /**
+   * Public and mutable so a test can set it to 0.
+   *
+   * The spacing is right in production and absurd in a unit test: the client
+   * tests make about thirty calls, which at 1.5-2s apart would take a minute
+   * to assert things that have nothing to do with rate limiting. Faking timers
+   * instead does not work - this queue is a module-level singleton, so a timer
+   * left pending when one test ends stalls the chain for every test after it.
+   */
+  constructor(public minGapMs: number) {}
 
   run<T>(fn: () => Promise<T>): Promise<T> {
     const result = this.chain.then(async () => {
