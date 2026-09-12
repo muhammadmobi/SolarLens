@@ -202,6 +202,28 @@ test.describe('Overview', () => {
     await expect(tiles(1).locator('> div')).toHaveCount(12);
   });
 
+  test('shows every figure it has, even when that is not a multiple of four', async ({ page }) => {
+    // Before dawn a system reports no peak, no full-load hours, no string
+    // count and no inverter temperature, leaving seven figures rather than
+    // eight. An earlier rule trimmed the count to a multiple of four so the
+    // grid could not end raggedly - and hid three of the seven to do it.
+    // Metrics without fullLoadHours: everything else the on-grid column shows
+    // is still there, so the count lands on seven.
+    const invs = inverters();
+    (invs[0] as { metrics: string }).metrics = metrics({
+      genMonthKwh: 185, genYearKwh: 13677, genTotalKwh: 48852,
+    });
+    await stubApi(page, { invs });
+    await page.goto('/');
+
+    const cells = page.locator('.ovsys').nth(0).locator('.ovtiles > div');
+    const n = await cells.count();
+    expect(n % 4).not.toBe(0);
+    // Nothing available is dropped; the last tile stretches across what is
+    // left of its row instead.
+    await expect(cells.nth(n - 1)).toHaveAttribute('style', /grid-column: span [2-4]/);
+  });
+
   test('fits one screen when the window is big enough, and scrolls when it is not', async ({ page }, testInfo) => {
     await stubApi(page);
     const fits = () => page.evaluate(() =>

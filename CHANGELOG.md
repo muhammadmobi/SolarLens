@@ -33,7 +33,7 @@ The overview in one screen, and the vendor clients under test.
   token acquisition and refresh-and-retry on both a bare 401 and the vendor's
   own `2101` code, the browser-session refresh flow, the error envelopes and
   the HTTP failure paths. Twenty-two tests, and the providers go from 6–65%
-  covered to 67–85%.
+  covered to 67–85%. The suite is 122 unit tests and 154 end-to-end tests.
 
   Enforced coverage is now **83.7% statements, 84.9% functions, 85.3% lines**,
   with thresholds raised to 80. Branches sits at 65% and is held at 63: the
@@ -55,6 +55,14 @@ The overview in one screen, and the vendor clients under test.
   real payloads do send strings; the first draft of the test did not, which is
   how it surfaced.
 
+- **Coverage now measures the file that decides what leaves the Worker.** The
+  scope was `src/providers/**`, so `public-view.ts` — which strips vendor
+  station ids, plant ids and serial numbers from every public response — carried
+  thirteen tests and no coverage number. Widening the scope raised the enforced
+  figures rather than lowering them, and the README now carries the whole-`src/`
+  figure too, 55.2%, so the ground left to the Playwright suite is visible
+  rather than hidden behind a flattering scope.
+
 ### Changed
 
 - **The overview is one screenful.** It was three full-width bands — energy
@@ -70,13 +78,13 @@ The overview in one screen, and the vendor clients under test.
   drawn in the diagram and then repeated as figures underneath it, which is
   most of what made the figures band the tallest of the three.
 
-  The figures are tiles, four across, trimmed to a multiple of four so the grid
-  never ends in a ragged row: eight for an on-grid inverter, twelve once there
-  is a battery to describe. **This year** and **full-load hours** appear for the
-  first time — both were already in the database, and full-load hours is the one
-  figure that compares a 12 kW array with a 3.5 kW one fairly. **Model** and
-  **datalogger signal** are gone from this page: they never change, and the
-  Devices tab is where hardware belongs.
+  The figures are tiles, four across, up to twelve — eight for an on-grid
+  inverter, twelve once there is a battery to describe, and fewer than either
+  when the vendor has not reported yet. **This year** and **full-load hours**
+  appear for the first time; both were already in the database, and full-load
+  hours is the one figure that compares a 12 kW array with a 3.5 kW one fairly.
+  **Model** and **datalogger signal** are gone from this page: they never
+  change, and the Devices tab is where hardware belongs.
 
   The two systems do not have the same amount to say — twelve figures against
   eight — and that difference has to land somewhere. **The diagrams match and
@@ -88,7 +96,7 @@ The overview in one screen, and the vendor clients under test.
   318px against 203px, then the figures were stretched to fill and the curve was
   pinned at 216px, which spent on air between two rows of numbers what the chart
   wanted. The figures now take the height they need and the curve takes the
-  rest, at 378px and 338px.
+  rest, at 378px and 337px.
 
   **Everything above the chart is one link to that system's detail page**, as
   the whole card was before — a reader who wants more about a figure clicks the
@@ -104,6 +112,49 @@ The overview in one screen, and the vendor clients under test.
 
   `sysCard`, `flowStats` and `battPanel` existed only to draw the band this
   replaces, and are removed with it.
+
+- **The overview's energy flow is a row, not a plan view.** The detail page puts
+  the house at the centre and hangs solar, grid and battery off it, which is the
+  truer picture of how a system is wired and needs the width to say so. In a
+  half-width column it shrank until its own labels could not be read — and
+  because a hybrid has more to draw, its picture came out at 203px against the
+  on-grid plant's 318px, which reads as a rendering fault rather than as a
+  system with more to show. The overview now draws solar, the house, the battery
+  where there is one, then the grid, left to right, with an arrow between each
+  pair lit only where power is actually moving. Both rows are 115px. The plan
+  view is one click away on the system page, which still draws it.
+
+- **Figures are set as numbers, not as text.** Anything past a thousand kWh
+  reads in MWh — `49.1 MWh` rather than `49082 kWh` — and every unit is smaller
+  and quieter than its figure. The chart's caption moved out of the drawing and
+  into the page above it: what the reading is on the left, the day's peak on the
+  right, set in the page's own type instead of scaled with the picture.
+
+### Fixed
+
+- **Every figure a system reports is shown, even when that is not four of
+  them.** The tile grid trimmed its count to a multiple of four so a row could
+  not end raggedly — and with seven figures available it showed four and hid
+  three. Seven is not hypothetical: it is what an on-grid plant reports before
+  dawn, when peak, full-load hours, string count and inverter temperature have
+  no value yet. The last tile now stretches across what is left of its row
+  instead, and a test holds it there.
+
+- **Documentation that had drifted, some of it for longer than this release.**
+  The HTTP API table still marked every `GET` as needing `API_TOKEN`, untrue
+  since reads became public, and would have misled anyone using the API.
+  `docs/feature-gaps.md` still advertised a "token-gated JSON API" and still
+  listed history as stored-but-not-presented, after the Historical Data tab had
+  shipped. The testing section claimed 86 unit tests where there were 100, and
+  its coverage table still listed `weather.ts`, deleted two days earlier. The
+  project layout listed that same file and hid eight scripts behind the word
+  "scripts".
+
+- **Two documented figures were wrong.** The measurement this layout was
+  justified by was quoted as 2,889px "on a 1440×900 laptop" — real, but taken in
+  a window about 725px wide, where the columns stack. At 1440×900 the old
+  overview is 1,695px. And the one-screen rule was documented as needing 820px
+  of window height after the value had already dropped to 660px.
 
 ## [2.0.0] — 2026-09-11
 
