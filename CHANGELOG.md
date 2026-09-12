@@ -11,6 +11,77 @@ into its release notes on GitHub, which is where the download links and the
 "what changed since you last looked" view live. One is the source, the other is
 the announcement.
 
+## [2.2.0] — 2026-09-12
+
+The three gaps `docs/feature-gaps.md` had carried since the first release, closed.
+
+### Added
+
+- **Every system's day ends where its own sun sets.** A solar day runs from the
+  array's midnight to the array's midnight, and until now every day in this app
+  was cut at the *reader's* instead. Open the dashboard from a country five
+  hours away and each day's yield was two half-days glued together, the peak
+  time named an hour that never happened over the panels, and "produced today"
+  quietly meant "produced since your midnight".
+
+  Both vendors do say where a plant is, in three different shapes: SolisCloud
+  sends whole hours, SolarMan's station detail sends seconds and its station
+  search sends an IANA zone name. All three are read, seconds preferred over
+  hours because a half-hour zone cannot be stated in whole hours at all. The
+  offset is stored per inverter by migration 0009 and refreshed on every poll.
+
+  It is applied everywhere a day is counted: the daily history query splits on
+  each plant's own midnight, `/api/series` opens its window at the earliest of
+  the plants' midnights so no system loses its morning, and on the page every
+  curve, peak, tile and legend is cut back to its own system's day. A plant
+  whose vendor says nothing falls back to the reader's midnight, which is
+  exactly what every plant used before — so nothing changes for a reader
+  sitting next to their panels, which is the common case and the one that was
+  never wrong.
+
+- **Self-sufficiency and self-consumption, as percentages.** Self-use was shown
+  in kilowatt-hours and left the actual question unanswered. The system page now
+  gives both ratios, because they are different questions and a day can be high
+  on one and low on the other: self-sufficiency is the share of the house load
+  met without the grid, self-consumption the share of generation that stayed
+  home rather than being exported.
+
+  Neither is shown where the denominator was never metered. An on-grid plant
+  with no current clamp reports no load at all, and before dawn a metered house
+  has consumed nothing — "0 % self-sufficient" would be a claim about a day
+  that has not started. The pair is clamped at 100, because the vendors round
+  the two counters independently and they can cross by a rounding step.
+
+- **Installable.** A web app manifest, both icon sizes rendered from the
+  existing `icon.svg` by `scripts/make-icons.mjs`, and a service worker. Added
+  to a phone's home screen it opens in its own window with no browser chrome.
+
+  The worker goes to the network first and reads its cache only when the
+  network failed, which is the whole design: a dashboard that served yesterday's
+  watts from disk would be worse than one that failed honestly. It never
+  replays a POST, and a page opened over plain HTTP simply does not register it
+  and loses nothing.
+
+### Changed
+
+- **`GET /api/series` picks its own window when asked to.** Omit `from` and it
+  opens at the earliest plant's midnight instead of a fixed 24 hours back, since
+  only the Worker knows every plant's zone before the page has any data. `tz`,
+  the caller's UTC offset in minutes, is the fallback. Passing `from`
+  explicitly behaves exactly as it did.
+
+- **Clock labels on a chart are the plant's.** "Peak at 13:04" is a statement
+  about the sun over the array, not about where the page happens to be open.
+
+### Fixed
+
+- **Three rows of `docs/feature-gaps.md` claimed less than the app does.**
+  Full-load hours were listed as captured but not surfaced after shipping on the
+  overview in 2.1.0; BMS detail was listed as unsurfaced while pack voltage,
+  current, temperature and both charge limits were already on the system page;
+  and the day/month/year row read as a flat no despite the Historical Data tab.
+  Section 4 now lists what is actually left, none of it small.
+
 ## [2.1.0] — 2026-09-12
 
 The overview in one screen, and the vendor clients under test.
@@ -463,6 +534,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.2.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/muhammadmobi/SolarLens/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/muhammadmobi/SolarLens/releases/tag/v1.0.0

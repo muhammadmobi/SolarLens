@@ -7,7 +7,13 @@ import { extname, join, normalize } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..', 'public');
 const PORT = Number(process.env.PORT ?? 4173);
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
+// Kept in step with public/_headers: the manifest has to arrive as JSON or
+// Chrome discards it, and the install tests would pass against a broken app.
+const TYPES = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css',
+  '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
+};
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
