@@ -11,7 +11,20 @@ into its release notes on GitHub, which is where the download links and the
 "what changed since you last looked" view live. One is the source, the other is
 the announcement.
 
+**Close `[Unreleased]` when you cut a tag.** It is the step this file forgets:
+by 2026-09-12 the section had run to 331 lines and 45 entries covering two
+tagged releases, because the tags were cut and their notes written from the tag
+annotation while nothing was moved out of here. The dates below are the tags'
+dates, not the dates the work landed, which is why 2.0.0 reads as five days
+rather than one.
+
 ## [Unreleased]
+
+Nothing yet.
+
+## [2.1.0] — 2026-09-12
+
+The overview in one screen, and the vendor clients under test.
 
 ### Added
 
@@ -92,34 +105,13 @@ the announcement.
   `sysCard`, `flowStats` and `battPanel` existed only to draw the band this
   replaces, and are removed with it.
 
-- **The dashboard opens without a login.** `GET /api/*` now answers everyone, so
-  the URL works on a phone, a second laptop or a relative's tablet with nothing
-  to copy first. The per-device `/auth?t=<API_TOKEN>` unlock was a tax paid on
-  every new device and forgotten exactly when it mattered — and, because the
-  cookie *is* the token, a token lost from `.dev.vars` locked out every device
-  that had not already been unlocked.
+## [2.0.0] — 2026-09-11
 
-  The cost is bounded rather than accepted. A new `src/public-view.ts` strips
-  vendor identifiers from every response before it leaves the Worker: station
-  and plant ids become positional aliases (`s1`, `s2`), serial numbers are
-  masked to their last four characters, and the stored raw vendor payload is not
-  served at all. The aliases are positional rather than hashed on purpose — a
-  SolarMan station id is eight digits, so a hash of one can be reversed by
-  trying all hundred million of them.
-
-  Nothing readable can spend money or change data: `POST /api/poll` keeps the
-  `API_TOKEN` gate because it makes live vendor calls, and `/api/ingest/*` keeps
-  its own `INGEST_TOKEN`. Read endpoints now send `Cache-Control: public,
-  max-age=60` so a burst is answered at the edge rather than against D1, whose
-  free-tier row budget this project has exhausted twice.
-
-  What this does not hide is the measurements. Anyone with the URL can see
-  generation and consumption, and a consumption curve says when a building is
-  occupied. Sites that mind can put Cloudflare Access in front of the Worker,
-  which covers the `workers.dev` URL and needs no change here.
-
-- Plant names are still published: they are what each system is labelled with on
-  screen. Rename the plant in the vendor portal if yours names a person.
+Five days that turned a working aggregator into something worth opening: a
+dashboard that needs no login, tabs for alerts and history, a relay that
+installs itself, and the interface rebuild of the 7th, which this version
+originally carried on its own — the tag was cut on the 11th, by which point
+four more days of work had landed behind it.
 
 ### Added
 
@@ -221,18 +213,42 @@ the announcement.
 - Branch protection on `main`: pull requests required, linear history, no force
   pushes, no deletions.
 
-### Removed
-
-- **The Google Weather API lookup.** Google Maps Platform requires a billing
-  account, and a dashboard for two inverters is not worth a billing
-  relationship. SolisCloud already ships a condition, a min/max and sunrise and
-  sunset with every station snapshot, for free, and that is what the header
-  shows. The only thing lost is a current temperature, and SolarMan — which
-  ships no weather of its own — no longer borrows any. `GOOGLE_WEATHER_KEY`,
-  `SITE_LAT` and `SITE_LON` are gone with it; the last two were the site's
-  coordinates, so that is a privacy improvement as much as a billing one.
+- Energy flow diagrams — PV, battery, house and grid with animated,
+  direction-aware arms — drawn per system rather than for the fleet as a whole.
+- Per-system detail pages on a hash route, reachable from any card.
+- A Power page carrying the complete figure set for every system.
+- Per-system generation curves alongside the combined fleet curve.
 
 ### Changed
+
+- **The dashboard opens without a login.** `GET /api/*` now answers everyone, so
+  the URL works on a phone, a second laptop or a relative's tablet with nothing
+  to copy first. The per-device `/auth?t=<API_TOKEN>` unlock was a tax paid on
+  every new device and forgotten exactly when it mattered — and, because the
+  cookie *is* the token, a token lost from `.dev.vars` locked out every device
+  that had not already been unlocked.
+
+  The cost is bounded rather than accepted. A new `src/public-view.ts` strips
+  vendor identifiers from every response before it leaves the Worker: station
+  and plant ids become positional aliases (`s1`, `s2`), serial numbers are
+  masked to their last four characters, and the stored raw vendor payload is not
+  served at all. The aliases are positional rather than hashed on purpose — a
+  SolarMan station id is eight digits, so a hash of one can be reversed by
+  trying all hundred million of them.
+
+  Nothing readable can spend money or change data: `POST /api/poll` keeps the
+  `API_TOKEN` gate because it makes live vendor calls, and `/api/ingest/*` keeps
+  its own `INGEST_TOKEN`. Read endpoints now send `Cache-Control: public,
+  max-age=60` so a burst is answered at the edge rather than against D1, whose
+  free-tier row budget this project has exhausted twice.
+
+  What this does not hide is the measurements. Anyone with the URL can see
+  generation and consumption, and a consumption curve says when a building is
+  occupied. Sites that mind can put Cloudflare Access in front of the Worker,
+  which covers the `workers.dev` URL and needs no change here.
+
+- Plant names are still published: they are what each system is labelled with on
+  screen. Rename the plant in the vendor portal if yours names a person.
 
 - **The energy flow diagram redrawn.** The house is now the load itself —
   before, the diagram drew a house in the middle *and* a separate
@@ -274,6 +290,23 @@ the announcement.
   as one long wall.
 - Overview order now runs energy flow, then figures, then curves, with each
   system in its own box in every band.
+
+- Refreshed visual design throughout: system cards, status pills, typography
+  and spacing.
+- Navigation renamed to plain words — Overview, Power, Devices.
+- The separate Energy flow tab was folded into the overview, where the diagram
+  now leads.
+
+### Removed
+
+- **The Google Weather API lookup.** Google Maps Platform requires a billing
+  account, and a dashboard for two inverters is not worth a billing
+  relationship. SolisCloud already ships a condition, a min/max and sunrise and
+  sunset with every station snapshot, for free, and that is what the header
+  shows. The only thing lost is a current temperature, and SolarMan — which
+  ships no weather of its own — no longer borrows any. `GOOGLE_WEATHER_KEY`,
+  `SITE_LAT` and `SITE_LON` are gone with it; the last two were the site's
+  coordinates, so that is a privacy improvement as much as a billing one.
 
 ### Fixed
 
@@ -341,26 +374,6 @@ the announcement.
   the improved metrics away and the new fields stayed blank until the vendor
   happened to produce a fresh sample. Existing rows now have their derived
   columns refreshed in place.
-
-## [2.0.0] — 2026-09-07
-
-The interface rebuild. Same data, restructured around what you actually look at.
-
-### Added
-
-- Energy flow diagrams — PV, battery, house and grid with animated,
-  direction-aware arms — drawn per system rather than for the fleet as a whole.
-- Per-system detail pages on a hash route, reachable from any card.
-- A Power page carrying the complete figure set for every system.
-- Per-system generation curves alongside the combined fleet curve.
-
-### Changed
-
-- Refreshed visual design throughout: system cards, status pills, typography
-  and spacing.
-- Navigation renamed to plain words — Overview, Power, Devices.
-- The separate Energy flow tab was folded into the overview, where the diagram
-  now leads.
 
 ## [1.0.0] — 2026-09-06
 
