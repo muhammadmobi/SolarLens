@@ -57,8 +57,8 @@ station on SolarMan. No account identifiers appear in this document.
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Active alarm list | ● | ◐ message centre | ○ |
-| Alarm code, level, duration, recovery time | ● | ◐ | ○ |
+| Active alarm list | ● | ◐ message centre | ◐ the Alerts tab raises the vendor's own alarm count and level, plus offline and no-data |
+| Alarm code, level, duration, recovery time | ● | ◐ | ◐ level only — the plant reports a count and a severity, never the codes behind them |
 | **Suggested treatment text** | ● | ○ | ○ Solis actually explains what a fault means |
 | Fault / warning history per device | ● | ◐ | ○ |
 | Push or email notification on fault or outage | ◐ | ◐ | ○ out of scope |
@@ -68,7 +68,7 @@ station on SolarMan. No account identifiers appear in this document.
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
 | Day / month / year / lifetime charts | ● | ● | ◐ day and per-day history; no month or year rollup |
-| Battery SOC history | ◐ | ● | ○ out of scope |
+| Battery SOC history | ◐ | ● | ◐ every sample's SOC is stored and served by `/api/series`; only the live figure is drawn |
 | Power-analysis view (generation vs consumption vs grid) | ◐ | ● | ○ out of scope |
 | CSV / data export | ● | ○ | ○ out of scope — but every sample **is** stored |
 | Scheduled email reports | ● | ○ | ○ out of scope |
@@ -80,7 +80,7 @@ station on SolarMan. No account identifiers appear in this document.
 |---|:--:|:--:|---|
 | Earnings today / month / lifetime, tariff config | ● | ● | ○ out of scope |
 | CO₂ avoided, trees, coal saved | ● | ● | ○ out of scope |
-| Current weather, 7-day forecast, sunrise/sunset | ● | ● | ○ out of scope |
+| Current weather, 7-day forecast, sunrise/sunset | ● | ● | ◐ today's conditions, min/max and sunrise/sunset where the vendor ships them with the snapshot; nothing is fetched, so no forecast |
 | Irradiance | ◐ | ◐ | ○ needs a weather station |
 
 ### Fleet, presentation, control
