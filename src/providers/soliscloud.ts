@@ -1,7 +1,7 @@
 import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
-import { num, pick, toEpochSeconds, toKwh, toWatts } from './units';
+import { num, pick, toEpochSeconds, toKwh, toWatts, tzOffsetSec } from './units';
 
 export interface SolisCredentials {
   keyId: string;
@@ -415,6 +415,7 @@ export class SolisCloudProvider implements Provider {
       id: String(r.id),
       name: String(pick(r, 'stationName', 'name') ?? r.id),
       capacityW: toWatts(pick(r, 'capacity'), pick(r, 'capacityStr')),
+      tzOffsetSec: tzOffsetSec(r),
     }));
   }
 
@@ -436,6 +437,7 @@ export class SolisCloudProvider implements Provider {
         plantId,
         plantName: String(pick(r, 'stationName') ?? ''),
         capacityW: toWatts(pick(r, 'power'), pick(r, 'powerStr')),
+        tzOffsetSec: tzOffsetSec(r),
       };
     });
     if (invs.length > 0) return invs;

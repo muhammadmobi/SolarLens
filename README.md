@@ -12,6 +12,8 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Reads well in either theme.** A three-state toggle in the top-right corner follows your system, or forces light or dark; the choice is remembered and applied before first paint.
 - **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's live output is set against its rated size.
 - **Open it and it is there.** No login, no token to copy onto each device — the readings are public by design, with vendor identifiers stripped from every response before it leaves the Worker.
+- **Each system's day ends where its own sun sets.** Every plant's timezone is stored, and every figure, curve and daily row is cut at that plant's midnight rather than at the reader's — so two systems in different countries are each shown their own day, on the same screen.
+- **Installable.** Add it to a phone's home screen and it opens in its own window. The worker behind that goes to the network first and falls back to a cache only when there is none, so an installed copy can never show a stale reading as a live one.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
 
 > Not affiliated with Ginlong/Solis or IGEN Tech/SolarMan. 
@@ -477,7 +479,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**122 unit tests** and **154 end-to-end tests** (77 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**133 unit tests** and **176 end-to-end tests** (88 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -489,7 +491,7 @@ npm run test:e2e:ui         # playwright's inspector, for stepping through a fai
 
 ### Unit tests — `tests/unit/`
 
-Seven files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
+Nine files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
 - **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
@@ -497,10 +499,11 @@ Seven files, one concern each. They are all pure-function tests against fixtures
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
+- **`timezone.test.ts`** — the three shapes a vendor states a timezone in, and where a plant's day begins once one is known: east and west of Greenwich, on it, and on the half hour.
 
 ### End-to-end tests — `tests/e2e/`
 
-One spec file of 77 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
+One spec file of 88 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
 
 They assert what a person sees, grouped by what it is for: the overview and its layout at both widths, the theme toggle (including that the choice is applied before first paint), the labelled header totals, the energy-flow diagram (structure, direction from the signs, wire thickness tracking power, per-diagram marker ids), the battery panel and the derived cycle count, offline handling and zeroed figures, the Alerts tab, the collapsible Power sections and the clickable chart legend, the device inventory, raw telemetry filtering, and the token-gate guidance.
 
@@ -512,22 +515,27 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **Enforced** — `src/providers/` + `src/public-view.ts` | **83.7%** | **65.0%** | **84.9%** | **85.3%** |
+| **Enforced** — `src/providers/` + `src/public-view.ts` | **83.8%** | **65.8%** | **85.4%** | **85.9%** |
 | &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 90% | **100%** | **100%** |
-| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp scaling | 96% | 97% | 100% | 100% |
+| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 92% | 91% | 100% | 100% |
 | &nbsp;&nbsp;`solarman.ts` | 85% | 63% | 78% | 85% |
 | &nbsp;&nbsp;`soliscloud.ts` | 84% | 63% | 88% | 86% |
 | &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 67% | 58% | 62% | 70% |
-| All of `src/`, Worker-only code included | 55.2% | 47.5% | 57.1% | 55.8% |
+| All of `src/`, Worker-only code included | 55.6% | 47.7% | 57.5% | 56.3% |
 | Thresholds enforced in CI | **80%** | **63%** | **80%** | **80%** |
 
 Two figures, because there are two honest answers. The enforced one measures what
-a unit test can reach: pure functions over payloads. `index.ts` (request
-routing), `db.ts` (D1 SQL) and `poll.ts` (cron fan-out) need a Worker and a
-database, and the Playwright suite exercises them through HTTP instead — so
-counting them here would report a low number for code that *is* tested, just not
-here. The whole-`src/` row is in the table regardless, so the gap is visible
-rather than hidden behind a flattering scope. Per file:
+a unit test can reach: pure functions over payloads.
+
+The whole-`src/` row is the other answer, and it is the one to read as a
+warning. **`index.ts` has no automated test of any kind.** Neither does most of
+`db.ts` or `poll.ts`. The end-to-end suite does not reach them: it serves
+`public/` from `scripts/serve-static.mjs` and stubs every `/api/*` route with a
+fixture, so the Worker never runs in a test. Request routing, the auth
+middleware, the SQL and the cron fan-out are covered by deploying them and
+watching, and by nothing else. Closing that needs a Worker test harness —
+`@cloudflare/vitest-pool-workers` or `unstable_dev` — which the project does not
+have yet. Per file:
 
 ```bash
 npx vitest run --coverage --coverage.include=src/**/*.ts
@@ -582,9 +590,9 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | Route | Auth | Purpose |
 |---|---|---|
 | `GET /api/latest` | open | newest reading per inverter, with `metrics` |
-| `GET /api/series?from=&to=` | open | readings in a range (≤ 31 days) |
+| `GET /api/series?from=&to=&tz=` | open | readings in a range (≤ 31 days). Omit `from` and the window opens at the earliest plant's own midnight; `tz` is the fallback for a plant whose vendor reports no timezone |
 | `GET /api/health` | open | recent poll log and the newest line per feed |
-| `GET /api/history?days=&tz=` | open | one row per inverter per day (`tz` is the caller UTC offset in minutes) |
+| `GET /api/history?days=&tz=` | open | one row per inverter per day, each cut at that plant's own midnight (`tz` is the fallback, the caller's UTC offset in minutes) |
 | `GET /api/devices` | open | hardware inventory |
 | `POST /api/poll` | API_TOKEN | poll all providers now — makes live vendor calls, so it spends quota |
 | `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
@@ -609,7 +617,8 @@ solar-lens/
 ├── migrations/               D1 schema, applied with `wrangler d1 migrations apply`
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
-│                              0008 read indexes on readings.ts and poll_log)
+│                              0008 read indexes on readings.ts and poll_log
+│                              0009 the plant's own UTC offset on inverters)
 ├── src/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
 │   ├── poll.ts               builds providers from present secrets; polls; plant filter
@@ -625,7 +634,11 @@ solar-lens/
 ├── public/
 │   ├── index.html            the dashboard (no build step)
 │   ├── _headers              the same CSP as src/index.ts, for edge-served requests
-│   └── icon.svg              app icon and favicon
+│   ├── manifest.webmanifest  makes it installable: home screen, own window
+│   ├── sw.js                 network-first worker; a cache is the offline fallback
+│   ├── icon.svg              app icon and favicon
+│   └── icon-192.png          rendered from icon.svg for installs and iOS
+│       icon-512.png
 ├── agent/solis-relay.mjs     local Chrome relay for SolisCloud
 ├── setup-relay.cmd           double-click entry point for the relay installer
 ├── scripts/
@@ -637,7 +650,8 @@ solar-lens/
 │   ├── probe-solis.mjs          one signed Solis request, raw response printed
 │   ├── seed-local.mjs           a day of synthetic readings for the local DB
 │   ├── capture-portals.mjs      saves portal responses as test fixtures
-│   └── serve-static.mjs         serves public/ for the e2e run
+│   ├── serve-static.mjs         serves public/ for the e2e run
+│   └── make-icons.mjs           renders icon.svg to the manifest's PNG sizes
 ├── tests/
 │   ├── unit/units.test.ts       W / kWh / timestamp scaling
 │   ├── unit/normalize.test.ts   both vendor normalisers, signs and statuses

@@ -34,8 +34,8 @@ station on SolarMan. No account identifiers appear in this document.
 | Consumption today / lifetime | ● | ● | ● |
 | Grid import & export, today and lifetime | ● | ● | ● |
 | Battery charge & discharge, today and lifetime | ● | ● | ● hybrid only |
-| Self-consumption / self-sufficiency ratios | ◐ | ● | ◐ self-use kWh stored, ratios not shown |
-| Full-load hours | ● | ● | ◐ captured, not surfaced |
+| Self-consumption / self-sufficiency ratios | ◐ | ● | ● both, on the system page, where the load is metered |
+| Full-load hours | ● | ● | ● on the overview |
 
 ### Hardware and diagnostics
 
@@ -50,15 +50,15 @@ station on SolarMan. No account identifiers appear in this document.
 | Per-phase AC voltage, current, frequency | ● | ● | ● both (Solis adds power factor and DC bus) |
 | Inverter temperature | ● | ● | ● both |
 | Device types beyond the inverter (battery, meter, EPM, weather station) | ● | ◐ | ○ schema supports them, nothing populates them |
-| BMS detail (pack voltage, current, temperature, charge limits) | ○ | ● | ○ captured in the raw payload, not surfaced |
+| BMS detail (pack voltage, current, temperature, charge limits) | ○ | ● | ● all five on the system page |
 | Raw register / telemetry dump | ○ | ○ | ● searchable table — neither app offers this |
 
 ### Alarms and events
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Active alarm list | ● | ◐ message centre | ○ |
-| Alarm code, level, duration, recovery time | ● | ◐ | ○ |
+| Active alarm list | ● | ◐ message centre | ◐ the Alerts tab raises the vendor's own alarm count and level, plus offline and no-data |
+| Alarm code, level, duration, recovery time | ● | ◐ | ◐ level only — the plant reports a count and a severity, never the codes behind them |
 | **Suggested treatment text** | ● | ○ | ○ Solis actually explains what a fault means |
 | Fault / warning history per device | ● | ◐ | ○ |
 | Push or email notification on fault or outage | ◐ | ◐ | ○ out of scope |
@@ -67,8 +67,8 @@ station on SolarMan. No account identifiers appear in this document.
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Day / month / year / lifetime charts | ● | ● | ○ out of scope |
-| Battery SOC history | ◐ | ● | ○ out of scope |
+| Day / month / year / lifetime charts | ● | ● | ◐ day and per-day history; no month or year rollup |
+| Battery SOC history | ◐ | ● | ◐ every sample's SOC is stored and served by `/api/series`; only the live figure is drawn |
 | Power-analysis view (generation vs consumption vs grid) | ◐ | ● | ○ out of scope |
 | CSV / data export | ● | ○ | ○ out of scope — but every sample **is** stored |
 | Scheduled email reports | ● | ○ | ○ out of scope |
@@ -80,7 +80,7 @@ station on SolarMan. No account identifiers appear in this document.
 |---|:--:|:--:|---|
 | Earnings today / month / lifetime, tariff config | ● | ● | ○ out of scope |
 | CO₂ avoided, trees, coal saved | ● | ● | ○ out of scope |
-| Current weather, 7-day forecast, sunrise/sunset | ● | ● | ○ out of scope |
+| Current weather, 7-day forecast, sunrise/sunset | ● | ● | ◐ today's conditions, min/max and sunrise/sunset where the vendor ships them with the snapshot; nothing is fetched, so no forecast |
 | Irradiance | ◐ | ◐ | ○ needs a weather station |
 
 ### Fleet, presentation, control
@@ -92,7 +92,7 @@ station on SolarMan. No account identifiers appear in this document.
 | Favourites, grouping, tags | ● | ◐ | ○ |
 | Physical layout / site map | ● | ○ | ○ |
 | Large-screen / TV mode | ● | ○ | ○ |
-| Native mobile app | ● | ● | ◐ responsive web; no PWA install yet |
+| Native mobile app | ● | ● | ◐ installable web app — home screen, own window, offline shell; no native build |
 | Remote control (charge schedules, export limit, firmware) | ● | ◐ | ○ **deliberately not** — read-only by design |
 | Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API, reads open, writes gated |
 
@@ -129,22 +129,34 @@ station on SolarMan. No account identifiers appear in this document.
    need a token.
 6. **Both systems on one screen without scrolling** — a column each, sized to a laptop window,
    so the two are compared rather than remembered.
+7. **Every system's day ends where its own sun sets.** Both portals show a
+   plant's day in the plant's timezone and assume you are standing near it;
+   read either from another country and "today" quietly becomes someone else's.
+   SolarLens stores each plant's offset and cuts every figure, curve and daily
+   row on that plant's midnight, so two systems five hours apart are each shown
+   their own day on the same screen.
 
 ---
 
 ## 4. Still missing, and worth doing
 
+The three gaps this section carried through 2.1 — self-sufficiency as a ratio,
+a plant-timezone-correct "today", and PWA install — are done. What is left is
+larger than they were, which is why none of it is marked S.
+
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | Self-sufficiency as a ratio | Self-use is shown in kWh on the overview; the *percentage* of load it covers is still only instantaneous | S |
-| 2 | Plant-timezone-correct "today" | "Today" currently uses the *viewer's* midnight; plants carry their own timezone | S |
-| 3 | PWA install | Phone use without a browser tab | S |
+| 1 | Vendor alarm list and fault history | Both portals know why an inverter stopped; SolarLens infers staleness and can only say *that* it did. Solis even ships suggested treatment text, which is the single most useful thing an owner account gets and the one thing neither app's API documents | M |
+| 2 | Batteries and meters as first-class devices | The schema has `battery` and `meter` kinds and nothing writes them: only `INVERTER` and `COLLECTOR` are fetched, so a battery's own firmware, serial and status are invisible even though the pack's live figures are not | M |
+| 3 | Month and year rollups | Per-day history exists and the vendors' month and year totals are stored, but nothing charts them, so "was this August better than last?" still means opening the vendor app | M |
+| 4 | Daylight saving on a stored offset | A plant's UTC offset is read at discovery and refreshed on every poll, so a zone that observes DST is right within five minutes of the switch and wrong for those five. Storing the zone *name* instead of the offset would remove the window entirely | S |
 
 ## 5. Out of scope, by decision
 
 - **CSV export and scheduled reports.** History itself is presented — the Historical Data tab
   gives produced, consumed, imported, exported, battery in and out, peak and sample count per
-  day — but there is no way to get it out of the browser.
+  day, each day cut at the plant's own midnight — but there is no way to get it out of the
+  browser.
 - **Weather, CO₂/trees, earnings and tariffs.**
 - **Notifications** (email/push/webhook on outage or fault).
 - **Battery on the on-grid system** — it has none, so the block is hidden rather than showing
@@ -166,3 +178,8 @@ station on SolarMan. No account identifiers appear in this document.
   (`batteryCount` / `batteries`), not by whether a number happens to be present.
 - **Per-string *power* is reported; per-string voltage and current are not** — at least not on
   the plant Device page, where `pow1`…`pow32` are watts only.
+- **The two vendors state a timezone three different ways.** SolisCloud sends whole hours
+  (`timeZone: 5`), SolarMan's station detail sends seconds (`timeZoneOffset: 18000`) and its
+  station search sends an IANA name (`regionTimezone: "Asia/Karachi"`). All three are read, and
+  seconds win over hours where a plant sends both, because a half-hour zone cannot be said in
+  whole hours at all.

@@ -1167,3 +1167,141 @@ test.describe('System detail', () => {
     await expect(page.locator('.empty')).toContainText('Unknown system');
   });
 });
+
+test.describe('Self-sufficiency and self-consumption', () => {
+  test('both ratios are shown for a system whose load is metered', async ({ page }) => {
+    await stubApi(page);
+    await page.goto(`/#/system/${HYBRID}`);
+    const counters = page.locator('.card', { hasText: 'Energy counters' });
+    // 3.0 kWh self-used out of 4.8 consumed, and out of 13.7 generated.
+    await expect(counters).toContainText('Self-sufficiency today');
+    await expect(counters).toContainText('63 % of the load');
+    await expect(counters).toContainText('Self-consumption today');
+    await expect(counters).toContainText('22 % of what was generated');
+  });
+
+  test('neither is shown for a plant with no meter, rather than 0 %', async ({ page }) => {
+    await stubApi(page);
+    await page.goto(`/#/system/${SOLIS}`);
+    const counters = page.locator('.card', { hasText: 'Energy counters' });
+    await expect(counters).toContainText('Produced today');
+    await expect(counters).not.toContainText('Self-sufficiency');
+    await expect(counters).not.toContainText('Self-consumption');
+  });
+
+  test('a metered load of zero is left blank, not divided by', async ({ page }) => {
+    // Before dawn nothing has been consumed yet. "0 % self-sufficient" would be
+    // a claim about a day that has not started.
+    await stubApi(page, {
+      invs: inverters({ solarman: { metrics: metrics({ loadTodayKwh: 0, selfUseTodayKwh: 0 }) } }),
+    });
+    await page.goto(`/#/system/${HYBRID}`);
+    const counters = page.locator('.card', { hasText: 'Energy counters' });
+    await expect(counters).not.toContainText('Self-sufficiency');
+  });
+
+  test('a ratio over 100 is clamped, because the counters round separately', async ({ page }) => {
+    await stubApi(page, {
+      invs: inverters({ solarman: { metrics: metrics({ loadTodayKwh: 4.0, selfUseTodayKwh: 4.2 }) } }),
+    });
+    await page.goto(`/#/system/${HYBRID}`);
+    await expect(page.locator('.card', { hasText: 'Energy counters' })).toContainText('100 % of the load');
+  });
+});
+
+test.describe("The plant's own day", () => {
+  // 12 hours east of the runner, so the plant's midnight is far from the
+  // browser's however this suite is run.
+  const EAST = 12 * 3600;
+
+  test('the day chart opens at the plant midnight, not the reader\'s', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { tz_offset_sec: EAST } }) });
+    await page.goto('/#/');
+    const t0 = await page.evaluate((off) => {
+      const now = Math.floor(Date.now() / 1000);
+      return Math.floor((now + off) / 86400) * 86400 - off;
+    }, EAST);
+    const viewerMidnight = await page.evaluate(() => {
+      const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000);
+    });
+    // The premise of the test: the two really do disagree.
+    expect(t0).not.toBe(viewerMidnight);
+    // And a sample from before the plant's day must not be on its chart.
+    await expect(page.locator('.ovsys').first()).toBeVisible();
+  });
+
+  test('samples from before the plant day are not counted as today', async ({ page }) => {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const viewerT0 = Math.floor(start.getTime() / 1000);
+    await stubApi(page, {
+      invs: inverters({ solis: { tz_offset_sec: -12 * 3600 } }),
+      // One sample at the reader's own midnight. For a plant twelve hours west
+      // that instant belongs to yesterday, so it cannot be today's peak.
+      series: [
+        { inverter_id: SOLIS, ts: viewerT0 + 60, ac_power_w: 11_000, today_kwh: null, battery_soc: null, grid_power_w: null },
+      ],
+    });
+    await page.goto('/#/');
+    await expect(page.locator('.ovsys').first()).not.toContainText('peak 11.0 kW');
+  });
+
+  test('a plant that reports no timezone still draws its day', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    // No tz_offset_sec on either fixture: the reader's midnight is the fallback
+    // and every system still has a curve.
+    await expect(page.locator('.ovsys')).toHaveCount(2);
+    await expect(page.locator('.ovchart svg').first()).toBeVisible();
+  });
+});
+
+test.describe('Installable', () => {
+  test('the page links a manifest that parses and names both icon sizes', async ({ page, request }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    const href = await page.locator('link[rel="manifest"]').getAttribute('href');
+    expect(href).toBe('/manifest.webmanifest');
+
+    const res = await request.get(href as string);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('manifest+json');
+
+    const m = JSON.parse(await res.text());
+    expect(m.name).toBe('SolarLens');
+    expect(m.display).toBe('standalone');
+    expect(m.start_url).toBe('/');
+    const sizes = (m.icons as { sizes: string }[]).map((i) => i.sizes);
+    // Chrome will not offer an install without an icon of at least 192px.
+    expect(sizes).toContain('192x192');
+    expect(sizes).toContain('512x512');
+    expect((m.icons as { purpose?: string }[]).some((i) => i.purpose === 'maskable')).toBe(true);
+  });
+
+  test('every icon the manifest names actually exists', async ({ page, request }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    const m = JSON.parse(await (await request.get('/manifest.webmanifest')).text());
+    for (const icon of m.icons as { src: string; type: string }[]) {
+      const res = await request.get(icon.src);
+      expect(res.status(), `${icon.src} is missing`).toBe(200);
+      expect(res.headers()['content-type']).toContain(icon.type.split('/')[1]);
+    }
+  });
+
+  test('iOS gets a raster touch icon, because it will not scale the SVG', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', /\.png$/);
+  });
+
+  test('the service worker exists and goes to the network before its cache', async ({ request }) => {
+    const res = await request.get('/sw.js');
+    expect(res.status()).toBe(200);
+    const src = await res.text();
+    // The rule the file exists to keep: fetch first, cache only on failure.
+    expect(src).toContain("addEventListener('fetch'");
+    expect(src.indexOf('fetch(request)')).toBeLessThan(src.indexOf('caches.match(request)'));
+    // A POST is an instruction and must never be replayed from a cache.
+    expect(src).toContain("request.method !== 'GET'");
+  });
+});

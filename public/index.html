@@ -8,7 +8,13 @@
 <meta name="theme-color" content="#f7f6f2" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0e100f" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/icon.svg">
+<!-- iOS ignores the manifest's icons and reads this one, and it will not scale
+     an SVG, so the rendered PNG is what a home-screen install actually uses. -->
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SolarLens">
+<meta name="mobile-web-app-capable" content="yes">
 <script>
   // Applied before first paint so a chosen theme never flashes the other one.
   try {
@@ -604,6 +610,13 @@
   };
   const fmtWs = (w) => { const [v, u] = fmtW(w); return u ? `${v} ${u}` : v; };
   const fmtKwh = (k) => (k === null || k === undefined) ? '—' : `${k >= 100 ? k.toFixed(0) : k.toFixed(1)} kWh`;
+  // Part of a whole as a percentage, or null when the question does not apply.
+  // A whole of zero is not a 0% answer, it is no answer: before dawn nothing
+  // has been generated and nothing consumed, and 0% self-sufficient would be a
+  // claim about a day that has not started. Clamped to 100 because the vendor's
+  // own counters are rounded independently and can cross by a rounding step.
+  const share = (part, whole) => (part == null || whole == null || !(whole > 0))
+    ? null : Math.min(100, Math.round((part / whole) * 100));
   const fmtDate = (s) => !s ? '—' : new Date(s * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   const ago = (s) => {
     if (!s) return 'never';
@@ -614,7 +627,26 @@
   };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000); };
+  // Midnight where the panels are. A solar day ends when the sun sets on the
+  // array, so a reader in another country was being shown two half-days glued
+  // together. Falls back to the reader's own midnight for a plant whose vendor
+  // never reported a timezone, which is exactly what every plant used before.
+  const dayStart = (offsetSec) => offsetSec == null
+    ? startOfToday()
+    : Math.floor((Math.floor(Date.now() / 1000) + offsetSec) / 86400) * 86400 - offsetSec;
+  // The reader's clock rendered in the plant's zone, for axis ticks.
+  const plantHour = (ts, offsetSec) => offsetSec == null
+    ? new Date(ts * 1000).getHours()
+    : Math.floor(((ts + offsetSec) % 86400) / 3600);
   const parse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
+  // One fetch covers every system, and it opens at the earliest plant's
+  // midnight - so a system further east is handed samples from its own
+  // yesterday evening. Cut each system's list back to its own day before any
+  // of it is drawn or reduced to a peak.
+  const todayOf = (inv, pts) => {
+    const t0 = dayStart(inv && inv.tz_offset_sec);
+    return (pts || []).filter((p) => p.ts >= t0 && p.ts < t0 + 86400);
+  };
 
   async function api(path) {
     const r = await fetch(path, { credentials: 'same-origin' });
@@ -879,7 +911,7 @@
     // being scaled with the picture.
     const bare = !!(opts && opts.bare);
     const W = 1000, H = viewH, L = 62, R = 16, T = bare ? 12 : 26, B = 30;
-    const t0 = startOfToday(), t1 = t0 + 86400;
+    const t0 = dayStart(inv.tz_offset_sec), t1 = t0 + 86400;
     const c = colorFor(inv.provider);
     if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
       pts.length === 1 ? 'One sample so far today - a curve needs two' : 'No samples yet today'}</text></svg>`;
@@ -929,7 +961,7 @@
     // after it. No sunrise, no claim.
     const sunUp = sunriseTs(inv, t0);
     if (sunUp !== null && pts[0].ts - sunUp > 3600) {
-      out += `<text class="axis gap" x="${W - R}" y="${T - 10}" text-anchor="end">recorded from ${esc(hhmm(pts[0].ts))}</text>`;
+      out += `<text class="axis gap" x="${W - R}" y="${T - 10}" text-anchor="end">recorded from ${esc(hhmm(pts[0].ts, inv.tz_offset_sec))}</text>`;
       // Shade the stretch nobody has a reading for, so the empty part of the
       // axis reads as "no data" rather than as a flat zero it really produced.
       out += `<rect class="nodata" x="${L}" y="${T}" width="${(x(pts[0].ts) - L).toFixed(1)}" height="${H - T - B}"/>`;
@@ -957,7 +989,7 @@
           <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
         </summary>
         <div class="secbody">
-          <section class="card"><div class="body">${systemChart(inv, byInv[inv.id] || [], 'pg' + i)}</div></section>
+          <section class="card"><div class="body">${systemChart(inv, todayOf(inv, byInv[inv.id]), 'pg' + i)}</div></section>
           ${b.blocks}
           ${b.raw}
         </div>
@@ -986,21 +1018,25 @@
    */
   function combinedChart(svg, byInv, invs) {
     const W = 1000, H = 230, L = 46, R = 12, T = 14, B = 26;
-    const t0 = startOfToday(), t1 = t0 + 86400;
+    // Systems in different zones do not share a midnight. Opening at the
+    // earliest of them keeps the earlier system's morning on the axis instead
+    // of clipping it off the left edge.
+    const t0 = Math.min(...invs.map((i) => dayStart(i.tz_offset_sec)), startOfToday());
+    const t1 = t0 + 86400;
     // Every system gets a switch, including one with nothing to draw today -
     // otherwise it silently disappears from the page rather than reading as
     // "this system has no samples". So does the fleet sum, always, or turning
     // everything off would take its own switch away with it.
     const legend = () => {
       const l = invs.map((i) => legendItem(i.id, colorFor(i.provider), i.name,
-        (byInv[i.id] || []).length === 0 ? 'no samples today'
-          : (byInv[i.id] || []).length === 1 ? 'one sample so far' : null));
+        todayOf(i, byInv[i.id]).length === 0 ? 'no samples today'
+          : todayOf(i, byInv[i.id]).length === 1 ? 'one sample so far' : null));
       if (invs.length > 1) l.push(legendItem(TOTAL_KEY, 'var(--total)', 'Fleet total'));
       return l;
     };
 
     const shown = invs.filter((i) => !state.hidden.has(i.id));
-    const all = shown.flatMap((i) => byInv[i.id] || []);
+    const all = shown.flatMap((i) => todayOf(i, byInv[i.id]));
     if (!all.length) {
       svg.innerHTML = `<text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
         invs.length && shown.length === 0 ? 'Every system is switched off in the legend' : 'No samples yet today'}</text>`;
@@ -1028,7 +1064,7 @@
       out += `<text class="axis" x="${xx}" y="${H - 6}" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${String(h).padStart(2, '0')}:00</text>`;
     }
     for (const inv of invs) {
-      const pts = byInv[inv.id] || [];
+      const pts = todayOf(inv, byInv[inv.id]);
       if (state.hidden.has(inv.id) || pts.length < 2) continue;
       out += `<path d="${line(pts)}" fill="none" stroke="${colorFor(inv.provider)}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
     }
@@ -1243,7 +1279,7 @@
 
     const cols = invs.map((inv, i) => {
       const st = statusOf(inv);
-      const pts = byInv[inv.id] || [];
+      const pts = todayOf(inv, byInv[inv.id]);
       const m = parse(inv.metrics) ?? {};
       const peak = peakOf(pts);
       // Everything above the chart is one link to this system's detail page,
@@ -1267,7 +1303,7 @@
         <a class="ovchart" href="#/power" title="Open the Power tab">
           <div class="ovchart-head">
             <span class="t">Today · watts</span>
-            ${peak ? `<span class="p">peak ${fmtWs(peak.ac_power_w)} at ${esc(hhmm(peak.ts))}</span>` : ''}
+            ${peak ? `<span class="p">peak ${fmtWs(peak.ac_power_w)} at ${esc(hhmm(peak.ts, inv.tz_offset_sec))}</span>` : ''}
           </div>
           ${systemChart(inv, pts, 'ov' + i, 300, { bare: true })}
         </a>
@@ -1304,9 +1340,18 @@
     return t0 + Number(m[1]) * 3600 + Number(m[2]) * 60;
   }
 
-  /** Just the clock, for an axis label where the date is already implied. */
-  const hhmm = (ts) => new Date(ts * 1000)
-    .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  /**
+   * Just the clock, for an axis label where the date is already implied, in the
+   * plant's own zone when it reported one. A peak time is a fact about the sun
+   * over the array, not about where the page happens to be open.
+   */
+  const hhmm = (ts, offsetSec) => {
+    if (offsetSec == null) {
+      return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
+    const mins = Math.floor(((ts + offsetSec) % 86400) / 60);
+    return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  };
 
   function when(ts) {
     if (!ts) return 'unknown';
@@ -1788,6 +1833,14 @@
       m.gridExportTotalKwh != null ? ['Exported, lifetime', fmtKwh(m.gridExportTotalKwh)] : null,
       m.loadTotalKwh != null ? ['Consumed, lifetime', fmtKwh(m.loadTotalKwh)] : null,
       m.selfUseTodayKwh != null ? ['Self-consumed today', fmtKwh(m.selfUseTodayKwh)] : null,
+      // Two different questions, and the pair is why both are worth printing:
+      // self-sufficiency is how much of the house ran on its own roof, and
+      // self-consumption is how much of the roof's output stayed home. A day
+      // can be high on one and low on the other.
+      share(m.selfUseTodayKwh, m.loadTodayKwh) != null
+        ? ['Self-sufficiency today', `${share(m.selfUseTodayKwh, m.loadTodayKwh)} % of the load`] : null,
+      share(m.selfUseTodayKwh, inv.today_kwh) != null
+        ? ['Self-consumption today', `${share(m.selfUseTodayKwh, inv.today_kwh)} % of what was generated`] : null,
       m.fullLoadHours != null ? ['Full-load hours', `${m.fullLoadHours} h`] : null,
     ],
     // A row that is simply absent invites the question every time. Say once
@@ -1918,7 +1971,7 @@
       const now = Math.floor(Date.now() / 1000);
       const [lat, ser, devs, health] = await Promise.all([
         api('/api/latest'),
-        api(`/api/series?from=${startOfToday()}&to=${now}`),
+        api(`/api/series?to=${now}&tz=${new Date().getTimezoneOffset()}`),
         api('/api/devices').catch(() => ({ devices: [] })),
         api('/api/health').catch(() => null),
       ]);
@@ -2021,6 +2074,18 @@
   // Returning to the tab is exactly when a stale figure matters, so that one
   // fetches everything rather than waiting for the slow cycle to come round.
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(true); });
+
+  // Installable: the worker is what lets the dashboard live on a home screen
+  // rather than in a tab. It goes to the network first and falls back to a
+  // cache only when there is no network, so nothing here can make a stale
+  // reading look live. Registration is deliberately last and deliberately
+  // silent: a browser that refuses it, or a page opened over plain HTTP where
+  // workers are not allowed, still gets the whole dashboard.
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
 })();
 </script>
 </body>

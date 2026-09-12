@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { daily, insertReading, inverterIds, latest, latestPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
+import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
 import { aliasFor, publicDevices, publicInverters, publicRows } from './public-view';
 import { plantFilter, pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
@@ -138,10 +138,26 @@ app.get('/api/latest', async (c) => {
   return c.json({ now: nowSec(), inverters: publicInverters(rows, alias) });
 });
 
+/**
+ * Samples over a window.
+ *
+ * Omit `from` and the window opens at the earliest of the plants' own
+ * midnights, which is what "today" means for a solar array: its day ends when
+ * the sun sets on it, not when the reader's clock rolls over. `tz`, the
+ * caller's UTC offset in minutes, is the fallback for a plant whose vendor
+ * never said where it is.
+ */
 app.get('/api/series', async (c) => {
   const to = Number(c.req.query('to') ?? nowSec());
-  const from = Number(c.req.query('from') ?? to - 24 * 3600);
-  if (!Number.isFinite(from) || !Number.isFinite(to) || to - from > 31 * 24 * 3600) {
+  const tz = Number(c.req.query('tz') ?? 0);
+  if (!Number.isFinite(to) || !Number.isFinite(tz) || Math.abs(tz) > 900) {
+    return c.json({ error: 'bad range' }, 400);
+  }
+  const asked = c.req.query('from');
+  const from = asked !== undefined
+    ? Number(asked)
+    : await earliestDayStart(c.env.DB, to, -tz * 60);
+  if (!Number.isFinite(from) || to - from > 31 * 24 * 3600) {
     return c.json({ error: 'bad range (max 31 days)' }, 400);
   }
   const [points, ids] = await Promise.all([series(c.env.DB, from, to), inverterIds(c.env.DB)]);
