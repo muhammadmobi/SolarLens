@@ -11,17 +11,6 @@ into its release notes on GitHub, which is where the download links and the
 "what changed since you last looked" view live. One is the source, the other is
 the announcement.
 
-**Close `[Unreleased]` when you cut a tag.** It is the step this file forgets:
-by 2026-09-12 the section had run to 331 lines and 45 entries covering two
-tagged releases, because the tags were cut and their notes written from the tag
-annotation while nothing was moved out of here. The dates below are the tags'
-dates, not the dates the work landed, which is why 2.0.0 reads as five days
-rather than one.
-
-## [Unreleased]
-
-Nothing yet.
-
 ## [2.1.0] — 2026-09-12
 
 The overview in one screen, and the vendor clients under test.
@@ -474,6 +463,6 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
-[Unreleased]: https://github.com/muhammadmobi/SolarLens/compare/v2.0.0...HEAD
+[2.1.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/muhammadmobi/SolarLens/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/muhammadmobi/SolarLens/releases/tag/v1.0.0
