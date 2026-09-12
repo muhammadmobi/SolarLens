@@ -516,6 +516,7 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 | &nbsp;&nbsp;`solarman.ts` | 85% | 63% | 78% | 85% |
 | &nbsp;&nbsp;`soliscloud.ts` | 84% | 63% | 88% | 86% |
 | &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 67% | 58% | 62% | 70% |
+| All of `src/`, Worker-only code included | 55.2% | 47.5% | 57.1% | 55.8% |
 | Thresholds enforced in CI | **80%** | **63%** | **80%** | **80%** |
 
 Two figures, because there are two honest answers. The enforced one measures what

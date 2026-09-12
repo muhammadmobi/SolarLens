@@ -20,7 +20,7 @@ export default defineConfig({
       // routing, D1 SQL and cron fan-out need a Worker and a database, and the
       // Playwright suite covers them through HTTP instead. Counting them here
       // reports a low number for code that is tested, just not here: the same
-      // suite measures 38% with them and 60% without. To see that view per
+      // suite measures 55% with them and 84% without. To see that view per
       // file when you want it:
       //   npx vitest run --coverage --coverage.include='src/**/*.ts'
       //
