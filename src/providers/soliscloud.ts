@@ -13,7 +13,7 @@ const CONTENT_TYPE = 'application/json';
 
 // 3 calls / 5 s per IP is the documented ceiling; 2 s spacing leaves headroom
 // for a second Worker isolate sharing the same egress IP.
-const queue = new CallQueue(2000);
+export const queue = new CallQueue(2000);
 
 const enc = new TextEncoder();
 

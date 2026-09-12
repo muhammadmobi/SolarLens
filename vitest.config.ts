@@ -38,14 +38,21 @@ export default defineConfig({
       // them and ordinary refactoring does not. Raise these when you add
       // tests; never lower them to make a red build go green.
       //
-      // The gap to 100% is almost entirely the vendor HTTP clients - signing,
-      // paging, token refresh - which need a live endpoint or a large mock to
-      // exercise. `npm run probe:solis` and the e2e suite cover that ground.
+      // Branches sits lower than the rest on purpose. The vendor payloads are
+      // full of optional fields, each read through a fallback chain - pick(r,
+      // 'stationName', 'name') ?? r.id - and covering every arm means a fixture
+      // per arm for figures that are already covered on the path that matters.
+      // The three that count are held at 80.
+      //
+      // What remains uncovered is the deep paging and device-detail fan-out in
+      // the vendor clients, and the parts of the browser-session fallback that
+      // only run without official keys. `npm run probe:solis` checks the
+      // signature against the live endpoint, which no mock can.
       thresholds: {
-        statements: 57,
-        branches: 49,
-        functions: 53,
-        lines: 57,
+        statements: 80,
+        branches: 63,
+        functions: 80,
+        lines: 80,
       },
     },
   },

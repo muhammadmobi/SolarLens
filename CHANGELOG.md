@@ -13,6 +13,35 @@ the announcement.
 
 ## [Unreleased]
 
+### Added
+
+- **The vendor HTTP clients are tested.** `tests/unit/clients.test.ts` drives
+  all three against a stubbed `fetch`: SolisCloud request signing, SolarMan
+  token acquisition and refresh-and-retry on both a bare 401 and the vendor's
+  own `2101` code, the browser-session refresh flow, the error envelopes and
+  the HTTP failure paths. Twenty-two tests, and the providers go from 6–65%
+  covered to 67–85%.
+
+  Enforced coverage is now **83.7% statements, 84.9% functions, 85.3% lines**,
+  with thresholds raised to 80. Branches sits at 65% and is held at 63: the
+  vendor payloads are full of optional fields read through fallback chains, and
+  covering every arm means a fixture per arm for figures already covered on the
+  path that matters.
+
+  Two things the file needs, both worth knowing before editing it. SolisCloud
+  signs with MD5, which WebCrypto does not define and Workers adds, so the
+  tests delegate that one algorithm to `node:crypto` — which is why
+  `@types/node` is now a dev dependency. And each provider's `CallQueue` holds
+  1.5–2s between calls, so `minGapMs` is public and the tests set it to zero;
+  faking timers instead strands a pending timer in a module-level singleton and
+  hangs every later test in the file.
+
+  One finding along the way: a 19-digit SolisCloud station id has to arrive as
+  a JSON string. Sent as a number it exceeds `Number.MAX_SAFE_INTEGER` and
+  arrives rounded — `…001` becomes `…000`, and every later lookup misses. The
+  real payloads do send strings; the first draft of the test did not, which is
+  how it surfaced.
+
 ### Changed
 
 - **The overview is one screenful.** It was three full-width bands — energy
