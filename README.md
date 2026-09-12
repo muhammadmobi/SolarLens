@@ -525,12 +525,17 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 | Thresholds enforced in CI | **80%** | **63%** | **80%** | **80%** |
 
 Two figures, because there are two honest answers. The enforced one measures what
-a unit test can reach: pure functions over payloads. `index.ts` (request
-routing), `db.ts` (D1 SQL) and `poll.ts` (cron fan-out) need a Worker and a
-database, and the Playwright suite exercises them through HTTP instead — so
-counting them here would report a low number for code that *is* tested, just not
-here. The whole-`src/` row is in the table regardless, so the gap is visible
-rather than hidden behind a flattering scope. Per file:
+a unit test can reach: pure functions over payloads.
+
+The whole-`src/` row is the other answer, and it is the one to read as a
+warning. **`index.ts` has no automated test of any kind.** Neither does most of
+`db.ts` or `poll.ts`. The end-to-end suite does not reach them: it serves
+`public/` from `scripts/serve-static.mjs` and stubs every `/api/*` route with a
+fixture, so the Worker never runs in a test. Request routing, the auth
+middleware, the SQL and the cron fan-out are covered by deploying them and
+watching, and by nothing else. Closing that needs a Worker test harness —
+`@cloudflare/vitest-pool-workers` or `unstable_dev` — which the project does not
+have yet. Per file:
 
 ```bash
 npx vitest run --coverage --coverage.include=src/**/*.ts
