@@ -1134,10 +1134,24 @@
       m.battDischargeTodayKwh != null ? tile('Discharged today', energy(m.battDischargeTodayKwh)) : '',
     ].filter(Boolean);
 
-    const target = Math.min(12, Math.floor((core.length + batt.length) / 4) * 4);
-    const cells = [...core.slice(0, Math.max(0, target - batt.length)), ...batt];
+    // Show everything there is, and let the last tile stretch across whatever
+    // is left of its row.
+    //
+    // This used to trim the count to a multiple of four so the grid could not
+    // end raggedly, which was the wrong trade: with seven figures available it
+    // showed four and silently hid three. And seven is not hypothetical - it is
+    // what a system reports before dawn, when peak, full-load hours, string
+    // count and inverter temperature have no value yet.
+    //
+    // Twelve is still the ceiling: a fourth row would take the height the day
+    // curve needs.
+    const cells = [...core, ...batt].slice(0, 12);
     if (!cells.length) return '';
-    return `<div class="ovtiles">${cells.join('')}</div>`;
+    const short = cells.length % 4;
+    const last = short ? ` style="grid-column: span ${4 - short + 1}"` : '';
+    return `<div class="ovtiles">${cells
+      .map((c, i) => (i === cells.length - 1 && short ? c.replace('<div>', `<div${last}>`) : c))
+      .join('')}</div>`;
   }
 
   /** The biggest sample of the day, or null before there are any. */
