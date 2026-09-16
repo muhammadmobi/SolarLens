@@ -67,8 +67,8 @@ station on SolarMan. No account identifiers appear in this document.
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Day / month / year / lifetime charts | ● | ● | ◐ day and per-day history; no month or year rollup |
-| Battery SOC history | ◐ | ● | ◐ every sample's SOC is stored and served by `/api/series`; only the live figure is drawn |
+| Day / month / year / lifetime charts | ● | ● | ● by day, month and year, each period saying how many of its days were recorded |
+| Battery SOC history | ◐ | ● | ● today's charge curve with its low and high, on the system page |
 | Power-analysis view (generation vs consumption vs grid) | ◐ | ● | ○ out of scope |
 | CSV / data export | ● | ○ | ○ out of scope — but every sample **is** stored |
 | Scheduled email reports | ● | ○ | ○ out of scope |
@@ -91,7 +91,7 @@ station on SolarMan. No account identifiers appear in this document.
 | **Two vendors on one screen** | ○ | ○ | ● the entire point |
 | Favourites, grouping, tags | ● | ◐ | ○ |
 | Physical layout / site map | ● | ○ | ○ |
-| Large-screen / TV mode | ● | ○ | ○ |
+| Large-screen / TV mode | ● | ○ | ● `#/tv`: no chrome, sized to the screen, keeps the display awake |
 | Native mobile app | ● | ● | ◐ installable web app — home screen, own window, offline shell; no native build |
 | Remote control (charge schedules, export limit, firmware) | ● | ◐ | ○ **deliberately not** — read-only by design |
 | Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API, reads open, writes gated |
@@ -148,7 +148,7 @@ larger than they were, which is why none of it is marked S.
 |---|---|---|---|
 | 1 | Vendor alarm list and fault history | Both portals know why an inverter stopped; SolarLens infers staleness and can only say *that* it did. Solis even ships suggested treatment text, which is the single most useful thing an owner account gets and the one thing neither app's API documents | M |
 | 2 | Batteries and meters as first-class devices | The schema has `battery` and `meter` kinds and nothing writes them: only `INVERTER` and `COLLECTOR` are fetched, so a battery's own firmware, serial and status are invisible even though the pack's live figures are not | M |
-| 3 | Month and year rollups | Per-day history exists and the vendors' month and year totals are stored, but nothing charts them, so "was this August better than last?" still means opening the vendor app | M |
+| 3 | History from before collecting began | Month and year views exist now, but the record starts on the day SolarLens first polled, so the first months are partial and every row says so. Both portals serve month and year history for the whole life of the plant; backfilling it would make "was this August better than last?" answerable from day one | M |
 | 4 | Daylight saving on a stored offset | A plant's UTC offset is read at discovery and refreshed on every poll, so a zone that observes DST is right within five minutes of the switch and wrong for those five. Storing the zone *name* instead of the offset would remove the window entirely | S |
 
 ## 5. Out of scope, by decision

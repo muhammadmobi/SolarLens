@@ -11,6 +11,58 @@ into its release notes on GitHub, which is where the download links and the
 "what changed since you last looked" view live. One is the source, the other is
 the announcement.
 
+## [2.3.0] — 2026-09-16
+
+Three of the features the gaps document listed as genuinely missing.
+
+### Added
+
+- **Battery charge through the day.** Every sample's state of charge was
+  already stored and served by `/api/series`, and only the live figure was ever
+  drawn, so "did it run flat overnight?" meant opening the vendor app. The
+  battery card on the system page now carries the day's curve with its low and
+  high. The axis is fixed at 0 to 100, because a pack moving from 94 to 100
+  fitted edge to edge looks like one that went flat and came back. A gap of more
+  than half an hour breaks the line rather than drawing a straight segment
+  across hours nobody measured.
+
+- **TV mode, for a screen on a wall.** At `#/tv`, or from the button beside the
+  theme toggle. No header, tabs or footer: one panel per system with what it is
+  producing now, today's energy, the battery where there is one and the day's
+  curve, plus the fleet total and a clock. The clock is there because on a
+  display nobody touches it is the only way to tell a live page from a frozen
+  one at a glance.
+
+  It fits the screen without scrolling, holds a screen wake lock so the display
+  does not sleep, and refreshes every five minutes to match the vendors' own
+  sample rate rather than the ten a browser tab uses. An offline system is
+  greyed and shows no house or grid flow. Escape leaves, and so does an exit
+  link that appears only while the mouse moves.
+
+- **History by month and by year.** The Historical Data tab folds its daily
+  rows into months or years. Energy sums, the peak is the highest peak, and a
+  period with nothing metered stays blank rather than summing to zero. Month
+  and year views ask for the API's full 400-day window.
+
+  A rollup must not pass a partial period off as a whole one. The record starts
+  on the day SolarLens began collecting, so every row says how many days it
+  recorded out of how many the period has, and the current month and year are
+  checked against the vendor's own counter, which saw the whole period. Where
+  they differ, the page says by how much and why.
+
+### Changed
+
+- **Refresh schedules itself** rather than running on a fixed interval, so
+  entering or leaving TV mode changes the cadence at once instead of after the
+  old timer fires.
+
+### Fixed
+
+- **The charge chart's first draft was unreadable in its card.** It used the
+  shared chart class, which assumes a full-width panel: a drawing 1000 units
+  wide squeezed into a 300-pixel card set its labels at about five pixels under
+  a band of empty space. It is now drawn at the width of the card it sits in.
+
 ## [2.2.0] — 2026-09-12
 
 The three gaps `docs/feature-gaps.md` had carried since the first release, closed.
@@ -554,6 +606,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.3.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/muhammadmobi/SolarLens/compare/v1.0.0...v2.0.0
