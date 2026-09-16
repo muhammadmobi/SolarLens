@@ -57,6 +57,31 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   - `inverterTemperature` (+ `inverterTemperatureUnit`), `dcBus`, `insulationResistance`
   - A wired but unlit string still reports volts with zero watts, so string presence is
     decided by any of V/A/W being non-zero.
+- `station/detailMix` also carries the plant's timezone: `timeZone` in whole hours,
+  `timeZoneStandardId` as an IANA name, and `timeZoneStr` as a label. SolarLens reads the hours.
+- `alarm/list` body `{currentPage, pageSize, state, faultType: 0, stationId}` → `data.records[]`
+  with `total` and `pages`. Reached at `/overview/plantStation/details/alarm/{id}`; the page opens
+  filtered to `state: 0`, and history needs the **Status** filter set and **Search** pressed.
+  - `state`: `0` Active, `1` Acknowledged, `2` Recovered. No date range is sent, so a status
+    covers the plant's whole history, ten records a page, newest first.
+  - Fields used: `alarmCode`, `alarmMsg` (e.g. `NO-Grid`), `alarmLevel` (the portal labels `1`
+    Info and `2` Warning), `advice`, `alarmBeginTime` / `alarmEndTime` (epoch **ms**).
+  - `pk` is **not** unique per alarm; it repeats for every alarm of one code on one device, so
+    identity is code plus start time. One real record has `alarmEndTime` equal to
+    `alarmBeginTime`.
+  - The same record carries the owner's `address`, `mobile`, `email`, `userName`, `userEmail`
+    and country, region, city and county names and ids. None of it is kept.
+- `chart/station/month` body `{id, month: 'YYYY-MM', timeZone, money}`, `chart/station/year`
+  body `{id, year}` and `chart/station/all` body `{id}` → `data[]`: one point per day with data,
+  per month, and per year since installation. Pressed as **Month**, **Year** and **Lifetime**
+  on the plant page's Operating Data chart; the arrows either side of the date are
+  `.gl-new-date-picker .change-date-btn`, previous first.
+  - Fields used: `dateStr` (the period key, in the plant's calendar), `energy` + `energyStr`,
+    `fullHour`, `consumeEnergy`, `gridPurchasedEnergy`, `gridSellEnergy`,
+    `batteryChargeEnergy`, `batteryDischargeEnergy`, `isEnergyStorage`.
+  - Each point also has `timeZone: 8`, which is the vendor's server and not the plant; ignore it.
+  - On an unmetered on-grid plant `consumeEnergy` and `homeLoadEnergy` copy `energy`, and every
+    grid figure is zero, exactly as in `detailMix`. Neither is a measurement.
 - `inverter/listV2` returned 0 records for a plant that reports `inverterCount: 1`, and
   `chart/station/day/v2` returned all-zero series while `power[]` in the same response held
   the real curve. Plant-level `detailMix` is therefore the source of truth.
@@ -83,7 +108,11 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
 - `GET /maintain-s/fast/system/{stationId}` — same live + today + lifetime fields, no month/year.
 - `GET /maintain-s/station/{stationId}/detail` — static: `station.name`, `installedCapacity`, `hasBattery`, `region.timezone`.
 - `POST /maintain-s/operating/station/search` body `{}` — station list with the live fields inline.
+- Timezone, in three shapes: `timezone` or `regionTimezone` as an IANA name on the station
+  search and detail, and `timeZoneOffset` in **seconds** where the portal sends one.
 - `GET /maintain-s/fast/device/{stationId}/device-types` → e.g. `["INVERTER","COLLECTOR"]`.
+  A hybrid with a battery still answers only those two: the battery is never a device of
+  its own here, and its figures exist only inside the inverter's data.
 - `GET /maintain-s/fast/device/{stationId}/device-list?deviceType=INVERTER|COLLECTOR` → array of
   devices. The portal only ever asks for `INVERTER`, so the datalogger needs an explicit second
   call with `COLLECTOR`. Fields used:
@@ -114,6 +143,21 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
     `C_C_L` / `D_C_L` charge and discharge current limits — stored in the device `battery` column
   - Direct navigation to `/plant/infos/device` redirects to `/data`; the tab must be clicked,
     which is why the endpoints only appear after a click-through.
+
+- `POST /maintain-s/operating/alert/search?order.direction=DESC&order.property=alertTime&page=1&size=20`
+  body `{deviceType: '', language: 'en', level: '', startTime: '', levelList: null, plantId}` →
+  `{total, data[]}`. The portal's Alert page (`/plant/infos/alert`).
+  - Fields used: `code`, `level` (`2` seen on a fault; lower levels assumed below it),
+    `showName` (e.g. `F56DC_VoltLow_Fault`), `alertTime` (epoch **s**).
+  - There is **no** end time and **no** remediation text. An alert says when a fault was
+    raised and never when it cleared.
+- `GET /maintain-s/history/batteryPower/{stationId}/stats/month?year=&month=` → `records[]`,
+  one per day; `.../stats/year?year=` → `records[]` one per month, plus a `statistics` total.
+  Named after the battery but covering the whole system:
+  - `generationValue`, `useValue`, `gridValue` (**export**), `buyValue` (**import**),
+    `chargeValue`, `dischargeValue`, `fullPowerHoursDay` — all kWh or hours
+  - `year`, `month`, `day` locate the record; `day` is `0` on a month record
+  - There is no year-by-year endpoint; a year's total is the sum of its months.
 
 ### Official Business API (`https://globalapi.solarmanpv.com`)
 

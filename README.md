@@ -355,10 +355,10 @@ It reaches the code three ways, in order of how reliable they proved to be:
    so and names the fix, instead of blaming a busy server.
 
 If step 1 finds a checkout that can no longer fast-forward, it is fetched and
-reset to `origin/main`. That case is not exotic here: **this repository's
-history has been rewritten and force-pushed**, so any clone taken beforehand
-holds commits that are not ancestors of the published branch and can never pull
-again. A checkout in that state would otherwise sit on stale code forever —
+reset to `origin/main`. That case is not exotic: **a checkout left on a
+branch that was later squash-merged**, or holding any commit that never reached
+`main` in that form, has diverged from the published branch and can never
+fast-forward to it. A checkout in that state would otherwise sit on stale code forever —
 including a stale copy of the installer, which is how one machine ended up
 unable to deliver its own fix. The reset happens **only** when `git status`
 reports nothing to lose; a working tree with local modifications is left alone
@@ -440,7 +440,7 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 
 ### How often anything actually happens
 
-Three separate intervals, easily confused:
+Five intervals, easily confused:
 
 | What | How often | Set where |
 |---|---|---|
@@ -504,6 +504,8 @@ Eleven files, one concern each. They are all pure-function tests against fixture
 - **`queue.test.ts`** — the rate limiter that stands between a cron run and a SolisCloud ban: calls stay in order, the minimum gap is a floor, and one failed call does not strand the ones behind it.
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
+- **`clients.test.ts`** — all three vendor HTTP clients against a stubbed `fetch`: SolisCloud request signing, SolarMan token acquisition and refresh-and-retry, the browser-session refresh flow, the alert and period reads, error envelopes and HTTP failures.
+- **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
 - **`extras.test.ts`** — the hourly and daily schedule for those reads: what the first run walks back through, what later runs skip, and that an empty current year in January does not stop the walk.
@@ -699,12 +701,13 @@ solar-lens/
 | `soliscloud: HTTP 403/401` on official API | Key not activated, or API access not enabled on the account. Check Basic Settings → API Management. |
 | `solarman: token refused` | Wrong `appId`/`appSecret`, or the password hash is not lowercase sha256 hex. |
 | SolarMan panel goes stale after ~24 h | The refresh grant failed; re-copy the refresh token (you may have logged out of SolarMan). Check `GET /api/health`. |
-| Relay: *session expired* | Run the relay once without `RELAY_HEADLESS=1` and log in again. |
+| Solis reads **offline** although the plant is producing, and the footer's SolisCloud feed is hours old | The relay's SolisCloud login has expired. A hidden, headless relay cannot show a login page, so every cycle fails where nobody sees it. From the repository folder run `RELAY_HEADLESS=0 RELAY_ONCE=1 node agent/solis-relay.mjs`, log in in the window it opens, and once it prints *first reading pushed* start the background relay again (on Windows, the *SolarLens relay* scheduled task). |
+| Relay console: *session expired* | Same cause as above; the relay only says so in its own console. |
 | Deploy: *register a workers.dev subdomain* | One-time account step; follow the printed link or pick a name in the dashboard, then deploy again. |
 | PowerShell: *The token '&&' is not valid* | Run the two commands on separate lines. |
 | A shared plant you don't own shows up | Set `INCLUDE_PLANTS` to the ids you want. |
 | Installer: *503 Backend.max_conn reached* | `raw.githubusercontent.com` is having a bad day — nothing to do with your network. The installer only falls back to that host when the machine has no git; install Git and it uses `github.com` instead, which stays up when the CDN does not. |
-| `git pull`: *Not possible to fast-forward* | That checkout predates a history rewrite here, so it can never pull again. Re-run the installer, which resets it to `origin/main`, or do it by hand: `git fetch origin && git reset --hard origin/main`. |
+| `git pull`: *Not possible to fast-forward* | That checkout has diverged from `main` - typically it holds commits that were later squash-merged - so it can never fast-forward. Re-run the installer, which resets it to `origin/main`, or do it by hand: `git fetch origin && git reset --hard origin/main`. |
 | *No mapping between account names and security IDs was done* | An older installer composed the task's account as `COMPUTERNAME\USERNAME`, which is wrong on a domain or Entra-joined machine. `git pull` and run the installer again. |
 | Task exists but `State: Ready`, no relay | Start it: `Start-ScheduledTask -TaskName 'SolarLens relay'`. If it drops straight back to `Ready`, `Get-ScheduledTaskInfo -TaskName 'SolarLens relay'` gives the result code the action returned. |
 | A console window appears at every logon | The task is registered to run `node.exe` directly. Re-run the installer; it registers `scripts\relay-hidden.vbs` instead. |

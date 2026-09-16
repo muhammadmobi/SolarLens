@@ -135,6 +135,8 @@ station on SolarMan. No account identifiers appear in this document.
    SolarLens stores each plant's offset and cuts every figure, curve and daily
    row on that plant's midnight, so two systems five hours apart are each shown
    their own day on the same screen.
+8. **Both vendors' fault histories on one page**, each alarm with its severity, code and how
+   long it lasted, beside SolisCloud's advice - from two portals that each show only their own.
 
 ---
 
