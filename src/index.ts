@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listDevices, logPoll, nowSec, recentPolls, series, upsertDevice, upsertInverter } from './db';
+import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods } from './db';
+import { solisAlarm, solisPeriods } from './providers/events';
 import { aliasFor, publicDevices, publicInverters, publicRows } from './public-view';
 import { plantFilter, pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
@@ -183,6 +184,28 @@ app.get('/api/health', async (c) => {
  * `tz` is the caller's UTC offset in minutes (what `getTimezoneOffset()`
  * returns), because a solar day ends at the array's midnight and not at UTC's.
  */
+/**
+ * Fault history, newest first.
+ *
+ * Open like every other read. What an alarm carries is a code, a message, a
+ * severity, the vendor's advice and two times - nothing that identifies the
+ * owner - and the system it belongs to is named by its alias.
+ */
+app.get('/api/alarms', async (c) => {
+  const days = Math.min(3650, Math.max(1, Number(c.req.query('days') ?? 730)));
+  const since = nowSec() - days * 86400;
+  const [rows, ids] = await Promise.all([listAlarms(c.env.DB, since), inverterIds(c.env.DB)]);
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: nowSec(), days, alarms: publicRows(rows, aliasFor(ids)) });
+});
+
+/** The vendors' own month and year totals, reaching back before SolarLens began collecting. */
+app.get('/api/periods', async (c) => {
+  const [rows, ids] = await Promise.all([listPeriods(c.env.DB), inverterIds(c.env.DB)]);
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: nowSec(), periods: publicRows(rows, aliasFor(ids)) });
+});
+
 app.get('/api/history', async (c) => {
   const days = Math.min(400, Math.max(1, Number(c.req.query('days') ?? 30)));
   const tz = Number(c.req.query('tz') ?? 0);
@@ -328,6 +351,81 @@ app.post('/api/ingest/station', async (c) => {
  * feed: `latest` ignores them, and the series query prefers a live sample
  * whenever both exist for the same instant.
  */
+/** The relay's shared secret, checked the same way on every ingest route. */
+function ingestRefusal(c: { env: Env; req: { header: (n: string) => string | undefined } }): { error: string; status: 401 | 503 } | null {
+  const token = c.env.INGEST_TOKEN;
+  if (!token) return { error: 'INGEST_TOKEN not configured', status: 503 };
+  const given = bearer(c.req.header('Authorization')) ?? '';
+  return timingSafeEqual(given, token) ? null : { error: 'unauthorized', status: 401 };
+}
+
+/**
+ * SolisCloud alarms, as the relay reads them off the portal's alarm page.
+ *
+ * The relay sends the vendor's records untouched and they are normalised here,
+ * so the one place that decides which fields are kept - and which personal ones
+ * are dropped - is the Worker, not a script on somebody's laptop.
+ */
+app.post('/api/ingest/alarms', async (c) => {
+  const refused = ingestRefusal(c);
+  if (refused) return c.json({ error: refused.error }, refused.status);
+  const body = (await c.req.json()) as { provider?: string; plantId?: string | number; records?: unknown[] };
+  if (body?.provider !== 'soliscloud' || !body.plantId || !Array.isArray(body.records)) {
+    return c.json({ error: 'provider soliscloud, plantId and records required' }, 400);
+  }
+  const plantId = String(body.plantId);
+  if (!plantFilter(c.env)(plantId)) return c.json({ stored: 0, skipped: 'not in INCLUDE_PLANTS' });
+  // One page of the portal's table is ten rows and the relay sends at most a
+  // few pages; anything far larger is not an alarm list.
+  if (body.records.length > 500) return c.json({ error: 'too many records' }, 400);
+  const alarms = body.records
+    .map((r) => (r && typeof r === 'object' ? solisAlarm(plantId, r as Record<string, unknown>) : null))
+    .filter((a): a is NonNullable<typeof a> => a !== null);
+  const stored = await upsertAlarms(c.env.DB, alarms);
+  return c.json({ stored, received: body.records.length });
+});
+
+/**
+ * SolisCloud's own day, month and year totals, as the relay reads them off the
+ * plant page's Month, Year and Lifetime tabs.
+ *
+ * Checked against the nameplate before anything is written: a 12 kW array
+ * cannot make more than 288 kWh in a day, and a unit error in a total is far
+ * harder to spot in a bar chart than a refusal is here.
+ */
+app.post('/api/ingest/periods', async (c) => {
+  const refused = ingestRefusal(c);
+  if (refused) return c.json({ error: refused.error }, refused.status);
+  const body = (await c.req.json()) as {
+    provider?: string; plantId?: string | number; which?: string; points?: unknown[];
+  };
+  const which = body?.which;
+  if (body?.provider !== 'soliscloud' || !body.plantId || !Array.isArray(body.points)
+    || (which !== 'month' && which !== 'year' && which !== 'all')) {
+    return c.json({ error: 'provider soliscloud, plantId, which (month|year|all) and points required' }, 400);
+  }
+  const plantId = String(body.plantId);
+  if (!plantFilter(c.env)(plantId)) return c.json({ stored: 0, skipped: 'not in INCLUDE_PLANTS' });
+  if (body.points.length > 400) return c.json({ error: 'too many points' }, 400);
+
+  const periods = solisPeriods(plantId, which,
+    body.points.filter((p): p is Record<string, unknown> => !!p && typeof p === 'object'));
+  const nameplate = await c.env.DB
+    .prepare('SELECT capacity_w FROM inverters WHERE id = ?1')
+    .bind(`soliscloud:station:${plantId}`)
+    .first<{ capacity_w: number | null }>();
+  const capKw = (nameplate?.capacity_w ?? 0) / 1000;
+  if (capKw > 0) {
+    const hours = { day: 24, month: 24 * 31, year: 24 * 366 } as const;
+    const bad = periods.find((p) => (p.yieldKwh ?? 0) > capKw * hours[p.period]);
+    if (bad) {
+      return c.json({ error: `${bad.key}: ${bad.yieldKwh} kWh exceeds what a ${capKw} kW array can make in a ${bad.period}` }, 422);
+    }
+  }
+  const stored = await upsertPeriods(c.env.DB, periods);
+  return c.json({ stored, received: body.points.length });
+});
+
 app.post('/api/ingest/history', async (c) => {
   const token = c.env.INGEST_TOKEN;
   if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);

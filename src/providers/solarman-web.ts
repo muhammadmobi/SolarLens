@@ -2,6 +2,7 @@ import type { Device, Inverter, Plant, Provider, Reading } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toWatts, tzOffsetSec } from './units';
 import { STATION_PREFIX, deviceFromRecord, deviceFromV3Detail, stationInverter, stationReading, type TokenStore } from './solarman';
+import { solarmanAlert, solarmanPeriods, type Alarm, type Period } from './events';
 
 /**
  * UNOFFICIAL fallback: drives the same endpoints the SOLARMAN Smart web portal
@@ -142,6 +143,35 @@ export class SolarmanWebProvider implements Provider {
       } catch { /* detail is a bonus; the list already carries the essentials */ }
     }
     return out;
+  }
+
+  /**
+   * The plant's alert list, newest first: the same call the portal's Alert page
+   * makes. A hundred covers far more than an owner's plant raises between two
+   * hourly reads, and alerts already stored are updated rather than duplicated.
+   */
+  async listAlarms(plantId: string): Promise<Alarm[]> {
+    const json = await this.call<{ data?: Rec[] }>(
+      'POST',
+      '/maintain-s/operating/alert/search?order.direction=DESC&order.property=alertTime&page=1&size=100',
+      { deviceType: '', language: 'en', level: '', startTime: '', levelList: null, plantId: Number(plantId) },
+    );
+    return (json.data ?? [])
+      .map((r) => solarmanAlert(plantId, r))
+      .filter((a): a is Alarm => a !== null);
+  }
+
+  /**
+   * The plant's own totals: one row per day for a month, or per month for a
+   * year. SolarMan files these under the battery, but they cover the whole
+   * system - generation, consumption, both directions of grid and the battery.
+   */
+  async listPeriods(plantId: string, year: number, month?: number): Promise<Period[]> {
+    const path = month
+      ? `/maintain-s/history/batteryPower/${plantId}/stats/month?year=${year}&month=${month}`
+      : `/maintain-s/history/batteryPower/${plantId}/stats/year?year=${year}`;
+    const json = await this.call<{ records?: Rec[] }>('GET', path);
+    return solarmanPeriods(plantId, month ? 'month' : 'year', year, json.records ?? []);
   }
 
   async getReading(inv: Inverter): Promise<Reading | null> {
