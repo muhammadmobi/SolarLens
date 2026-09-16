@@ -13,9 +13,49 @@ the announcement.
 
 ## [2.3.0] — 2026-09-16
 
-Three of the features the gaps document listed as genuinely missing.
+Fault history, history back to installation, battery charge through the day,
+and TV mode.
 
 ### Added
+
+- **Fault history, with the vendor's advice.** The Alerts tab now carries, for
+  each system, every alarm its vendor has on record, newest first: when it
+  started, its severity, the fault code, what it was, how long it lasted, and
+  SolisCloud's own advice. A summary names how many, since when, and which fault
+  happens most. On the on-grid plant that is 63 alarms since July 2024, 55 of
+  them the grid going down.
+
+  Neither vendor's documented API exposes an owner's alarm history, so both are
+  read from the portals' web APIs, recorded from live owner accounts. SolarMan's
+  alert list is fetched by the Worker hourly. SolisCloud signs every request with
+  a secret in its own JavaScript, so the relay reads it the only way that allows:
+  it opens the plant's alarm page, sets the Status filter to Recovered, searches,
+  and takes the portal's own response - every page on its first run, the newest
+  page after that.
+
+  A SolisCloud alarm record also carries the owner's address, phone number,
+  email and region. Every one of those is dropped in the Worker before anything
+  is stored, and a test proves it rather than assuming it. SolarMan never records
+  when a fault cleared, so its alarms read "not recorded" rather than implying
+  they are still going on. SolarMan's severities are partly inferred, and the
+  vendor's own number is stored beside them for that reason.
+
+- **Month and year history back to installation.** SolarLens's own record
+  starts on the day it first polled, so its first month was a fraction and every
+  earlier year was missing. The vendors counted all of it. Month and year views
+  now use each vendor's own totals wherever one exists - SolisCloud's from the
+  plant chart's Month, Year and Lifetime tabs via the relay, SolarMan's from its
+  statistics endpoints via the Worker - and SolarLens's own record supplies only
+  what the vendor does not report: the peak, and how many of the period's days
+  it saw. A Source column says whose figure each row is. On real data the on-grid
+  plant's months now run from February 2024, and its three year totals add to
+  within 10 kWh of the vendor's lifetime counter.
+
+  Totals are fetched daily. The first run walks back a year at a time until a
+  year comes back empty; later runs read only the current year and month. Every
+  total pushed through the relay is checked against the plant's nameplate before
+  it is stored, since a unit error in a total is far harder to see in a bar chart
+  than a refusal is in a log.
 
 - **Battery charge through the day.** Every sample's state of charge was
   already stored and served by `/api/series`, and only the live figure was ever
@@ -56,12 +96,41 @@ Three of the features the gaps document listed as genuinely missing.
   entering or leaving TV mode changes the cadence at once instead of after the
   old timer fires.
 
+- **The relay does two more things each cycle, after the live reading.** It
+  reads alarm history hourly and period totals daily. Both run last and neither
+  can fail the cycle: a portal redesign that moves the alarm filter must not cost
+  the reading the relay exists to deliver. Its first cycle after starting takes
+  about a minute longer, because it reads everything once. **A machine running
+  the relay needs its checkout updated to pick this up**; the installer's update
+  path does that.
+
+- **New routes.** `GET /api/alarms` and `GET /api/periods` are open reads.
+  `POST /api/ingest/alarms` and `POST /api/ingest/periods` take the relay's raw
+  SolisCloud payloads and normalise them in the Worker, so a script on a laptop
+  never decides which fields are kept. Migration 0010 adds the two tables.
+
+- **The capture script redacts emails by value, not only by key name.** A
+  SolisCloud message record carried an account email under `contactWay`, a name
+  no key list would think of. Existing captures were scrubbed the same way. It
+  also accepts `CAPTURE_MINUTES` for a longer session, and `CAPTURE_CDP_PORT` so a
+  second script can drive the window while it records, bound to 127.0.0.1.
+
 ### Fixed
 
 - **The charge chart's first draft was unreadable in its card.** It used the
   shared chart class, which assumes a full-width panel: a drawing 1000 units
   wide squeezed into a 300-pixel card set its labels at about five pixels under
   a band of empty space. It is now drawn at the width of the card it sits in.
+
+- **Caught before release: an alarm's internal id would have been public.** It
+  is built from provider, plant, code and start time so that re-reading an alarm
+  updates it, which means it spells out the vendor's plant id. Running the new
+  routes against a local database with real portal payloads showed
+  `/api/alarms` returning it. The id now stays in the database.
+
+- **The history chart's unit label no longer sits on top of its highest axis
+  value**, where "kWh per year" and "18.4k" printed over each other. This
+  predates 2.3.
 
 ## [2.2.0] — 2026-09-12
 
