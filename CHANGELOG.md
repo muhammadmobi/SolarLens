@@ -92,6 +92,17 @@ and TV mode.
 
 ### Changed
 
+- **Documentation brought up to date with the code.** `docs/api-notes.md` now
+  records the endpoints this release reads: SolisCloud's alarm list and its
+  month, year and lifetime charts, SolarMan's alert search and statistics, and
+  where each vendor states a plant's timezone, including the owner fields a
+  SolisCloud alarm carries and SolarLens drops. The README's troubleshooting
+  table describes an expired relay login by what a person actually sees - Solis
+  offline while the plant is producing - with the exact command to fix it, and
+  its test list now covers all eleven unit test files. The installer's
+  explanation of why it resets a checkout that cannot fast-forward names the
+  usual cause: a branch that was later squash-merged.
+
 - **Refresh schedules itself** rather than running on a fixed interval, so
   entering or leaving TV mode changes the cadence at once instead of after the
   old timer fires.

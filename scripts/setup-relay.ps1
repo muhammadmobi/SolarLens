@@ -115,12 +115,12 @@ if (Test-Path (Join-Path $InstallDir '.git')) {
   Push-Location $InstallDir
   try { Invoke-Native 'git' @('pull','--ff-only') 'git pull'; Ok 'Repository already present - updated' }
   catch {
-    # A fast-forward is not always possible, and on this repository that is
-    # expected rather than exceptional: its history has been rewritten and
-    # force-pushed, so any clone taken beforehand has commits that are no
-    # longer ancestors of the published branch. Such a checkout can never pull
-    # again, and would sit on stale code indefinitely while reporting only a
-    # warning - which is how a machine ended up running a month-old installer.
+    # A fast-forward is not always possible, and that is expected rather than
+    # exceptional: a checkout left on a branch that was later squash-merged, or
+    # holding any commit that never reached main in that form, has diverged from
+    # the published branch. Such a checkout can never fast-forward, and would sit
+    # on stale code indefinitely while reporting only a warning - which is how a
+    # machine ended up running a month-old installer.
     #
     # Resetting is the right answer for a deployment checkout nobody edits, and
     # the wrong one for a working copy, so it happens only when git itself
