@@ -477,10 +477,12 @@
   .bar-row.unused .num { color: var(--faint); font-weight: 650; }
   .cardnote { margin: 12px 0 0; font-size: 12.5px; color: var(--faint); }
   .rangepick { display: flex; gap: 8px; flex-wrap: wrap; }
-  .rangebtn { font: inherit; font-size: 12.5px; font-weight: 650; color: var(--muted); background: var(--surface-2);
+  .rangebtn, .groupbtn { font: inherit; font-size: 12.5px; font-weight: 650; color: var(--muted); background: var(--surface-2);
               border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
-  .rangebtn:hover { border-color: var(--muted); }
-  .rangebtn.on { background: var(--accent, var(--ink)); color: var(--surface); border-color: transparent; }
+  .rangebtn:hover, .groupbtn:hover { border-color: var(--muted); }
+  .rangesep { width: 1px; background: var(--line); margin: 2px 4px; }
+  td.partial { color: var(--muted); }
+  .rangebtn.on, .groupbtn.on { background: var(--accent, var(--ink)); color: var(--surface); border-color: transparent; }
   .daybar { rx: 2; }
   td.faint { color: var(--faint); }
   .bar-track { height: 9px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
@@ -1578,6 +1580,49 @@
    * are never mistaken for each other.
    */
   const HISTORY_RANGES = [7, 30, 90];
+  // Month and year views need the longest window the API gives: 400 days is
+  // thirteen months, enough for this month to sit beside the same one last year.
+  const ROLLUP_DAYS = 400;
+  const GROUPS = [['day', 'By day'], ['month', 'By month'], ['year', 'By year']];
+
+  /**
+   * Daily rows folded into months or years.
+   *
+   * Energy sums; peak is the highest peak; samples add up. What a rollup must
+   * never do is pass a partial period off as a whole one - the record starts
+   * the day SolarLens began collecting, so its first month is only the days
+   * after that. Each period therefore carries how many days were recorded and
+   * how many the period has, and the page prints both.
+   */
+  function rollup(rows, group) {
+    const key = (d) => (group === 'month' ? d.slice(0, 7) : d.slice(0, 4));
+    const span = (k) => {
+      const y = Number(k.slice(0, 4));
+      if (group === 'year') return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
+      return new Date(Date.UTC(y, Number(k.slice(5, 7)), 0)).getUTCDate();
+    };
+    const add = (a, b) => (a == null && b == null ? null : (a ?? 0) + (b ?? 0));
+    const out = new Map();
+    for (const r of rows) {
+      const k = key(r.day);
+      const p = out.get(k) ?? {
+        day: k, yield_kwh: null, load_kwh: null, import_kwh: null, export_kwh: null,
+        batt_charge_kwh: null, batt_discharge_kwh: null, peak_w: null, samples: 0, days: 0, span: span(k),
+      };
+      p.yield_kwh = add(p.yield_kwh, r.yield_kwh);
+      p.load_kwh = add(p.load_kwh, r.load_kwh);
+      p.import_kwh = add(p.import_kwh, r.import_kwh);
+      p.export_kwh = add(p.export_kwh, r.export_kwh);
+      p.batt_charge_kwh = add(p.batt_charge_kwh, r.batt_charge_kwh);
+      p.batt_discharge_kwh = add(p.batt_discharge_kwh, r.batt_discharge_kwh);
+      p.peak_w = r.peak_w == null ? p.peak_w : Math.max(p.peak_w ?? 0, r.peak_w);
+      p.samples += r.samples ?? 0;
+      p.days += 1;
+      out.set(k, p);
+    }
+    // Newest first, like the daily rows.
+    return [...out.values()].sort((a, b) => (a.day < b.day ? 1 : -1));
+  }
 
   async function loadHistory(days) {
     state.historyDays = days;
@@ -1594,8 +1639,13 @@
     if (!state.history) { loadHistory(state.historyDays ?? 30); }
 
     const days = state.historyDays ?? 30;
-    const picker = `<div class="rangepick">${HISTORY_RANGES.map((d) =>
-      `<button type="button" class="rangebtn${d === days ? ' on' : ''}" data-days="${d}">${d} days</button>`).join('')}</div>`;
+    const group = state.historyGroup ?? 'day';
+    // The day ranges mean nothing once rows are folded into months, so the
+    // month and year views show only the grouping switch.
+    const picker = `<div class="rangepick">${GROUPS.map(([g, label]) =>
+      `<button type="button" class="groupbtn${g === group ? ' on' : ''}" data-group="${g}">${label}</button>`).join('')}
+      ${group === 'day' ? `<span class="rangesep"></span>${HISTORY_RANGES.map((d) =>
+      `<button type="button" class="rangebtn${d === days ? ' on' : ''}" data-days="${d}">${d} days</button>`).join('')}` : ''}</div>`;
 
     if (state.history?.error) {
       $('view').innerHTML = `<div class="card"><div class="empty">Could not load history: ${esc(state.history.error)}</div></div>`;
@@ -1611,6 +1661,8 @@
     const rows = state.history.rows ?? [];
     const byInv = {};
     for (const r of rows) (byInv[r.inverter_id] ||= []).push(r);
+    if (group !== 'day') for (const id of Object.keys(byInv)) byInv[id] = rollup(byInv[id], group);
+    const periodWord = group === 'month' ? 'Month' : group === 'year' ? 'Year' : 'Day';
 
     const sections = invs.map((inv, i) => {
       const mine = byInv[inv.id] ?? [];
@@ -1632,9 +1684,9 @@
       const anyGrid = mine.some((r) => r.import_kwh != null || r.export_kwh != null);
       const anyBatt = mine.some((r) => r.batt_charge_kwh != null || r.batt_discharge_kwh != null);
 
-      const head = ['Day', 'Produced', anyLoad ? 'Consumed' : null, anyGrid ? 'Imported' : null,
+      const head = [periodWord, 'Produced', anyLoad ? 'Consumed' : null, anyGrid ? 'Imported' : null,
         anyGrid ? 'Exported' : null, anyBatt ? 'Charged' : null, anyBatt ? 'Discharged' : null,
-        'Peak', 'Samples'].filter(Boolean);
+        'Peak', group === 'day' ? null : 'Days recorded', 'Samples'].filter(Boolean);
 
       const body = mine.map((r) => `<tr>
         <td class="mono">${esc(r.day)}</td>
@@ -1643,23 +1695,38 @@
         ${anyGrid ? `<td>${fmtKwh(r.import_kwh)}</td><td>${fmtKwh(r.export_kwh)}</td>` : ''}
         ${anyBatt ? `<td>${fmtKwh(r.batt_charge_kwh)}</td><td>${fmtKwh(r.batt_discharge_kwh)}</td>` : ''}
         <td>${fmtWs(r.peak_w)}</td>
+        ${group === 'day' ? '' : `<td class="${r.days < r.span ? 'partial' : ''}">${r.days} of ${r.span}</td>`}
         <td class="faint">${r.samples}</td>
       </tr>`).join('');
+
+      // The one comparison that says how much of a period the record is
+      // missing: the vendor counted the whole of this month and year, even the
+      // part before SolarLens was collecting.
+      const nowKey = group === 'month' ? mine[0]?.day : group === 'year' ? mine[0]?.day : null;
+      const vendorNow = group === 'month' ? m.genMonthKwh : group === 'year' ? m.genYearKwh : null;
+      const shortfall = nowKey && vendorNow != null && mine[0].yield_kwh != null && vendorNow - mine[0].yield_kwh > 0.5
+        ? `<p class="cardnote" style="margin:0 20px 4px">${esc(providerName(inv.provider))} counts ${fmtKwh(vendorNow)} for ${esc(nowKey)};
+           SolarLens recorded ${fmtKwh(mine[0].yield_kwh)} across ${mine[0].days} of its ${mine[0].span} days.
+           The difference is the part of the ${group} before collecting began, or days a feed was down.</p>`
+        : '';
 
       return `<details class="syssec" open>
         <summary>
           <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
-          <span class="snow">${fmtKwh(totals.yield)}<small> in ${mine.length} day${mine.length === 1 ? '' : 's'}</small></span>
+          <span class="snow">${fmtKwh(totals.yield)}<small> in ${group === 'day'
+            ? `${mine.length} day${mine.length === 1 ? '' : 's'}`
+            : `${mine.length} ${group}${mine.length === 1 ? '' : 's'}`}</small></span>
         </summary>
         <div class="secbody">
-          <section class="card"><div class="body">${dailyBars(mine, colorFor(inv.provider), 'hb' + i)}</div></section>
+          <section class="card"><div class="body">${dailyBars(mine, colorFor(inv.provider), 'hb' + i, group)}</div></section>
+          ${shortfall}
           <div class="tablewrap"><table class="devices">
             <thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
             <tbody>${body}</tbody>
           </table></div>
           <dl class="kv" style="padding:16px 20px 20px">
-            <dt>Recorded here</dt><dd>${fmtKwh(totals.yield)} over ${mine.length} day${mine.length === 1 ? '' : 's'}</dd>
+            <dt>Recorded here</dt><dd>${fmtKwh(totals.yield)} over ${group === 'day' ? mine.length : mine.reduce((a, r) => a + r.days, 0)} day${(group === 'day' ? mine.length : mine.reduce((a, r) => a + r.days, 0)) === 1 ? '' : 's'}</dd>
             ${m.genMonthKwh != null ? `<dt>Vendor · this month</dt><dd>${fmtKwh(m.genMonthKwh)}</dd>` : ''}
             ${m.genYearKwh != null ? `<dt>Vendor · this year</dt><dd>${fmtKwh(m.genYearKwh)}</dd>` : ''}
             ${m.genTotalKwh != null ? `<dt>Vendor · lifetime</dt><dd>${fmtKwh(m.genTotalKwh)}</dd>` : ''}
@@ -1678,13 +1745,25 @@
   }
 
   function bindRange() {
-    for (const b of document.querySelectorAll('.rangebtn')) {
+    for (const b of document.querySelectorAll('.rangebtn[data-days]')) {
       b.onclick = () => { state.history = null; loadHistory(Number(b.dataset.days)); renderHistory(); };
+    }
+    for (const b of document.querySelectorAll('.groupbtn')) {
+      b.onclick = () => {
+        const g = b.dataset.group;
+        if (g === (state.historyGroup ?? 'day')) return;
+        state.historyGroup = g;
+        // Months and years need the whole window; going back to days restores
+        // the default range rather than leaving a 400-day table on screen.
+        const want = g === 'day' ? 30 : ROLLUP_DAYS;
+        if (state.historyDays !== want) { state.history = null; loadHistory(want); }
+        renderHistory();
+      };
     }
   }
 
   /** Daily yield as bars: the shape of a month reads faster than 30 numbers. */
-  function dailyBars(rows, colour, id) {
+  function dailyBars(rows, colour, id, group = 'day') {
     const W = 1000, H = 200, L = 54, R = 12, T = 18, B = 34;
     const days = [...rows].reverse(); // oldest first, left to right
     const max = Math.max(1, ...days.map((r) => r.yield_kwh ?? 0));
@@ -1703,10 +1782,13 @@
       // A label per day is unreadable past a week, so thin them out.
       const step = Math.ceil(days.length / 10);
       if (i % step === 0 || i === days.length - 1) {
-        out += `<text class="axis" x="${(x + bw * 0.35).toFixed(1)}" y="${H - 12}" text-anchor="middle">${esc(r.day.slice(5))}</text>`;
+        const label = group === 'year' ? r.day
+          : group === 'month' ? new Date(`${r.day}-01T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', year: '2-digit', timeZone: 'UTC' })
+          : r.day.slice(5);
+        out += `<text class="axis" x="${(x + bw * 0.35).toFixed(1)}" y="${H - 12}" text-anchor="middle">${esc(label)}</text>`;
       }
     });
-    out += `<text class="axis unit" x="6" y="${T - 4}">kWh per day</text>`;
+    out += `<text class="axis unit" x="6" y="${T - 4}">kWh per ${group}</text>`;
     return `<svg class="combined" id="${id}" viewBox="0 0 ${W} ${H}">${out}</svg>`;
   }
 

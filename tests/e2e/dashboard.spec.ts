@@ -1519,3 +1519,92 @@ test.describe('TV mode', () => {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 });
+
+test.describe('History by month and by year', () => {
+  // Rows that straddle a month and a year boundary, so the folding is visible.
+  const rows = () => {
+    const out: unknown[] = [];
+    const day = (d: string, y: number, load: number | null) => ({
+      inverter_id: HYBRID, day: d, yield_kwh: y, peak_w: 2500 + y, load_kwh: load,
+      import_kwh: 1, export_kwh: 2, batt_charge_kwh: 0.5, batt_discharge_kwh: 0.25,
+      samples: 100, first_ts: NOW, last_ts: NOW,
+    });
+    out.push(day('2026-01-02', 10, 4), day('2026-01-01', 12, 5));
+    out.push(day('2025-12-31', 8, 3), day('2025-12-30', 9, 3));
+    out.push({ inverter_id: SOLIS, day: '2026-01-01', yield_kwh: 40, peak_w: 9000, load_kwh: null,
+      import_kwh: null, export_kwh: null, batt_charge_kwh: null, batt_discharge_kwh: null,
+      samples: 90, first_ts: NOW, last_ts: NOW });
+    return out;
+  };
+
+  const section = (page: Page, name: string) => page.locator('details.syssec', { hasText: name });
+
+  test('folds days into months, with how many days each month really has', async ({ page }) => {
+    await stubApi(page, { history: rows() });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="month"]').click();
+    const t = section(page, 'Demo Hybrid').locator('table tbody tr');
+    await expect(t).toHaveCount(2);
+    // Newest first. January: 10 + 12 produced, 4 + 5 consumed, peak 2512.
+    await expect(t.nth(0)).toContainText('2026-01');
+    await expect(t.nth(0)).toContainText('22.0 kWh');
+    await expect(t.nth(0)).toContainText('9.0 kWh');
+    await expect(t.nth(0)).toContainText('2 of 31');
+    await expect(t.nth(1)).toContainText('2025-12');
+    await expect(t.nth(1)).toContainText('17.0 kWh');
+    await expect(t.nth(1)).toContainText('2 of 31');
+  });
+
+  test('folds into years, counting a year\'s real length', async ({ page }) => {
+    await stubApi(page, { history: rows() });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="year"]').click();
+    const t = section(page, 'Demo Hybrid').locator('table tbody tr');
+    await expect(t).toHaveCount(2);
+    await expect(t.nth(0)).toContainText('2026');
+    await expect(t.nth(0)).toContainText('2 of 365');
+    await expect(t.nth(1)).toContainText('2025');
+  });
+
+  test('a period with nothing metered stays blank rather than summing to zero', async ({ page }) => {
+    await stubApi(page, { history: rows() });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="month"]').click();
+    const solis = section(page, 'Demo Solis Plant');
+    await expect(solis.locator('thead')).not.toContainText('Consumed');
+    await expect(solis.locator('tbody tr').first()).toContainText('40.0 kWh');
+  });
+
+  test('asks the server for the whole 400-day window, and goes back to 30 for days', async ({ page }) => {
+    const asked: string[] = [];
+    await stubApi(page, { history: rows() });
+    page.on('request', (r) => { if (r.url().includes('/api/history')) asked.push(new URL(r.url()).searchParams.get('days') ?? ''); });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="month"]').click();
+    await expect.poll(() => asked).toContain('400');
+    // The day ranges mean nothing for months, so they are not offered.
+    await expect(page.locator('.rangebtn[data-days]')).toHaveCount(0);
+    await page.locator('.groupbtn[data-group="day"]').click();
+    await expect(page.locator('.rangebtn[data-days]')).toHaveCount(3);
+    await expect.poll(() => asked.at(-1)).toBe('30');
+  });
+
+  test('says how much of the current month the record is missing, against the vendor', async ({ page }) => {
+    // The fixture hybrid reports genMonthKwh 70.9; the newest recorded month
+    // holds 22 kWh across 2 of 31 days.
+    await stubApi(page, { history: rows() });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="month"]').click();
+    const note = section(page, 'Demo Hybrid').locator('.cardnote');
+    await expect(note).toContainText('counts 70.9 kWh');
+    await expect(note).toContainText('recorded 22.0 kWh across 2 of its 31 days');
+  });
+
+  test('the chart labels months and years, not day numbers', async ({ page }) => {
+    await stubApi(page, { history: rows() });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="year"]').click();
+    const labels = await section(page, 'Demo Hybrid').locator('svg text.axis').allTextContents();
+    expect(labels).toEqual(expect.arrayContaining(['2025', '2026', 'kWh per year']));
+  });
+});
