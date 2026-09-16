@@ -158,12 +158,13 @@
   }
   .livedot i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
   .livedot.stale i { background: var(--warn); }
-  .themebtn {
+  .themebtn, .tvbtn {
     font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
     background: var(--surface-2); color: var(--ink); border: 1px solid var(--line);
     border-radius: 999px; padding: 7px 11px; transition: background .15s, border-color .15s;
   }
-  .themebtn:hover { border-color: var(--muted); }
+  .tvbtn { text-decoration: none; }
+  .themebtn:hover, .tvbtn:hover { border-color: var(--muted); }
 
   nav { display: flex; gap: 2px; padding: 10px 0 0; }
   nav a {
@@ -375,6 +376,10 @@
 
   /* The chart's caption above the drawing, not written across it: what the
      reading is on the left, the day's peak on the right. */
+  .soc { margin-top: 16px; }
+  .soc .ovchart-head { margin-bottom: 6px; }
+  .soc-chart { width: 100%; height: auto; display: block; }
+  .soc-chart .axis { font-size: 11px; }
   .ovchart-head { display: flex; align-items: baseline; gap: 10px; padding: 4px 12px 2px; }
   .ovchart-head .t { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
   .ovchart-head .p { margin-left: auto; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -533,6 +538,37 @@
 
   footer { margin-top: 26px; color: var(--faint); font-size: 12.5px; display: flex; gap: 16px; flex-wrap: wrap; }
   .empty { padding: 56px 24px; text-align: center; color: var(--muted); }
+
+  /* TV mode: a wall display. No chrome, type sized to the screen rather than to
+     a reading distance, and nothing that scrolls - a display nobody touches has
+     no way to scroll. */
+  body.tv .topbar, body.tv footer { display: none; }
+  body.tv { height: 100dvh; overflow: hidden; }
+  body.tv .wrap { max-width: none; margin: 0; padding: 3vh 3vw; }
+  /* #view keeps a top padding for the tabs above it; with no tabs that padding
+     is exactly the height that pushed the page past the bottom of the screen. */
+  body.tv #view { padding: 0; }
+  .tvwrap { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 3vh; height: 94dvh; }
+  .tvhead { display: flex; justify-content: space-between; align-items: flex-end; gap: 3vw; }
+  .tvhead .k { color: var(--muted); font-size: clamp(14px, 1.4vw, 24px); font-weight: 600; }
+  .tvtotal { font-size: clamp(44px, 7vw, 120px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .tvtotal small, .tvnow small { font-size: .38em; color: var(--muted); font-weight: 600; margin-left: .15em; }
+  .tvclock { text-align: right; }
+  .tvclock .t { font-size: clamp(28px, 4vw, 68px); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  .tvgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 2.5vw; min-height: 0; }
+  .tvsys { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 3vh 2.4vw;
+           display: flex; flex-direction: column; gap: 2vh; min-height: 0; border-top: 6px solid var(--accent); }
+  .tvname { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            font-size: clamp(20px, 2.2vw, 38px); font-weight: 700; }
+  .tvnow { font-size: clamp(60px, 9vw, 160px); font-weight: 800; line-height: .95; font-variant-numeric: tabular-nums; }
+  .tvnow.off { color: var(--muted); }
+  .tvfigs { display: flex; flex-wrap: wrap; gap: 1.5vh 3.5vw; font-size: clamp(20px, 2.3vw, 40px); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tvfigs .k { display: block; color: var(--muted); font-size: .5em; font-weight: 600; margin-bottom: .2em; }
+  .tvcurve { flex: 1; min-height: 0; }
+  .tvcurve svg { width: 100%; height: 100%; }
+  .tvexit { position: fixed; top: 14px; right: 14px; opacity: 0; transition: opacity .25s; z-index: 5; }
+  body.tv.moving .tvexit { opacity: 1; }
+  body:not(.tv) .tvexit { display: none; }
   .empty code { background: var(--surface-2); padding: 3px 8px; border-radius: 7px; font-family: var(--mono); font-size: 12.5px; }
   .stack { display: flex; flex-direction: column; gap: 18px; }
 </style>
@@ -551,6 +587,7 @@
       <div class="fitem" id="wx-item" hidden><span class="flabel">Weather</span><span class="num small" id="fleet-wx">—</span></div>
     </div>
     <span class="livedot" id="updated"><i></i>loading…</span>
+    <a class="tvbtn" id="tvbtn" href="#/tv" aria-label="TV mode" title="TV mode: full screen, for a wall display">📺</a>
     <button class="themebtn" id="theme" type="button" aria-label="Change theme">🖥️</button>
   </div>
   <div class="inner" style="padding-top:0">
@@ -564,6 +601,7 @@
   </div>
 </div>
 
+<a class="tvbtn tvexit" href="#/" aria-label="Leave TV mode">Exit TV mode · Esc</a>
 <div class="wrap">
   <main id="view"><div class="empty">Loading…</div></main>
   <footer>
@@ -586,6 +624,13 @@
    * which is the moment a stale figure would matter.
    */
   const REFRESH_MS = 10 * 60_000;
+  // A wall display is never hidden, so it never gets the refresh-on-return that
+  // makes ten minutes enough for a tab. Five matches the vendors' own sample
+  // rate: any faster would ask for data that cannot have changed.
+  const TV_REFRESH_MS = 5 * 60_000;
+  // Declared up here, not beside schedule(): a page opened straight on #/tv
+  // routes, and so schedules, before the bottom of this script has run.
+  let timer = null;
   // Comfortably longer than the poll interval plus a vendor's own publishing
   // gap. At a ten-minute poll a fifteen-minute cutoff would tip a perfectly
   // healthy system into "offline" in the minutes before the next fetch, purely
@@ -1706,6 +1751,53 @@
       `${note ? `<p class="cardnote">${esc(note)}</p>` : ''}</div></section>`;
   }
 
+  /**
+   * The battery's charge across the plant's day, 0 to 100 %.
+   *
+   * Every sample's state of charge was already stored and served by
+   * /api/series; only the live figure was ever drawn, so "did it run flat
+   * overnight?" meant opening the vendor app. The axis is fixed at 0-100
+   * rather than fitted to the data, because a pack that moved from 94 to 100
+   * drawn edge to edge looks like one that went flat and back.
+   *
+   * A gap of more than half an hour breaks the line instead of joining across
+   * it. A straight segment over an outage is a claim about hours nobody
+   * measured - the same rule the power curve keeps.
+   */
+  function socChart(inv, pts, accent) {
+    const soc = pts.filter((p) => p.battery_soc != null);
+    if (soc.length < 2) return '';
+    // Drawn at roughly the width of the card it sits in, so the axis text
+    // renders near its real size. The shared chart class assumes a full-width
+    // panel: a 1000-unit drawing squeezed into a 300px card set its labels at
+    // about five pixels, under a band of empty space the fixed height left.
+    const W = 360, H = 130, L = 36, R = 8, T = 8, B = 22;
+    const t0 = dayStart(inv.tz_offset_sec), t1 = t0 + 86400;
+    const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
+    const y = (v) => T + (1 - Math.max(0, Math.min(100, v)) / 100) * (H - T - B);
+    let out = '';
+    for (const v of [0, 50, 100]) {
+      out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" vector-effect="non-scaling-stroke"/>`;
+      out += `<text class="axis" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}%</text>`;
+    }
+    for (let h = 0; h <= 24; h += 6) {
+      out += `<text class="axis" x="${x(t0 + h * 3600)}" y="${H - 6}" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${String(h).padStart(2, '0')}:00</text>`;
+    }
+    let d = '';
+    soc.forEach((p, i) => {
+      const gap = i > 0 && p.ts - soc[i - 1].ts > 1800;
+      d += `${i === 0 || gap ? 'M' : 'L'}${x(p.ts).toFixed(1)},${y(p.battery_soc).toFixed(1)}`;
+    });
+    out += `<path d="${d}" fill="none" stroke="${accent}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+    const lo = soc.reduce((a, p) => (p.battery_soc < a.battery_soc ? p : a));
+    const hi = soc.reduce((a, p) => (p.battery_soc > a.battery_soc ? p : a));
+    return `<div class="soc">
+      <div class="ovchart-head"><span class="t">Charge today</span>
+        <span class="p">low ${Math.round(lo.battery_soc)}% at ${esc(hhmm(lo.ts, inv.tz_offset_sec))} · high ${Math.round(hi.battery_soc)}%</span></div>
+      <svg class="soc-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Battery charge through today">${out}</svg>
+    </div>`;
+  }
+
   function stringsCard(invDev, accent, offline) {
     // strings === null means the vendor reports no per-string registers at all;
     // an empty array means it does, but none are producing (night). Only the
@@ -1891,6 +1983,7 @@
         ${ring(inv.battery_soc ?? 0)}
         <div><div class="k">State of charge</div><div class="v">${battText(inv.battery_power_w)}</div></div>
       </div>
+      ${socChart(inv, todayOf(inv, (state.series?.points ?? []).filter((p) => p.inverter_id === inv.id)), accent)}
       <dl class="kv" style="margin-top:16px">
         ${m.batteryStatus || bat?.status ? `<dt>Status</dt><dd>${esc(String(m.batteryStatus || bat.status).toLowerCase())}</dd>` : ''}
         ${inv.battery_soc != null ? `<dt>State of charge</dt><dd>${Math.round(inv.battery_soc)} %</dd>` : ''}
@@ -1965,6 +2058,12 @@
     const hash = location.hash || '#/';
     for (const a of $('nav').children) a.classList.toggle('on', a.getAttribute('href') === hash);
     document.body.classList.remove('ovfit');
+    const tv = hash === '#/tv';
+    if (document.body.classList.contains('tv') !== tv) {
+      document.body.classList.toggle('tv', tv);
+      holdScreen(tv);
+      schedule();
+    }
     if (state.error === 'unauthorized') {
       // Reads are public, so this should not happen. It is kept because a
       // deployment mid-rollout can still answer 401, and a blank page would
@@ -1975,6 +2074,7 @@
     if (!state.latest) return; // first paint waits for data
     const sys = hash.match(/^#\/system\/(.+)$/);
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
+    if (tv) return renderTv();
     if (hash === '#/devices') return renderDevices();
     if (hash === '#/alerts') return renderAlerts();
     if (hash === '#/history') return renderHistory();
@@ -1983,6 +2083,76 @@
     if (hash === '#/flow') { location.replace('#/'); return overviewRoute(); }
     if (hash === '#/power') return renderPower();
     overviewRoute();
+  }
+
+  /**
+   * TV mode: the dashboard for a screen on a wall.
+   *
+   * One panel per system with the only figures readable from across a room -
+   * what it is producing now, what it has made today, the battery where there
+   * is one, and the day's curve - plus the fleet total and a clock. The clock
+   * is not decoration: on a display nobody touches, it is the only way to tell
+   * a live page from a frozen one at a glance.
+   */
+  function renderTv() {
+    const invs = (state.latest?.inverters ?? []).filter((i) => i.ts);
+    const byInv = {};
+    for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
+    const [tw, tu] = fmtW(invs.reduce((a, i) => a + (i.ac_power_w || 0), 0));
+    const panels = invs.map((inv, i) => {
+      const m = parse(inv.metrics) ?? {};
+      const st = statusOf(inv);
+      const [pw, pu] = fmtW(inv.ac_power_w);
+      const figs = [
+        ['Today', fmtKwh(inv.today_kwh)],
+        hasBattery(inv, m) && inv.battery_soc != null ? ['Battery', `${Math.round(inv.battery_soc)} % · ${battText(inv.battery_power_w)}`] : null,
+        inv.load_power_w != null && !st.offline ? ['House', fmtWs(inv.load_power_w)] : null,
+        inv.grid_power_w != null && !st.offline ? ['Grid', gridText(inv.grid_power_w)] : null,
+      ].filter(Boolean);
+      return `<section class="tvsys" style="--accent:${colorFor(inv.provider)}">
+        <div class="tvname"><span>${esc(inv.name)}</span><span class="pill ${st.cls}"><i></i>${esc(st.text)}</span></div>
+        <div class="tvnow${st.offline ? ' off' : ''}">${pw}<small>${pu}</small></div>
+        <div class="tvfigs">${figs.map(([k, v]) => `<div><span class="k">${esc(k)}</span>${esc(v)}</div>`).join('')}</div>
+        <div class="tvcurve">${systemChart(inv, todayOf(inv, byInv[inv.id]), 'tv' + i, 300, { bare: true })}</div>
+      </section>`;
+    }).join('');
+    $('view').innerHTML = `<div class="tvwrap">
+      <div class="tvhead">
+        <div><div class="k">Producing now, both systems</div><div class="tvtotal">${tw}<small>${tu}</small></div></div>
+        <div class="tvclock"><div class="t" id="tvclock"></div><div class="k" id="tvago"></div></div>
+      </div>
+      <div class="tvgrid">${panels || '<div class="empty">No system has reported yet.</div>'}</div>
+    </div>`;
+    tvTick();
+  }
+
+  /** The clock and the data's age, once a second, without refetching. */
+  function tvTick() {
+    if (!document.body.classList.contains('tv')) return;
+    const c = $('tvclock'), a = $('tvago');
+    if (c) c.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    const newest = Math.max(0, ...(state.latest?.inverters ?? []).map((i) => i.ts || 0));
+    if (a) a.textContent = newest ? `updated ${ago(newest)}` : '';
+  }
+
+  /**
+   * Keep the screen on. A wall display that dims after ten minutes is a black
+   * rectangle on a wall. The browser drops the lock whenever the page is
+   * hidden, so it is taken again on return; where the API does not exist, or
+   * the page is not on HTTPS, the display simply follows its own power
+   * settings and nothing else changes.
+   */
+  let wakeLock = null;
+  async function holdScreen(on) {
+    try {
+      if (on && !wakeLock && 'wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } else if (!on && wakeLock) {
+        await wakeLock.release();
+        wakeLock = null;
+      }
+    } catch { wakeLock = null; }
   }
 
   /**
@@ -2102,10 +2272,36 @@
   window.addEventListener('hashchange', route);
   route();
   refresh(true);
-  setInterval(refresh, REFRESH_MS);
+  // Self-scheduling rather than setInterval, so that entering or leaving TV
+  // mode can change the cadence immediately instead of after the old timer.
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(async () => { await refresh(); schedule(); },
+      document.body.classList.contains('tv') ? TV_REFRESH_MS : REFRESH_MS);
+  }
+  schedule();
+  setInterval(tvTick, 1000);
+
+  // Leaving: Escape, or the exit link, which appears when the mouse moves and
+  // hides again when it stops - a cursor parked on a wall display should not
+  // leave a button hanging over the numbers.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('tv')) location.hash = '#/';
+  });
+  let still = null;
+  document.addEventListener('mousemove', () => {
+    if (!document.body.classList.contains('tv')) return;
+    document.body.classList.add('moving');
+    clearTimeout(still);
+    still = setTimeout(() => document.body.classList.remove('moving'), 2500);
+  });
   // Returning to the tab is exactly when a stale figure matters, so that one
   // fetches everything rather than waiting for the slow cycle to come round.
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(true); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    refresh(true);
+    if (document.body.classList.contains('tv')) holdScreen(true);
+  });
 
   // Installable: the worker is what lets the dashboard live on a home screen
   // rather than in a tab. It goes to the network first and falls back to a
