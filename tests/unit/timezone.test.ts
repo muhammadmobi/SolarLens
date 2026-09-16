@@ -78,3 +78,11 @@ describe('dayStartSec', () => {
     }
   });
 });
+
+describe('tzOffsetSec on a SolisCloud plant snapshot', () => {
+  it('reads the whole-hours field the relayed snapshot carries, beside its other zone fields', () => {
+    // The shape of detailMix: hours, a label, and a zone name, all at the top level.
+    const snapshot = { timeZone: 9, timeZoneName: '(UTC+09:00) Tokyo', timeZoneStr: 'UTC+09:00', timeZoneStandardId: 'Asia/Tokyo', stationName: 'Demo' };
+    expect(tzOffsetSec(snapshot)).toBe(9 * 3600);
+  });
+});
