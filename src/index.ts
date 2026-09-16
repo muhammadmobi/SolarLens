@@ -3,7 +3,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
-import { aliasFor, publicDevices, publicInverters, publicRows } from './public-view';
+import { aliasFor, publicAlarms, publicDevices, publicInverters, publicRows } from './public-view';
 import { plantFilter, pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
 import {
@@ -196,7 +196,7 @@ app.get('/api/alarms', async (c) => {
   const since = nowSec() - days * 86400;
   const [rows, ids] = await Promise.all([listAlarms(c.env.DB, since), inverterIds(c.env.DB)]);
   c.header('Cache-Control', CACHE);
-  return c.json({ now: nowSec(), days, alarms: publicRows(rows, aliasFor(ids)) });
+  return c.json({ now: nowSec(), days, alarms: publicAlarms(rows, aliasFor(ids)) });
 });
 
 /** The vendors' own month and year totals, reaching back before SolarLens began collecting. */
