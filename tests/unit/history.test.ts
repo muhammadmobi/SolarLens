@@ -12,7 +12,8 @@ import { historyFromChart } from '../../src/providers/soliscloud';
  * skipped rather than guessed at.
  */
 describe('historyFromChart', () => {
-  const noon = Date.UTC(2026, 8, 8, 7, 0, 0); // 12:00 in Asia/Karachi
+  // A mid-morning sample. The zone plays no part: this parser reads times as given.
+  const noon = Date.UTC(2026, 8, 8, 7, 0, 0);
 
   it('reads the portal shape: time[] and power[] as parallel arrays', () => {
     // This is what the chart call actually returns - two arrays of the same

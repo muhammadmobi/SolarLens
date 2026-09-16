@@ -1,6 +1,6 @@
 import type { Device, Inverter, Plant, Provider, Reading } from './types';
 import { CallQueue } from './queue';
-import { num, pick, toWatts } from './units';
+import { num, pick, toWatts, tzOffsetSec } from './units';
 import { STATION_PREFIX, deviceFromRecord, deviceFromV3Detail, stationInverter, stationReading, type TokenStore } from './solarman';
 
 /**
@@ -103,6 +103,7 @@ export class SolarmanWebProvider implements Provider {
       id: String(s.id),
       name: String(pick(s, 'name', 'stationName') ?? `Station ${s.id}`),
       capacityW: toWatts(pick(s, 'installedCapacity'), 'kW'),
+      tzOffsetSec: tzOffsetSec(s),
     }));
     for (const p of plants) this.plants.set(p.id, p);
     return plants;

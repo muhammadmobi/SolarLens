@@ -23,3 +23,13 @@
   Referrer-Policy: no-referrer
   Cross-Origin-Opener-Policy: same-origin
   X-Frame-Options: DENY
+
+# Chrome rejects a manifest that does not arrive as JSON, and the asset handler
+# has no mapping for .webmanifest of its own.
+/manifest.webmanifest
+  Content-Type: application/manifest+json
+
+# The worker must be allowed to control the whole origin, not just /.
+/sw.js
+  Service-Worker-Allowed: /
+  Cache-Control: no-cache

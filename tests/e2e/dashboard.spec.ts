@@ -1167,3 +1167,225 @@ test.describe('System detail', () => {
     await expect(page.locator('.empty')).toContainText('Unknown system');
   });
 });
+
+test.describe('Self-sufficiency and self-consumption', () => {
+  test('both ratios are shown for a system whose load is metered', async ({ page }) => {
+    await stubApi(page);
+    await page.goto(`/#/system/${HYBRID}`);
+    const counters = page.locator('.card', { hasText: 'Energy counters' });
+    // 3.0 kWh self-used out of 4.8 consumed, and out of 13.7 generated.
+    await expect(counters).toContainText('Self-sufficiency today');
+    await expect(counters).toContainText('63 % of the load');
+    await expect(counters).toContainText('Self-consumption today');
+    await expect(counters).toContainText('22 % of what was generated');
+  });
+
+  test('neither is shown for a plant with no meter, rather than 0 %', async ({ page }) => {
+    await stubApi(page);
+    await page.goto(`/#/system/${SOLIS}`);
+    const counters = page.locator('.card', { hasText: 'Energy counters' });
+    await expect(counters).toContainText('Produced today');
+    await expect(counters).not.toContainText('Self-sufficiency');
+    await expect(counters).not.toContainText('Self-consumption');
+  });
+
+  test('a metered load of zero is left blank, not divided by', async ({ page }) => {
+    // Before dawn nothing has been consumed yet. "0 % self-sufficient" would be
+    // a claim about a day that has not started.
+    await stubApi(page, {
+      invs: inverters({ solarman: { metrics: metrics({ loadTodayKwh: 0, selfUseTodayKwh: 0 }) } }),
+    });
+    await page.goto(`/#/system/${HYBRID}`);
+    const counters = page.locator('.card', { hasText: 'Energy counters' });
+    await expect(counters).not.toContainText('Self-sufficiency');
+  });
+
+  test('a ratio over 100 is clamped, because the counters round separately', async ({ page }) => {
+    await stubApi(page, {
+      invs: inverters({ solarman: { metrics: metrics({ loadTodayKwh: 4.0, selfUseTodayKwh: 4.2 }) } }),
+    });
+    await page.goto(`/#/system/${HYBRID}`);
+    await expect(page.locator('.card', { hasText: 'Energy counters' })).toContainText('100 % of the load');
+  });
+});
+
+test.describe("The plant's own day", () => {
+  // 12 hours east of the runner, so the plant's midnight is far from the
+  // browser's however this suite is run.
+  const EAST = 12 * 3600;
+
+  test('the day chart opens at the plant midnight, not the reader\'s', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solis: { tz_offset_sec: EAST } }) });
+    await page.goto('/#/');
+    const t0 = await page.evaluate((off) => {
+      const now = Math.floor(Date.now() / 1000);
+      return Math.floor((now + off) / 86400) * 86400 - off;
+    }, EAST);
+    const viewerMidnight = await page.evaluate(() => {
+      const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000);
+    });
+    // The premise of the test: the two really do disagree.
+    expect(t0).not.toBe(viewerMidnight);
+    // And a sample from before the plant's day must not be on its chart.
+    await expect(page.locator('.ovsys').first()).toBeVisible();
+  });
+
+  test('samples from before the plant day are not counted as today', async ({ page }) => {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const viewerT0 = Math.floor(start.getTime() / 1000);
+    await stubApi(page, {
+      invs: inverters({ solis: { tz_offset_sec: -12 * 3600 } }),
+      // One sample at the reader's own midnight. For a plant twelve hours west
+      // that instant belongs to yesterday, so it cannot be today's peak.
+      series: [
+        { inverter_id: SOLIS, ts: viewerT0 + 60, ac_power_w: 11_000, today_kwh: null, battery_soc: null, grid_power_w: null },
+      ],
+    });
+    await page.goto('/#/');
+    await expect(page.locator('.ovsys').first()).not.toContainText('peak 11.0 kW');
+  });
+
+  test('a plant that reports no timezone still draws its day', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    // No tz_offset_sec on either fixture: the reader's midnight is the fallback
+    // and every system still has a curve.
+    await expect(page.locator('.ovsys')).toHaveCount(2);
+    await expect(page.locator('.ovchart svg').first()).toBeVisible();
+  });
+});
+
+test.describe('Installable', () => {
+  test('the page links a manifest that parses and names both icon sizes', async ({ page, request }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    const href = await page.locator('link[rel="manifest"]').getAttribute('href');
+    expect(href).toBe('/manifest.webmanifest');
+
+    const res = await request.get(href as string);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('manifest+json');
+
+    const m = JSON.parse(await res.text());
+    expect(m.name).toBe('SolarLens');
+    expect(m.display).toBe('standalone');
+    expect(m.start_url).toBe('/');
+    const sizes = (m.icons as { sizes: string }[]).map((i) => i.sizes);
+    // Chrome will not offer an install without an icon of at least 192px.
+    expect(sizes).toContain('192x192');
+    expect(sizes).toContain('512x512');
+    expect((m.icons as { purpose?: string }[]).some((i) => i.purpose === 'maskable')).toBe(true);
+  });
+
+  test('every icon the manifest names actually exists', async ({ page, request }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    const m = JSON.parse(await (await request.get('/manifest.webmanifest')).text());
+    for (const icon of m.icons as { src: string; type: string }[]) {
+      const res = await request.get(icon.src);
+      expect(res.status(), `${icon.src} is missing`).toBe(200);
+      expect(res.headers()['content-type']).toContain(icon.type.split('/')[1]);
+    }
+  });
+
+  test('iOS gets a raster touch icon, because it will not scale the SVG', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', /\.png$/);
+  });
+
+  test('the service worker exists and goes to the network before its cache', async ({ request }) => {
+    const res = await request.get('/sw.js');
+    expect(res.status()).toBe(200);
+    const src = await res.text();
+    // The rule the file exists to keep: fetch first, cache only on failure.
+    expect(src).toContain("addEventListener('fetch'");
+    expect(src.indexOf('fetch(request)')).toBeLessThan(src.indexOf('caches.match(request)'));
+    // A POST is an instruction and must never be replayed from a cache.
+    expect(src).toContain("request.method !== 'GET'");
+  });
+});
+
+test.describe('PV strings on an offline inverter', () => {
+  // The bug this block exists for: an inverter that went offline at dusk kept
+  // its last string readings on the device record - 21 W and 17 W - and every
+  // view counted those as strings producing now, on a system the header
+  // correctly called offline.
+  const offlineSolis = () => inverters({ solis: { ts: NOW - 19 * 3600, status: 'offline' } });
+  const staleDevices = () => devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+    ? { ...d, status: 'offline', last_seen: NOW - 19 * 3600 }
+    : d);
+
+  test('the overview does not say an offline inverter\'s strings are producing', async ({ page }) => {
+    await stubApi(page, { invs: offlineSolis(), devs: staleDevices() });
+    await page.goto('/#/');
+    const solis = page.locator('.ovsys').first();
+    const tile = solis.locator('.ovtiles > div', { hasText: 'PV strings' });
+    await expect(tile).toBeVisible();
+    await expect(tile).not.toContainText('producing');
+    await expect(tile).toContainText('offline');
+  });
+
+  test('the devices table says offline, not "2 producing"', async ({ page }) => {
+    await stubApi(page, { invs: offlineSolis(), devs: staleDevices() });
+    await page.goto('/#/devices');
+    const row = page.locator('table.devices tbody tr').nth(0);
+    await expect(row).toContainText('S5-GR3P10K');
+    await expect(row).not.toContainText('producing');
+  });
+
+  test('the devices table also trusts the reading, not only the device record', async ({ page }) => {
+    // The device record still says online, but the inverter's newest sample is
+    // 19 hours old - which is what makes a system offline everywhere else.
+    await stubApi(page, { invs: offlineSolis(), devs: devices() });
+    await page.goto('/#/devices');
+    await expect(page.locator('table.devices tbody tr').nth(0)).not.toContainText('producing');
+  });
+
+  test('the system page labels its string readings as the last ones reported', async ({ page }) => {
+    await stubApi(page, { invs: offlineSolis(), devs: staleDevices() });
+    await page.goto(`/#/system/${SOLIS}`);
+    const card = page.locator('.card', { hasText: 'PV strings' });
+    await expect(card).toBeVisible();
+    // No wattage presented as if it were flowing now.
+    await expect(card.locator('.bar-row .num').first()).toHaveText('offline');
+    await expect(card).toContainText('last reported');
+  });
+});
+
+test.describe('PV strings: counting what is connected', () => {
+  test('an empty MPPT socket is not counted as a string that is not producing', async ({ page }) => {
+    // One array on input 1, nothing on input 2: that is one string, producing.
+    // "1 of 2" would read as a fault that does not exist.
+    const devs = devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+      ? { ...d, strings: JSON.stringify([
+          { index: 1, powerW: 2289, voltageV: 253.6, currentA: 9.2 },
+          { index: 2, powerW: 0, voltageV: 0.5, currentA: 0 },
+        ]) }
+      : d);
+    await stubApi(page, { devs });
+    await page.goto('/#/');
+    const tile = page.locator('.ovsys').first().locator('.ovtiles > div', { hasText: 'PV strings' });
+    await expect(tile).toContainText('1 producing');
+    await expect(tile).not.toContainText('of 2');
+
+    await page.goto('/#/devices');
+    const row = page.locator('table.devices tbody tr').nth(0);
+    await expect(row).toContainText('1 producing');
+  });
+
+  test('a connected string reading zero in daylight is reported as a shortfall', async ({ page }) => {
+    const devs = devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+      ? { ...d, strings: JSON.stringify([
+          { index: 1, powerW: 4100, voltageV: 480, currentA: 8.5 },
+          { index: 2, powerW: 0, voltageV: 310, currentA: 0 },
+        ]) }
+      : d);
+    await stubApi(page, { devs });
+    await page.goto('/#/');
+    const tile = page.locator('.ovsys').first().locator('.ovtiles > div', { hasText: 'PV strings' });
+    // A string with real voltage and no current is connected and not
+    // producing - the one case "1 of 2" is the right thing to say.
+    await expect(tile).toContainText('1 of 2');
+  });
+});

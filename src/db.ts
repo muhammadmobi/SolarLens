@@ -26,17 +26,18 @@ export function nowSec(): number {
 export async function upsertInverter(db: D1Database, inv: Inverter, seenAt = nowSec()): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO inverters (id, provider, vendor_id, serial, name, plant_id, plant_name, capacity_w, first_seen, last_seen)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+      `INSERT INTO inverters (id, provider, vendor_id, serial, name, plant_id, plant_name, capacity_w, tz_offset_sec, first_seen, last_seen)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?9, ?9)
        ON CONFLICT(id) DO UPDATE SET
          serial     = COALESCE(excluded.serial, inverters.serial),
          name       = COALESCE(excluded.name, inverters.name),
          plant_id   = excluded.plant_id,
          plant_name = CASE WHEN excluded.plant_name = '' THEN inverters.plant_name ELSE excluded.plant_name END,
          capacity_w = COALESCE(excluded.capacity_w, inverters.capacity_w),
+         tz_offset_sec = COALESCE(excluded.tz_offset_sec, inverters.tz_offset_sec),
          last_seen  = excluded.last_seen`,
     )
-    .bind(inv.id, inv.provider, inv.vendorId, inv.serial, inv.name, inv.plantId, inv.plantName, inv.capacityW, seenAt)
+    .bind(inv.id, inv.provider, inv.vendorId, inv.serial, inv.name, inv.plantId, inv.plantName, inv.capacityW, seenAt, inv.tzOffsetSec ?? null)
     .run();
 }
 
@@ -108,6 +109,13 @@ export interface LatestRow {
   plant_name: string | null;
   capacity_w: number | null;
   display_order: number;
+  /**
+   * The plant's UTC offset in seconds, so the page can draw the array's day
+   * rather than the reader's. Already implied by the plant-local sunrise and
+   * sunset the vendors ship in metrics, so publishing it reveals nothing the
+   * public response did not already carry.
+   */
+  tz_offset_sec: number | null;
   ts: number | null;
   source: string | null;
   ac_power_w: number | null;
@@ -129,6 +137,7 @@ export async function latest(db: D1Database): Promise<LatestRow[]> {
   const { results } = await db
     .prepare(
       `SELECT i.id, i.provider, i.serial, i.name, i.plant_id, i.plant_name, i.capacity_w, i.display_order,
+              i.tz_offset_sec,
               r.ts, r.source, r.ac_power_w, r.dc_power_w, r.today_kwh, r.total_kwh,
               r.battery_soc, r.battery_power_w, r.grid_power_w, r.load_power_w, r.temp_c, r.status,
               r.metrics, r.raw
@@ -295,6 +304,31 @@ export interface DayRow {
   last_ts: number;
 }
 
+/** Midnight, in the zone `offsetSec` east of UTC, on or before `atSec`. */
+export function dayStartSec(atSec: number, offsetSec: number): number {
+  return Math.floor((atSec + offsetSec) / 86400) * 86400 - offsetSec;
+}
+
+/**
+ * The earliest "today" among the plants, so one fetch covers every system's
+ * own day. Two plants five hours apart start their days five hours apart, and
+ * a window cut to the later one would open with the earlier one's morning
+ * already missing.
+ */
+export async function earliestDayStart(
+  db: D1Database,
+  atSec: number,
+  fallbackOffsetSec: number,
+): Promise<number> {
+  const { results } = await db
+    .prepare('SELECT tz_offset_sec FROM inverters WHERE enabled = 1')
+    .all<{ tz_offset_sec: number | null }>();
+  const starts = (results ?? []).map((r) =>
+    dayStartSec(atSec, r.tz_offset_sec ?? fallbackOffsetSec),
+  );
+  return starts.length ? Math.min(...starts) : dayStartSec(atSec, fallbackOffsetSec);
+}
+
 /**
  * One row per inverter per day.
  *
@@ -303,9 +337,12 @@ export interface DayRow {
  * largest value seen within it - no summing, and no double counting when the
  * same sample is stored twice.
  *
- * Local midnight is the caller's, passed in as the browser's own UTC offset in
- * minutes. The alternative is guessing a timezone server-side and splitting
- * every day in the wrong place.
+ * Local midnight is the *plant's*, where the vendor told us where the plant is:
+ * inverters.tz_offset_sec, learned at discovery. A solar day ends at the
+ * array's midnight, so reading the dashboard from another country used to blend
+ * two of the plant's days into each row. Plants whose vendor says nothing fall
+ * back to the caller's own offset, passed in as the browser's UTC offset in
+ * minutes, which is what every plant used before.
  */
 export async function daily(
   db: D1Database,
@@ -316,22 +353,23 @@ export async function daily(
   const shift = -tzOffsetMin * 60; // JS offset is minutes to add to local to reach UTC
   const { results } = await db
     .prepare(
-      `SELECT inverter_id,
-              date(ts + ?3, 'unixepoch') AS day,
-              MAX(today_kwh)                                    AS yield_kwh,
-              MAX(ac_power_w)                                   AS peak_w,
-              MAX(json_extract(metrics, '$.loadTodayKwh'))      AS load_kwh,
-              MAX(json_extract(metrics, '$.gridImportTodayKwh')) AS import_kwh,
-              MAX(json_extract(metrics, '$.gridExportTodayKwh')) AS export_kwh,
-              MAX(json_extract(metrics, '$.battChargeTodayKwh')) AS batt_charge_kwh,
-              MAX(json_extract(metrics, '$.battDischargeTodayKwh')) AS batt_discharge_kwh,
+      `SELECT r.inverter_id AS inverter_id,
+              date(r.ts + COALESCE(i.tz_offset_sec, ?3), 'unixepoch') AS day,
+              MAX(r.today_kwh)                                    AS yield_kwh,
+              MAX(r.ac_power_w)                                   AS peak_w,
+              MAX(json_extract(r.metrics, '$.loadTodayKwh'))      AS load_kwh,
+              MAX(json_extract(r.metrics, '$.gridImportTodayKwh')) AS import_kwh,
+              MAX(json_extract(r.metrics, '$.gridExportTodayKwh')) AS export_kwh,
+              MAX(json_extract(r.metrics, '$.battChargeTodayKwh')) AS batt_charge_kwh,
+              MAX(json_extract(r.metrics, '$.battDischargeTodayKwh')) AS batt_discharge_kwh,
               COUNT(*) AS samples,
-              MIN(ts)  AS first_ts,
-              MAX(ts)  AS last_ts
-       FROM readings
-       WHERE ts BETWEEN ?1 AND ?2
-       GROUP BY inverter_id, day
-       ORDER BY day DESC, inverter_id`,
+              MIN(r.ts)  AS first_ts,
+              MAX(r.ts)  AS last_ts
+       FROM readings r
+       LEFT JOIN inverters i ON i.id = r.inverter_id
+       WHERE r.ts BETWEEN ?1 AND ?2
+       GROUP BY r.inverter_id, day
+       ORDER BY day DESC, r.inverter_id`,
     )
     .bind(fromTs, toTs, shift)
     .all<DayRow>();
