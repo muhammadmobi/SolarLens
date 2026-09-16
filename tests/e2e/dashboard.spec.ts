@@ -138,6 +138,8 @@ async function stubApi(page: Page, opts: {
   invs?: unknown[]; devs?: unknown[]; status?: number; series?: unknown[];
   poll?: { ts?: number; ok: number; detail: string; provider: string };
   history?: unknown[] | null;
+  alarms?: unknown[] | 'error';
+  periods?: unknown[];
   feeds?: { ts: number; ok: number; detail: string; provider: string }[];
 } = {}) {
   const status = opts.status ?? 200;
@@ -150,6 +152,10 @@ async function stubApi(page: Page, opts: {
   await page.route('**/api/series**', (r) => r.fulfill(json(status === 200 ? { from: 0, to: NOW, points } : { error: 'unauthorized' })));
   await page.route('**/api/devices', (r) => r.fulfill(json(status === 200 ? { now: NOW, devices: devs } : { error: 'unauthorized' })));
   await page.route('**/api/history**', (r) => r.fulfill(json({ now: NOW, days: 30, rows: opts.history ?? historyRows() })));
+  await page.route('**/api/alarms**', (r) => (opts.alarms === 'error'
+    ? r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) })
+    : r.fulfill(json({ now: NOW, days: 3650, alarms: opts.alarms ?? [] }))));
+  await page.route('**/api/periods', (r) => r.fulfill(json({ now: NOW, periods: opts.periods ?? [] })));
   const polls = [opts.poll ?? { ts: NOW - 30, provider: 'solarman', ok: 1, detail: 'plants=1 inverters=1 new=1' }];
   await page.route('**/api/health', (r) => r.fulfill(json({ now: NOW, polls, feeds: opts.feeds ?? polls })));
 }
@@ -1606,5 +1612,146 @@ test.describe('History by month and by year', () => {
     await page.locator('.groupbtn[data-group="year"]').click();
     const labels = await section(page, 'Demo Hybrid').locator('svg text.axis').allTextContents();
     expect(labels).toEqual(expect.arrayContaining(['2025', '2026', 'kWh per year']));
+  });
+});
+
+test.describe('Fault history', () => {
+  const DAY = 86400;
+  const solisAlarm = (daysAgo: number, over: Record<string, unknown> = {}) => ({
+    inverter_id: SOLIS, provider: 'soliscloud', code: '1015', message: 'NO-Grid', severity: 'info',
+    vendor_level: 1, advice: 'No Action Required', begin_ts: NOW - daysAgo * DAY, end_ts: NOW - daysAgo * DAY + 600,
+    state: 'recovered', ...over,
+  });
+  const hybridAlarm = (daysAgo: number) => ({
+    inverter_id: HYBRID, provider: 'solarman', code: '7', message: 'DC volt low fault', severity: 'fault',
+    vendor_level: 2, advice: null, begin_ts: NOW - daysAgo * DAY, end_ts: null, state: 'unknown',
+  });
+  const section = (page: Page, name: string) => page.locator('details.syssec', { hasText: name });
+
+  test('lists a system\'s past alarms, newest first, with what the vendor advises', async ({ page }) => {
+    await stubApi(page, { alarms: [solisAlarm(1, { code: 'F017', message: 'L&PE FAIL', severity: 'warning' }), solisAlarm(30), solisAlarm(400)] });
+    await page.goto('/#/alerts');
+    const hist = section(page, 'Demo Solis Plant').locator('.faulthist');
+    await expect(hist.locator('tbody tr')).toHaveCount(3);
+    await expect(hist.locator('thead')).toContainText('Vendor advice');
+    const first = hist.locator('tbody tr').first();
+    await expect(first).toContainText('F017');
+    await expect(first).toContainText('L&PE FAIL');
+    await expect(first).toContainText('warning');
+    await expect(first).toContainText('10 min');
+    await expect(first).toContainText('No Action Required');
+  });
+
+  test('sums it up: how many, since when, and what happens most', async ({ page }) => {
+    await stubApi(page, { alarms: [solisAlarm(1), solisAlarm(2), solisAlarm(3, { code: 'F017', message: 'L&PE FAIL' })] });
+    await page.goto('/#/alerts');
+    const sum = section(page, 'Demo Solis Plant').locator('.fh-sum');
+    await expect(sum).toContainText('3 alarms since');
+    await expect(sum).toContainText('Most often: NO-Grid, 2 times');
+  });
+
+  test('SolarMan has no advice and no end time, and the page does not pretend otherwise', async ({ page }) => {
+    await stubApi(page, { alarms: [hybridAlarm(5)] });
+    await page.goto('/#/alerts');
+    const hist = section(page, 'Demo Hybrid').locator('.faulthist');
+    await expect(hist.locator('thead')).not.toContainText('Vendor advice');
+    const row = hist.locator('tbody tr').first();
+    await expect(row).toContainText('not recorded');
+    await expect(row).not.toContainText('ongoing');
+    await expect(row.locator('.pill')).toHaveClass(/bad/);
+  });
+
+  test('an alarm the vendor records as clearing the instant it began reads "under a minute"', async ({ page }) => {
+    await stubApi(page, { alarms: [solisAlarm(1, { end_ts: NOW - DAY })] });
+    await page.goto('/#/alerts');
+    await expect(section(page, 'Demo Solis Plant').locator('tbody tr').first()).toContainText('under a minute');
+  });
+
+  test('each system shows only its own alarms, and says so when it has none', async ({ page }) => {
+    await stubApi(page, { alarms: [solisAlarm(1)] });
+    await page.goto('/#/alerts');
+    await expect(section(page, 'Demo Solis Plant').locator('.faulthist tbody tr')).toHaveCount(1);
+    await expect(section(page, 'Demo Hybrid').locator('.faulthist')).toContainText('no alarms on record');
+  });
+
+  test('a long history shows the newest fifty and says how many there are', async ({ page }) => {
+    await stubApi(page, { alarms: Array.from({ length: 63 }, (_, i) => solisAlarm(i + 1)) });
+    await page.goto('/#/alerts');
+    const hist = section(page, 'Demo Solis Plant').locator('.faulthist');
+    await expect(hist.locator('tbody tr')).toHaveCount(50);
+    await expect(hist).toContainText('Showing the newest 50 of 63');
+  });
+
+  test('a failed load says so instead of claiming a clean record', async ({ page }) => {
+    await stubApi(page, { alarms: 'error' });
+    await page.goto('/#/alerts');
+    const hist = section(page, 'Demo Solis Plant').locator('.faulthist');
+    await expect(hist).toContainText('Could not load fault history');
+    await expect(hist).not.toContainText('no alarms on record');
+  });
+});
+
+test.describe('History with vendor totals', () => {
+  const vendorMonth = (key: string, y: number, inv = SOLIS) => ({
+    inverter_id: inv, period: 'month', key, yield_kwh: y, load_kwh: null, import_kwh: null, export_kwh: null,
+    charge_kwh: null, discharge_kwh: null, full_hours: 80, source: 'soliscloud-portal',
+  });
+  const vendorYear = (key: string, y: number) => ({ ...vendorMonth(key, y), period: 'year' });
+  const recordedDay = (day: string, y: number) => ({
+    inverter_id: SOLIS, day, yield_kwh: y, peak_w: 9000, load_kwh: null, import_kwh: null, export_kwh: null,
+    batt_charge_kwh: null, batt_discharge_kwh: null, samples: 100, first_ts: NOW, last_ts: NOW,
+  });
+  const section = (page: Page, name: string) => page.locator('details.syssec', { hasText: name });
+
+  test('a month the vendor counted in full shows its total, not the few days SolarLens saw', async ({ page }) => {
+    await stubApi(page, {
+      history: [recordedDay('2026-09-02', 40), recordedDay('2026-09-01', 34)],
+      periods: [vendorMonth('2026-09', 493.6)],
+    });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="month"]').click();
+    const row = section(page, 'Demo Solis Plant').locator('tbody tr', { hasText: '2026-09' });
+    await expect(row).toContainText('494 kWh');
+    await expect(row).toContainText('2 of 30');
+    await expect(row).toContainText('SolisCloud');
+    // The peak still comes from what SolarLens recorded.
+    await expect(row).toContainText('9.00 kW');
+  });
+
+  test('months from before SolarLens began collecting appear, from the vendor', async ({ page }) => {
+    await stubApi(page, {
+      history: [recordedDay('2026-09-01', 34)],
+      periods: [vendorMonth('2026-09', 493.6), vendorMonth('2025-12', 1210), vendorMonth('2024-02', 23)],
+    });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="month"]').click();
+    const rows = section(page, 'Demo Solis Plant').locator('tbody tr');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(2)).toContainText('2024-02');
+    await expect(rows.nth(2)).toContainText('0 of 29');
+    await expect(section(page, 'Demo Solis Plant').locator('.cardnote')).toContainText('own');
+  });
+
+  test('a system the vendor sent no totals for keeps its own record, labelled as such', async ({ page }) => {
+    await stubApi(page, { periods: [vendorMonth('2026-09', 493.6)] });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="month"]').click();
+    const hybrid = section(page, 'Demo Hybrid');
+    await expect(hybrid.locator('tbody tr').first()).toContainText('SolarLens');
+  });
+
+  test('by year, the vendor years go back to installation', async ({ page }) => {
+    await stubApi(page, {
+      history: [recordedDay('2026-09-01', 34)],
+      periods: [vendorYear('2026', 13985.4), vendorYear('2025', 18420.8), vendorYear('2024', 16744)],
+    });
+    await page.goto('/#/history');
+    await page.locator('.groupbtn[data-group="year"]').click();
+    const rows = section(page, 'Demo Solis Plant').locator('tbody tr');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(1)).toContainText('2025');
+    await expect(rows.nth(1)).toContainText('18421 kWh');
+    const labels = await section(page, 'Demo Solis Plant').locator('svg text.axis').allTextContents();
+    expect(labels).toEqual(expect.arrayContaining(['2024', '2025', '2026']));
   });
 });
