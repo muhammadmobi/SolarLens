@@ -54,6 +54,7 @@
 import { chromium } from 'playwright-core';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { readAlarms, readPeriods } from './solis-extras.mjs';
 
 /**
  * The Worker's own secrets already live in .dev.vars, and the agent needs two
@@ -378,6 +379,49 @@ async function pushDevices(plantId, { inverters, collectors, details }) {
   log(`devices ${plantId}: ${j.stored} stored${rssi != null ? `, logger RSSI ${rssi} dBm` : ''}${strings ? `, ${strings} PV string(s) producing` : ''}`);
 }
 
+/**
+ * Fault history hourly and period totals daily, per plant. The first run after
+ * the relay starts reads everything - every page of alarms, every year of
+ * totals - and later runs read only what can have changed. The schedule lives
+ * in memory, so a restarted relay simply reads everything once more; the Worker
+ * updates rows it already has rather than duplicating them.
+ */
+const EXTRAS = { alarmsEveryMs: 60 * 60_000, periodsEveryMs: 24 * 60 * 60_000 };
+const lastAlarms = new Map();
+const lastPeriods = new Map();
+
+async function ingest(path, body) {
+  const res = await fetch(`${SOLARLENS_URL}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${INGEST_TOKEN}` },
+    body: JSON.stringify(body),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`${path} -> HTTP ${res.status} ${j.error ?? ''}`);
+  return j;
+}
+
+async function extras(plantId) {
+  const now = Date.now();
+  if (now - (lastAlarms.get(plantId) ?? 0) >= EXTRAS.alarmsEveryMs) {
+    const first = !lastAlarms.has(plantId);
+    const records = await readAlarms(page, PORTAL, plantId, { allPages: first });
+    const j = await ingest('/api/ingest/alarms', { provider: 'soliscloud', plantId, records });
+    lastAlarms.set(plantId, now);
+    log(`alarms ${plantId}: ${j.stored} of ${records.length}${first ? ' (full history)' : ''}`);
+    await sleep(2500);
+  }
+  if (now - (lastPeriods.get(plantId) ?? 0) >= EXTRAS.periodsEveryMs) {
+    const first = !lastPeriods.has(plantId);
+    let stored = 0;
+    for (const { which, points } of await readPeriods(page, PORTAL, plantId, { backfill: first })) {
+      stored += (await ingest('/api/ingest/periods', { provider: 'soliscloud', plantId, which, points })).stored ?? 0;
+    }
+    lastPeriods.set(plantId, now);
+    log(`periods ${plantId}: ${stored} totals${first ? ' (every year)' : ''}`);
+  }
+}
+
 /** With no configured ids, make sure the portal's plant list has been seen at least once. */
 async function discoverPlants() {
   if (PLANTS.length || known.size) return;
@@ -408,6 +452,10 @@ async function cycle() {
     try { await pushDevices(id, await devices(id)); }
     catch (e) { log(`devices ${id}: ${e.message}`); }
     await sleep(2500);
+    // Last, and never fatal: a portal redesign that moves the alarm filter must
+    // not cost the live reading, which is the thing this agent exists for.
+    try { await extras(id); }
+    catch (e) { log(`extras ${id}: ${e.message}`); }
   }
 }
 

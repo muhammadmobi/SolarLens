@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aliasFor, maskSerial, publicDevices, publicInverters, publicRows } from '../../src/public-view';
+import { aliasFor, maskSerial, publicDevices, publicInverters, publicRows, publicAlarms } from '../../src/public-view';
 
 /**
  * The dashboard is served to anyone with the link, so these functions are the
@@ -130,5 +130,23 @@ describe('publicRows', () => {
     expect(out[0].inverter_id).toBe('s1');
     expect(out[0].ac_power_w).toBe(4200);
     expect(JSON.stringify(out)).not.toContain('1000000000000000001');
+  });
+});
+
+describe('publicAlarms', () => {
+  const rows = [{
+    id: 'soliscloud:1000000000000000001:1015:1784359680', inverter_id: 'soliscloud:station:1000000000000000001',
+    code: '1015', message: 'NO-Grid', begin_ts: 1784359680,
+  }];
+
+  it('never lets the alarm id out, because it spells the plant id', () => {
+    const out = publicAlarms(rows, aliasFor(['soliscloud:station:1000000000000000001']));
+    expect(JSON.stringify(out)).not.toContain('1000000000000000001');
+    expect(out[0]).not.toHaveProperty('id');
+  });
+
+  it('names the system by alias and keeps the fault itself', () => {
+    const [a] = publicAlarms(rows, aliasFor(['soliscloud:station:1000000000000000001']));
+    expect(a).toEqual({ inverter_id: 's1', code: '1015', message: 'NO-Grid', begin_ts: 1784359680 });
   });
 });

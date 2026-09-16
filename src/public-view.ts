@@ -84,3 +84,15 @@ export function publicDevices<T extends { id: string; sn?: string | null; plant_
 export function publicRows<T extends { inverter_id: string }>(rows: T[], alias: Alias) {
   return rows.map((r) => ({ ...r, inverter_id: alias(r.inverter_id) }));
 }
+
+/**
+ * Alarms for a public response.
+ *
+ * An alarm's own id is provider:plant:code:start, which makes re-reading the
+ * same alarm update it rather than duplicate it - and which also spells out the
+ * vendor's plant id. So the id stays in the database and never leaves: the page
+ * keys an alarm by its system, code and start time, which it has anyway.
+ */
+export function publicAlarms<T extends { id: string; inverter_id: string }>(rows: T[], alias: Alias) {
+  return rows.map((r) => ({ ...omit(r, ['id']), inverter_id: alias(r.inverter_id) }));
+}
