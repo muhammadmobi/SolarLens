@@ -1,5 +1,6 @@
 import type { Device, Inverter, Reading } from './providers/types';
 import type { TokenStore } from './providers/solarman';
+import type { Alarm, Period } from './providers/events';
 
 export interface Env {
   DB: D1Database;
@@ -474,4 +475,129 @@ export function tokenStore(db: D1Database): TokenStore {
 export async function inverterIds(db: D1Database): Promise<string[]> {
   const { results } = await db.prepare('SELECT id FROM inverters ORDER BY id').all<{ id: string }>();
   return results.map((r) => r.id);
+}
+
+// ---------- fault history and vendor period totals ----------
+
+/** D1 caps how much one batch may carry; fifty statements stays well inside it. */
+async function inBatches(db: D1Database, stmts: D1PreparedStatement[]): Promise<void> {
+  for (let i = 0; i < stmts.length; i += 50) await db.batch(stmts.slice(i, i + 50));
+}
+
+/**
+ * Store alarms, updating any already known. An alarm is usually first read
+ * while active and later again once recovered, so the end, state and advice
+ * are taken from the newer read; the first-seen time is kept from the first.
+ */
+export async function upsertAlarms(db: D1Database, alarms: Alarm[], seenAt = nowSec()): Promise<number> {
+  const stmts = alarms.map((a) =>
+    db.prepare(
+      `INSERT INTO alarms (id, inverter_id, provider, code, message, severity, vendor_level, advice,
+                           begin_ts, end_ts, state, first_seen, last_seen)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)
+       ON CONFLICT(id) DO UPDATE SET
+         message   = COALESCE(excluded.message, alarms.message),
+         severity  = COALESCE(excluded.severity, alarms.severity),
+         advice    = COALESCE(excluded.advice, alarms.advice),
+         end_ts    = COALESCE(excluded.end_ts, alarms.end_ts),
+         state     = CASE WHEN excluded.state = 'unknown' THEN alarms.state ELSE excluded.state END,
+         last_seen = excluded.last_seen`,
+    ).bind(a.id, a.inverterId, a.provider, a.code, a.message, a.severity, a.vendorLevel, a.advice,
+      a.beginTs, a.endTs, a.state, seenAt));
+  await inBatches(db, stmts);
+  return stmts.length;
+}
+
+export interface AlarmRow {
+  id: string;
+  inverter_id: string;
+  provider: string;
+  code: string;
+  message: string | null;
+  severity: string | null;
+  vendor_level: number | null;
+  advice: string | null;
+  begin_ts: number;
+  end_ts: number | null;
+  state: string;
+}
+
+/** Newest first. Capped, because a flapping grid can raise dozens in a week. */
+export async function listAlarms(db: D1Database, sinceTs: number, limit = 1000): Promise<AlarmRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, inverter_id, provider, code, message, severity, vendor_level, advice, begin_ts, end_ts, state
+       FROM alarms WHERE begin_ts >= ?1 ORDER BY begin_ts DESC LIMIT ?2`,
+    )
+    .bind(sinceTs, limit)
+    .all<AlarmRow>();
+  return results;
+}
+
+/** Store the vendor's own totals; a newer fetch of the same period replaces the older. */
+export async function upsertPeriods(db: D1Database, periods: Period[], fetchedAt = nowSec()): Promise<number> {
+  const stmts = periods.map((p) =>
+    db.prepare(
+      `INSERT INTO vendor_periods (inverter_id, period, key, yield_kwh, load_kwh, import_kwh, export_kwh,
+                                   charge_kwh, discharge_kwh, full_hours, source, fetched_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+       ON CONFLICT(inverter_id, period, key) DO UPDATE SET
+         yield_kwh = excluded.yield_kwh, load_kwh = excluded.load_kwh,
+         import_kwh = excluded.import_kwh, export_kwh = excluded.export_kwh,
+         charge_kwh = excluded.charge_kwh, discharge_kwh = excluded.discharge_kwh,
+         full_hours = excluded.full_hours, source = excluded.source, fetched_at = excluded.fetched_at`,
+    ).bind(p.inverterId, p.period, p.key, p.yieldKwh, p.loadKwh, p.importKwh, p.exportKwh,
+      p.chargeKwh, p.dischargeKwh, p.fullHours, p.source, fetchedAt));
+  await inBatches(db, stmts);
+  return stmts.length;
+}
+
+export interface PeriodRow {
+  inverter_id: string;
+  period: string;
+  key: string;
+  yield_kwh: number | null;
+  load_kwh: number | null;
+  import_kwh: number | null;
+  export_kwh: number | null;
+  charge_kwh: number | null;
+  discharge_kwh: number | null;
+  full_hours: number | null;
+  source: string;
+}
+
+/**
+ * Month and year totals only. Daily totals exist too, but the page already has
+ * its own record of every day since it began; what it lacks is the months and
+ * years from before that, and a year of day rows is not worth a read per view.
+ */
+export async function listPeriods(db: D1Database): Promise<PeriodRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT inverter_id, period, key, yield_kwh, load_kwh, import_kwh, export_kwh,
+              charge_kwh, discharge_kwh, full_hours, source
+       FROM vendor_periods WHERE period IN ('month', 'year') ORDER BY key DESC`,
+    )
+    .all<PeriodRow>();
+  return results;
+}
+
+/**
+ * A small "has this run lately?" memory, in the kv table migration 0007 made.
+ * Alarm history and period totals change far more slowly than the five-minute
+ * cron, so each is fetched only when its key has expired.
+ */
+export async function isDue(db: D1Database, key: string, now = nowSec()): Promise<boolean> {
+  const row = await db.prepare('SELECT expires_at FROM kv WHERE k = ?1').bind(key).first<{ expires_at: number }>();
+  return !row || row.expires_at <= now;
+}
+
+export async function markDone(db: D1Database, key: string, everySec: number, now = nowSec()): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO kv (k, v, expires_at) VALUES (?1, ?2, ?3)
+       ON CONFLICT(k) DO UPDATE SET v = excluded.v, expires_at = excluded.expires_at`,
+    )
+    .bind(key, String(now), now + everySec)
+    .run();
 }

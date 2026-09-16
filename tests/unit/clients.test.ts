@@ -327,6 +327,38 @@ describe('SolarmanProvider', () => {
 describe('SolarmanWebProvider', () => {
   const future = Math.floor(Date.now() / 1000) + 3600;
 
+  it('reads the alert list as the portal asks for it, newest first', async () => {
+    const calls = stubFetch([
+      ['/operating/alert/search', () => ({ total: 1, data: [
+        { deviceSn: 'DEMOSN', level: 2, alertTime: 1785881092, code: '7', showName: 'F56DC_VoltLow_Fault', addr: 'fake' },
+        { code: null, alertTime: 1 },
+      ] })],
+    ]);
+    const alarms = await new SolarmanWebProvider({ refreshToken: 'R', accessToken: 'T' }, memoryTokens()).listAlarms('62000000');
+    expect(alarms).toHaveLength(1);
+    expect(alarms[0]).toMatchObject({ code: '7', severity: 'fault', message: 'DC volt low fault', inverterId: 'solarman:station:62000000' });
+    expect(calls[0].url).toContain('order.direction=DESC');
+    expect(calls[0].init!.method).toBe('POST');
+    expect(JSON.parse(String(calls[0].init!.body))).toMatchObject({ plantId: 62000000 });
+  });
+
+  it('reads a year of month totals, or a month of day totals', async () => {
+    const calls = stubFetch([
+      ['/stats/year', () => ({ statistics: {}, records: [{ year: 2026, month: 1, day: 0, generationValue: 292.6 }] })],
+      ['/stats/month', () => ({ records: [{ year: 2026, month: 9, day: 1, generationValue: 9.3 }] })],
+    ]);
+    const p = new SolarmanWebProvider({ refreshToken: 'R', accessToken: 'T' }, memoryTokens());
+    expect(await p.listPeriods('62000000', 2026)).toMatchObject([{ period: 'month', key: '2026-01', yieldKwh: 292.6 }]);
+    expect(await p.listPeriods('62000000', 2026, 9)).toMatchObject([{ period: 'day', key: '2026-09-01', yieldKwh: 9.3 }]);
+    expect(calls[0].url).toContain('/stats/year?year=2026');
+    expect(calls[1].url).toContain('/stats/month?year=2026&month=9');
+  });
+
+  it('a history call with no records is an empty history, not a failure', async () => {
+    stubFetch([['/stats/year', () => ({})]]);
+    expect(await new SolarmanWebProvider({ refreshToken: 'R', accessToken: 'T' }, memoryTokens()).listPeriods('1', 2019)).toEqual([]);
+  });
+
   it('exchanges the refresh token for an access token', async () => {
     const calls = stubFetch([
       ['/oauth2-s/oauth/token', () => ({ access_token: 'WEBTOK', refresh_token: 'NEWREFRESH', expires_in: 86_400 })],

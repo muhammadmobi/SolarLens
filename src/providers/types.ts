@@ -1,3 +1,5 @@
+import type { Alarm, Period } from './events';
+
 export type ProviderId = 'soliscloud' | 'solarman';
 
 export interface Plant {
@@ -160,4 +162,8 @@ export interface Provider {
   listPlants(): Promise<Plant[]>;
   listInverters(plantId: string): Promise<Inverter[]>;
   getReading(inv: Inverter): Promise<Reading | null>;
+  /** Optional: the plant's fault history, newest first. */
+  listAlarms?(plantId: string): Promise<Alarm[]>;
+  /** Optional: the vendor's own totals - per month for a year, or per day for a month. */
+  listPeriods?(plantId: string, year: number, month?: number): Promise<Period[]>;
 }
