@@ -3,6 +3,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
+import { tzOffsetSec } from './providers/units';
 import { aliasFor, publicAlarms, publicDevices, publicInverters, publicRows } from './public-view';
 import { plantFilter, pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
@@ -321,6 +322,10 @@ app.post('/api/ingest/station', async (c) => {
     plantId,
     plantName: body.name ?? '',
     capacityW: body.capacityW ?? null,
+    // The relay sends the plant snapshot untouched, and SolisCloud's carries the
+    // plant's timezone. Without this the relayed plant was the one system whose
+    // day was still cut at the reader's midnight.
+    tzOffsetSec: tzOffsetSec(body.raw),
   };
   const source = body.source ?? `${body.provider}-relay`;
   const reading =
