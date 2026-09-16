@@ -1389,3 +1389,133 @@ test.describe('PV strings: counting what is connected', () => {
     await expect(tile).toContainText('1 of 2');
   });
 });
+
+test.describe('Battery charge through the day', () => {
+  const socSeries = (samples: [number, number][]) => {
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const t0 = Math.floor(start.getTime() / 1000);
+    return samples.map(([hour, soc]) => ({
+      inverter_id: HYBRID, ts: t0 + Math.round(hour * 3600), ac_power_w: 0,
+      today_kwh: null, battery_soc: soc, grid_power_w: null,
+    }));
+  };
+
+  test('draws the charge curve with the day\'s low and high', async ({ page }) => {
+    await stubApi(page, { series: socSeries([[1, 62], [3, 48], [5, 41], [8, 55], [11, 88], [13, 100]]) });
+    await page.goto(`/#/system/${HYBRID}`);
+    const battery = page.locator('.card', { hasText: 'State of charge' });
+    const chart = battery.locator('.soc');
+    await expect(chart).toBeVisible();
+    await expect(chart).toContainText('low 41%');
+    await expect(chart).toContainText('high 100%');
+    await expect(chart.locator('path')).toHaveCount(1);
+  });
+
+  test('is not drawn for a system with no battery', async ({ page }) => {
+    await stubApi(page);
+    await page.goto(`/#/system/${SOLIS}`);
+    await expect(page.locator('.soc')).toHaveCount(0);
+  });
+
+  test('needs two samples before it draws a line', async ({ page }) => {
+    await stubApi(page, { series: socSeries([[9, 70]]) });
+    await page.goto(`/#/system/${HYBRID}`);
+    await expect(page.locator('.card', { hasText: 'State of charge' })).toBeVisible();
+    await expect(page.locator('.soc')).toHaveCount(0);
+  });
+
+  test('breaks the line across an outage rather than joining it', async ({ page }) => {
+    // Samples until 02:00, nothing until 07:00. A straight segment across the
+    // gap would be a claim about five hours nobody measured.
+    await stubApi(page, { series: socSeries([[1, 60], [1.5, 58], [2, 57], [7, 40], [7.5, 45]]) });
+    await page.goto(`/#/system/${HYBRID}`);
+    const d = await page.locator('.soc path').getAttribute('d');
+    expect((d ?? '').match(/M/g)).toHaveLength(2);
+  });
+
+  test('keeps the axis at 0 to 100 whatever the data spans', async ({ page }) => {
+    // 94 to 100 fitted edge to edge would look like a pack that went flat.
+    await stubApi(page, { series: socSeries([[9, 94], [12, 100]]) });
+    await page.goto(`/#/system/${HYBRID}`);
+    const labels = await page.locator('.soc text.axis').allTextContents();
+    expect(labels).toEqual(expect.arrayContaining(['0%', '50%', '100%']));
+  });
+});
+
+test.describe('TV mode', () => {
+  test('opens straight on #/tv, with no header, tabs or footer', async ({ page }) => {
+    // A wall display is bookmarked on this URL and loaded cold, so this is the
+    // path that has to work - not only arriving from the overview.
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await stubApi(page);
+    await page.goto('/#/tv');
+    await expect(page.locator('.tvsys')).toHaveCount(2);
+    await expect(page.locator('.topbar')).toBeHidden();
+    await expect(page.locator('footer')).toBeHidden();
+    expect(errors).toEqual([]);
+  });
+
+  test('shows each system\'s power, today and the fleet total', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/tv');
+    const panels = page.locator('.tvsys');
+    await expect(panels.nth(0)).toContainText('Demo Solis Plant');
+    await expect(panels.nth(0).locator('.tvnow')).toContainText('5.08');
+    await expect(panels.nth(0)).toContainText('Today');
+    // 5080 W + 278 W.
+    await expect(page.locator('.tvtotal')).toContainText('5.36');
+  });
+
+  test('the battery appears only on the system that has one', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/tv');
+    await expect(page.locator('.tvsys').nth(0)).not.toContainText('Battery');
+    await expect(page.locator('.tvsys').nth(1)).toContainText('Battery');
+    await expect(page.locator('.tvsys').nth(1)).toContainText('100 %');
+  });
+
+  test('an offline system is greyed and shows no house or grid flow', async ({ page }) => {
+    await stubApi(page, { invs: inverters({ solarman: { ts: NOW - 19 * 3600, status: 'offline' } }) });
+    await page.goto('/#/tv');
+    const hybrid = page.locator('.tvsys').nth(1);
+    await expect(hybrid.locator('.tvnow')).toHaveClass(/off/);
+    await expect(hybrid.locator('.pill')).toHaveText('offline');
+    await expect(hybrid).not.toContainText('House');
+    await expect(hybrid).not.toContainText('Grid');
+  });
+
+  test('has a running clock, so a frozen page is visible as frozen', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/tv');
+    await expect(page.locator('#tvclock')).toHaveText(/^\d{2}:\d{2}$/);
+    await expect(page.locator('#tvago')).toContainText('updated');
+  });
+
+  test('Escape leaves, and the page comes back with its chrome', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/tv');
+    await expect(page.locator('.tvsys').first()).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page).toHaveURL(/#\/$/);
+    await expect(page.locator('.topbar')).toBeVisible();
+    await expect(page.locator('.ovsys')).toHaveCount(2);
+  });
+
+  test('is reachable from the header', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    await page.locator('#tvbtn').click();
+    await expect(page).toHaveURL(/#\/tv$/);
+    await expect(page.locator('.tvsys')).toHaveCount(2);
+  });
+
+  test('fits the screen without scrolling', async ({ page }) => {
+    await stubApi(page);
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto('/#/tv');
+    await expect(page.locator('.tvsys')).toHaveCount(2);
+    const overflow = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+});
