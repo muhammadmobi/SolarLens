@@ -11,6 +11,9 @@ into its release notes on GitHub, which is where the download links and the
 "what changed since you last looked" view live. One is the source, the other is
 the announcement.
 
+When a release is tagged, `version` in `package.json` is set to match it, so a
+checkout of any tag says which release it is.
+
 ## [2.3.0] — 2026-09-16
 
 Fault history, history back to installation, battery charge through the day,
@@ -103,6 +106,10 @@ and TV mode.
   explanation of why it resets a checkout that cannot fast-forward names the
   usual cause: a branch that was later squash-merged.
 
+- **`package.json` carries the release version.** It had said 0.1.0 since the
+  first release; it now says 2.3.0, and the 2.2.0 entry below carries the date
+  it was actually released rather than the date it was written.
+
 - **Refresh schedules itself** rather than running on a fixed interval, so
   entering or leaving TV mode changes the cadence at once instead of after the
   old timer fires.
@@ -149,7 +156,7 @@ and TV mode.
   value**, where "kWh per year" and "18.4k" printed over each other. This
   predates 2.3.
 
-## [2.2.0] — 2026-09-12
+## [2.2.0] — 2026-09-16
 
 The three gaps `docs/feature-gaps.md` had carried since the first release, closed.
 
