@@ -128,6 +128,12 @@ and TV mode.
   routes against a local database with real portal payloads showed
   `/api/alarms` returning it. The id now stays in the database.
 
+- **The relayed Solis plant now gets its timezone too.** 2.2.0 taught both
+  vendor connectors to store a plant's UTC offset, but the relay posts the
+  plant snapshot straight to the station ingest route, which never read it. The
+  SolarMan plant had its offset within one poll of deploying 2.2.0; the Solis
+  plant stayed on the reader's midnight until this.
+
 - **The history chart's unit label no longer sits on top of its highest axis
   value**, where "kWh per year" and "18.4k" printed over each other. This
   predates 2.3.
