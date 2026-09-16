@@ -13,8 +13,9 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's live output is set against its rated size.
 - **Open it and it is there.** No login, no token to copy onto each device — the readings are public by design, with vendor identifiers stripped from every response before it leaves the Worker.
 - **Each system's day ends where its own sun sets.** Every plant's timezone is stored, and every figure, curve and daily row is cut at that plant's midnight rather than at the reader's — so two systems in different countries are each shown their own day, on the same screen.
+- **Fault history, with what the vendor advises.** Every alarm each vendor has on record, back to installation: when, how severe, the fault code, how long it lasted, and SolisCloud's own advice. SolarMan never records when a fault cleared, and the page says so rather than guessing.
 - **Made for a wall, too.** TV mode at `#/tv` drops the header and tabs, sizes everything to the screen, keeps the display awake, and shows a clock so a frozen page is obvious from across a room.
-- **History that adds up.** Days, months or years, with every period saying how many of its days were actually recorded, so a partial first month is never mistaken for a poor one.
+- **History that goes back to the start.** Days, months or years. Months and years use each vendor's own totals, which reach back to the day the plant was installed, and every row says whether its figure is the vendor's or SolarLens's own and how many of its days SolarLens saw.
 - **Installable.** Add it to a phone's home screen and it opens in its own window. The worker behind that goes to the network first and falls back to a cache only when there is none, so an installed copy can never show a stale reading as a live one.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
 
@@ -311,6 +312,7 @@ To keep it alive: `pm2 start agent/solis-relay.mjs --name solis-relay`, or a
 - Readings arrive tagged `source: soliscloud-relay`; the dashboard shows "via soliscloud-relay" under the panel.
 - It reads `.dev.vars` itself, and clears its own stale Chrome profile lock if a previous run was killed.
 - **It retries a failed browser launch** twice with a short backoff, and clears the `Singleton*` files Chrome leaves when a machine is shut down under it — but only when nothing holds the profile, because a live Chrome owns those files. Without this, the first cycle after a restart fails and Solis loses a whole interval: Chrome starts, exits before Playwright can speak to it, and the error is not the one a message-matching retry would recognise.
+- **Hourly it also reads the plant's alarm history, and daily the vendor's own period totals**, by setting the alarm page's Status filter to Recovered and pressing Month, Lifetime and Year on the plant's chart - again waiting for the portal's own signed responses. The first cycle after the relay starts reads every page of alarms and steps back through every year of totals, which adds about a minute to that one cycle; later cycles read only the newest page and the current year. Neither step can cost the live reading: both run last and a failure is logged and skipped.
 - `RELAY_ONCE=1` runs a single cycle and exits with a code that says whether it worked. The installer uses it for the sign-in step, so that step ends by itself instead of asking anyone to press Ctrl+C — which on Windows raises *Terminate batch job (Y/N)?* inside a `.cmd` and strands the installer half-finished.
 
 ### Running it on more than one machine
@@ -444,6 +446,8 @@ Three separate intervals, easily confused:
 |---|---|---|
 | Worker polls the vendor clouds | 5 min | `triggers.crons` in `wrangler.jsonc` |
 | Relay agent pushes Solis readings | 5 min | `RELAY_INTERVAL_MIN` |
+| Alarm history is re-read (both vendors) | 1 hour | `EXTRAS` in `agent/solis-relay.mjs`; `HOUR` in `src/poll.ts` |
+| Vendor period totals are re-read (both vendors) | 1 day | `EXTRAS` in `agent/solis-relay.mjs`; `DAY` in `src/poll.ts` |
 | Open dashboard re-fetches | 10 min, and never in a hidden tab | `REFRESH_MS` in `public/index.html` |
 
 A system is drawn as offline once its newest sample is older than
@@ -481,7 +485,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**133 unit tests** and **226 end-to-end tests** (113 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**168 unit tests** and **248 end-to-end tests** (124 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -493,7 +497,7 @@ npm run test:e2e:ui         # playwright's inspector, for stepping through a fai
 
 ### Unit tests — `tests/unit/`
 
-Nine files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
+Eleven files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
 - **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
@@ -501,11 +505,13 @@ Nine files, one concern each. They are all pure-function tests against fixtures 
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
+- **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
+- **`extras.test.ts`** — the hourly and daily schedule for those reads: what the first run walks back through, what later runs skip, and that an empty current year in January does not stop the walk.
 - **`timezone.test.ts`** — the three shapes a vendor states a timezone in, and where a plant's day begins once one is known: east and west of Greenwich, on it, and on the half hour.
 
 ### End-to-end tests — `tests/e2e/`
 
-One spec file of 113 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
+One spec file of 124 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
 
 They assert what a person sees, grouped by what it is for: the overview and its layout at both widths, the theme toggle (including that the choice is applied before first paint), the labelled header totals, the energy-flow diagram (structure, direction from the signs, wire thickness tracking power, per-diagram marker ids), the battery panel and the derived cycle count, offline handling and zeroed figures, the Alerts tab, the collapsible Power sections and the clickable chart legend, the device inventory, raw telemetry filtering, and the token-gate guidance.
 
@@ -517,13 +523,14 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **Enforced** — `src/providers/` + `src/public-view.ts` | **83.8%** | **65.8%** | **85.4%** | **85.9%** |
+| **Enforced** — `src/providers/` + `src/public-view.ts` | **85.3%** | **68.2%** | **87.8%** | **87.3%** |
 | &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 90% | **100%** | **100%** |
+| &nbsp;&nbsp;`events.ts` — alarms and period totals | 98% | 81% | 100% | 100% |
 | &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 92% | 91% | 100% | 100% |
 | &nbsp;&nbsp;`solarman.ts` | 85% | 63% | 78% | 85% |
 | &nbsp;&nbsp;`soliscloud.ts` | 84% | 63% | 88% | 86% |
-| &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 67% | 58% | 62% | 70% |
-| All of `src/`, Worker-only code included | 55.6% | 47.7% | 57.5% | 56.3% |
+| &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 70% | 66% | 71% | 73% |
+| All of `src/`, Worker-only code included | 57.1% | 50.4% | 60.8% | 57.7% |
 | Thresholds enforced in CI | **80%** | **63%** | **80%** | **80%** |
 
 Two figures, because there are two honest answers. The enforced one measures what
@@ -596,11 +603,15 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `GET /api/health` | open | recent poll log and the newest line per feed |
 | `GET /api/history?days=&tz=` | open | one row per inverter per day, each cut at that plant's own midnight (`tz` is the fallback, the caller's UTC offset in minutes) |
 | `GET /api/devices` | open | hardware inventory |
+| `GET /api/alarms?days=` | open | fault history, newest first (default 730 days). An alarm's internal id is never returned, since it contains the vendor's plant id |
+| `GET /api/periods` | open | each vendor's own month and year totals, back to installation |
 | `POST /api/poll` | API_TOKEN | poll all providers now — makes live vendor calls, so it spends quota |
 | `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |
 | `POST /api/ingest/devices` | INGEST_TOKEN | push raw vendor device records (`{provider, plantId, inverters[], collectors[]}`); normalised server-side |
 | `POST /api/ingest/history` | INGEST_TOKEN | backfill a day curve; rejects a peak above 5× nameplate |
+| `POST /api/ingest/alarms` | INGEST_TOKEN | raw SolisCloud alarm records (`{provider, plantId, records[]}`), normalised and stripped of owner fields in the Worker |
+| `POST /api/ingest/periods` | INGEST_TOKEN | raw SolisCloud chart totals (`{provider, plantId, which: month\|year\|all, points[]}`); rejects a total the nameplate could not produce |
 | `GET /auth?t=` | — | set the cookie the write routes accept |
 
 **Every `GET` answers anyone**, with vendor identifiers stripped — see
@@ -620,15 +631,18 @@ solar-lens/
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log
-│                              0009 the plant's own UTC offset on inverters)
+│                              0009 the plant's own UTC offset on inverters
+│                              0010 alarms and vendor period totals)
 ├── src/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
-│   ├── poll.ts               builds providers from present secrets; polls; plant filter
+│   ├── poll.ts               builds providers from present secrets; polls; plant filter;
+│   │                         hourly alarms and daily period totals
 │   ├── db.ts                 D1 queries and the Env type
 │   ├── public-view.ts        strips vendor identifiers from public responses
 │   └── providers/
 │       ├── types.ts          Provider / Inverter / Reading / Metrics
 │       ├── units.ts          W / kWh / timestamp normalisation
+│       ├── events.ts         alarms and vendor period totals, owner fields dropped
 │       ├── queue.ts          serialised call queue (vendor rate limits)
 │       ├── soliscloud.ts     official API adapter + station normaliser
 │       ├── solarman.ts       official API adapter + station normaliser
@@ -641,7 +655,9 @@ solar-lens/
 │   ├── icon.svg              app icon and favicon
 │   └── icon-192.png          rendered from icon.svg for installs and iOS
 │       icon-512.png
-├── agent/solis-relay.mjs     local Chrome relay for SolisCloud
+├── agent/
+│   ├── solis-relay.mjs       local Chrome relay for SolisCloud
+│   └── solis-extras.mjs      its slower reads: alarm history and period totals
 ├── setup-relay.cmd           double-click entry point for the relay installer
 ├── scripts/
 │   ├── wrangler.mjs             fills CF_D1_DATABASE_ID into a temp config
@@ -663,6 +679,9 @@ solar-lens/
 │   ├── unit/logging.test.ts     query strings redacted before they reach the log
 │   ├── unit/public-view.test.ts what a public response may and may not carry
 │   ├── unit/clients.test.ts     the vendor HTTP clients against a stubbed fetch
+│   ├── unit/events.test.ts      alarms and period totals from both vendors
+│   ├── unit/extras.test.ts      the hourly and daily schedule for them
+│   ├── unit/timezone.test.ts    plant timezones and where a plant's day begins
 │   ├── fixtures/               captured vendor payloads, scrubbed of identifiers
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first

@@ -49,7 +49,7 @@ station on SolarMan. No account identifiers appear in this document.
 | Per-string voltage & current | ● | ● | ● both |
 | Per-phase AC voltage, current, frequency | ● | ● | ● both (Solis adds power factor and DC bus) |
 | Inverter temperature | ● | ● | ● both |
-| Device types beyond the inverter (battery, meter, EPM, weather station) | ● | ◐ | ○ schema supports them, nothing populates them |
+| Device types beyond the inverter (battery, meter, EPM, weather station) | ● | ◐ | ○ not available for these plants: SolarMan lists only an inverter and a datalogger, and the battery exists only inside the inverter's data |
 | BMS detail (pack voltage, current, temperature, charge limits) | ○ | ● | ● all five on the system page |
 | Raw register / telemetry dump | ○ | ○ | ● searchable table — neither app offers this |
 
@@ -57,17 +57,17 @@ station on SolarMan. No account identifiers appear in this document.
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Active alarm list | ● | ◐ message centre | ◐ the Alerts tab raises the vendor's own alarm count and level, plus offline and no-data |
-| Alarm code, level, duration, recovery time | ● | ◐ | ◐ level only — the plant reports a count and a severity, never the codes behind them |
-| **Suggested treatment text** | ● | ○ | ○ Solis actually explains what a fault means |
-| Fault / warning history per device | ● | ◐ | ○ |
+| Active alarm list | ● | ◐ message centre | ● an alarm SolisCloud still holds open reads "ongoing" in the fault history, beside the vendor's own count on the Alerts tab |
+| Alarm code, level, duration, recovery time | ● | ◐ | ● all four for SolisCloud; SolarMan records no recovery time, and the page says "not recorded" |
+| **Suggested treatment text** | ● | ○ | ● SolisCloud's advice beside each alarm |
+| Fault / warning history per device | ● | ◐ | ● per system, back to installation, newest first |
 | Push or email notification on fault or outage | ◐ | ◐ | ○ out of scope |
 
 ### History and reporting
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Day / month / year / lifetime charts | ● | ● | ● by day, month and year, each period saying how many of its days were recorded |
+| Day / month / year / lifetime charts | ● | ● | ● by day, month and year; months and years use the vendor's own totals back to installation, each row saying whose figure it is |
 | Battery SOC history | ◐ | ● | ● today's charge curve with its low and high, on the system page |
 | Power-analysis view (generation vs consumption vs grid) | ◐ | ● | ○ out of scope |
 | CSV / data export | ● | ○ | ○ out of scope — but every sample **is** stored |
@@ -140,16 +140,16 @@ station on SolarMan. No account identifiers appear in this document.
 
 ## 4. Still missing, and worth doing
 
-The three gaps this section carried through 2.1 — self-sufficiency as a ratio,
-a plant-timezone-correct "today", and PWA install — are done. What is left is
-larger than they were, which is why none of it is marked S.
+2.3 closed the two largest gaps this section listed: the vendor alarm list with
+fault history, and history from before SolarLens began collecting. A third,
+batteries and meters as devices, turned out not to be a gap SolarLens can
+close - see section 6. What remains:
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | Vendor alarm list and fault history | Both portals know why an inverter stopped; SolarLens infers staleness and can only say *that* it did. Solis even ships suggested treatment text, which is the single most useful thing an owner account gets and the one thing neither app's API documents | M |
-| 2 | Batteries and meters as first-class devices | The schema has `battery` and `meter` kinds and nothing writes them: only `INVERTER` and `COLLECTOR` are fetched, so a battery's own firmware, serial and status are invisible even though the pack's live figures are not | M |
-| 3 | History from before collecting began | Month and year views exist now, but the record starts on the day SolarLens first polled, so the first months are partial and every row says so. Both portals serve month and year history for the whole life of the plant; backfilling it would make "was this August better than last?" answerable from day one | M |
-| 4 | Daylight saving on a stored offset | A plant's UTC offset is read at discovery and refreshed on every poll, so a zone that observes DST is right within five minutes of the switch and wrong for those five. Storing the zone *name* instead of the offset would remove the window entirely | S |
+| 1 | Daylight saving on a stored offset | A plant's UTC offset is read at discovery and refreshed on every poll, so a zone that observes DST is right within five minutes of the switch and wrong for those five. Storing the zone *name* instead of the offset would remove the window entirely | S |
+| 2 | An automated test for the Worker itself | Every route, the auth middleware, the SQL and the cron fan-out are checked by deploying and by hand-run local checks, and by no automated test: the end-to-end suite serves `public/` from a static server and stubs every `/api/*` route. A Worker harness would let routes run against a real D1 in CI | M |
+| 3 | SolarMan alarm detail | The alert list names a fault and when it was raised, but not when it cleared or what to do about it. SolarMan's portal may carry both on an alert's own detail page; it has not been captured | S |
 
 ## 5. Out of scope, by decision
 
@@ -167,6 +167,20 @@ larger than they were, which is why none of it is marked S.
 - Installer/fleet management, warranty orders, SIM billing, org and role administration.
 
 ## 6. Data-quality notes
+
+- **SolarMan reports no battery device for a hybrid plant.** Its device-type list for the
+  plant is inverter and datalogger only, so a battery's own firmware, serial and status are
+  not available from SolarMan at all - not merely unfetched. Its live figures are carried in
+  the inverter's data, which is where SolarLens already reads them.
+- **SolisCloud's advice text is uniform for grid faults.** Across two years and 63 alarms on
+  an on-grid plant, every alarm - no grid, grid under-voltage, and a line or earth fault -
+  carried the same advice, "No Action Required". The column is shown because it is the
+  vendor's statement; it should not be read as a diagnosis.
+- **An alarm can recover in the instant it began.** One SolisCloud record has identical start
+  and end times, so nothing may assume an alarm's end is after its start.
+- **SolisCloud's period totals copy generation into load on an unmetered plant**, exactly as
+  its live snapshot does, and report every grid figure as zero. Those rows keep generation and
+  full-load hours only.
 
 - **A vendor "daily yield" can disagree with the live snapshot.** The Device page showed a full
   day's yield while the plant snapshot reported `dayEnergy: 0` — the counter resets at local
