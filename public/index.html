@@ -1152,9 +1152,8 @@
       // array with a 3.5 kW one fairly, which is the whole point of this page.
       m.fullLoadHours != null ? tile('Full-load hours', num(Number(m.fullLoadHours).toFixed(2), 'h')) : '',
       (() => {
-        if (!strings || !strings.length) return '';
-        const live = strings.filter((x) => (x.powerW ?? 0) > 0).length;
-        return tile('PV strings', live === strings.length ? `${live} producing` : `${live} of ${strings.length}`, 'sm');
+        const label = stringsLabel(strings, inv.offline);
+        return label ? tile('PV strings', esc(label), 'sm') : '';
       })(),
       tempC != null ? tile('Inverter temp', num(tempC.toFixed(1), '°C')) : '',
     ].filter(Boolean);
@@ -1675,6 +1674,9 @@
     const row = (d) => {
       const cls = d.status === 'online' ? 'ok' : d.status === 'alarm' ? 'bad' : 'warn';
       const strings = parse(d.strings);
+      const owner = (state.latest?.inverters ?? []).find(
+        (i) => i.provider === d.provider && (!d.plant_id || d.plant_id === plantIdOf(i)));
+      const offline = d.status === 'offline' || !!owner?.offline;
       return `<tr>
         <td><span class="pill ${cls}"><i></i>${esc(d.status ?? 'unknown')}</span></td>
         <td><div class="dev-name">${esc(d.name || d.kind)}</div>
@@ -1684,7 +1686,7 @@
         <td class="mono">${esc(d.firmware ?? '—')}</td>
         <td>${d.kind === 'datalogger' ? esc(signalLabel(d)) : (d.rated_power_w ? fmtWs(d.rated_power_w) : '—')}</td>
         <td>${d.last_seen ? esc(ago(d.last_seen)) : '—'}</td>
-        <td>${strings && strings.length ? `${strings.length} producing` : (d.kind === 'inverter' ? 'none' : '—')}</td>
+        <td>${esc(stringsLabel(strings, offline) ?? (d.kind === 'inverter' ? 'none' : '—'))}</td>
         <td>${d.temp_c != null ? `${d.temp_c} °C` : '—'}</td>
       </tr>`;
     };
@@ -1704,7 +1706,7 @@
       `${note ? `<p class="cardnote">${esc(note)}</p>` : ''}</div></section>`;
   }
 
-  function stringsCard(invDev, accent) {
+  function stringsCard(invDev, accent, offline) {
     // strings === null means the vendor reports no per-string registers at all;
     // an empty array means it does, but none are producing (night). Only the
     // second case deserves a card.
@@ -1715,7 +1717,9 @@
       : (() => {
           const max = Math.max(...strings.map((s) => s.powerW), 1);
           return `<div class="bars">${strings.map((s) => {
-            const state = stringState(s);
+            // Offline: an empty socket is still an empty socket, but a connected
+            // string's wattage is history, and says so.
+            const state = stringState(s) === 'no input' ? 'no input' : offline ? 'offline' : stringState(s);
             const detail = [s.voltageV != null ? `${s.voltageV} V` : null, s.currentA != null ? `${s.currentA} A` : null]
               .filter(Boolean).join(' · ');
             return `<div class="bar-row${state === 'no input' ? ' unused' : ''}">
@@ -1725,6 +1729,9 @@
             ${detail ? `<span class="sub2">${esc(detail)}</span>` : ''}
             </div>`;
           }).join('')}</div>
+          ${offline && invDev.last_seen
+            ? `<p class="cardnote">The inverter is offline. Voltage and current are the last reported, ${esc(ago(invDev.last_seen))}, not a reading from now.</p>`
+            : ''}
           ${strings.some((x) => stringState(x) === 'no input')
             ? `<p class="cardnote">An MPPT input reading a fraction of a volt with no current has nothing plugged into it - not a string producing zero.</p>`
             : ''}`;
@@ -1779,6 +1786,31 @@
   const stringState = (st) =>
     (st.voltageV ?? 0) < 10 && !(st.currentA > 0) && !(st.powerW > 0) ? 'no input'
       : (st.powerW ?? 0) > 0 ? null : 'not producing';
+
+  /**
+   * How many strings are producing, out of how many are actually connected -
+   * the one answer the overview tile, the Devices table and the system page
+   * all give, so they cannot disagree again.
+   *
+   * Two things it refuses to count. An empty MPPT socket is not a string, so
+   * it is not in the total: "1 of 2" for one array on a two-input inverter
+   * reads as a fault that does not exist. And an offline inverter's strings
+   * are not producing, whatever the device record says. That record holds the
+   * last readings the inverter sent before it went quiet - at dusk, typically,
+   * a few watts on each input - and it is not updated again until the
+   * inverter comes back. Read as current, it said "2 producing" about a system
+   * the header correctly called offline.
+   *
+   * Returns the label to print, or null when there is nothing to say.
+   */
+  const stringsLabel = (strings, offline) => {
+    if (!strings || !strings.length) return null;
+    const connected = strings.filter((x) => stringState(x) !== 'no input');
+    if (!connected.length) return null;
+    if (offline) return 'offline';
+    const live = connected.filter((x) => (x.powerW ?? 0) > 0).length;
+    return live === connected.length ? `${live} producing` : `${live} of ${connected.length}`;
+  };
 
   function detailBlocks(inv) {
     const m = parse(inv.metrics) ?? {};
@@ -1904,7 +1936,7 @@
         </div>
       </div>`,
       flow: `<section class="card" style="margin-bottom:16px"><div class="body">${flowSvg(inv, m)}</div></section>`,
-      blocks: `<div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent)}${acCard(invDev)}${battery}${diagnostics}</div>`,
+      blocks: `<div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent, st.offline)}${acCard(invDev)}${battery}${diagnostics}</div>`,
       raw: rawCard(inv),
     };
   }

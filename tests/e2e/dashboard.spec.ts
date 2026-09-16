@@ -1305,3 +1305,87 @@ test.describe('Installable', () => {
     expect(src).toContain("request.method !== 'GET'");
   });
 });
+
+test.describe('PV strings on an offline inverter', () => {
+  // The bug this block exists for: an inverter that went offline at dusk kept
+  // its last string readings on the device record - 21 W and 17 W - and every
+  // view counted those as strings producing now, on a system the header
+  // correctly called offline.
+  const offlineSolis = () => inverters({ solis: { ts: NOW - 19 * 3600, status: 'offline' } });
+  const staleDevices = () => devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+    ? { ...d, status: 'offline', last_seen: NOW - 19 * 3600 }
+    : d);
+
+  test('the overview does not say an offline inverter\'s strings are producing', async ({ page }) => {
+    await stubApi(page, { invs: offlineSolis(), devs: staleDevices() });
+    await page.goto('/#/');
+    const solis = page.locator('.ovsys').first();
+    const tile = solis.locator('.ovtiles > div', { hasText: 'PV strings' });
+    await expect(tile).toBeVisible();
+    await expect(tile).not.toContainText('producing');
+    await expect(tile).toContainText('offline');
+  });
+
+  test('the devices table says offline, not "2 producing"', async ({ page }) => {
+    await stubApi(page, { invs: offlineSolis(), devs: staleDevices() });
+    await page.goto('/#/devices');
+    const row = page.locator('table.devices tbody tr').nth(0);
+    await expect(row).toContainText('S5-GR3P10K');
+    await expect(row).not.toContainText('producing');
+  });
+
+  test('the devices table also trusts the reading, not only the device record', async ({ page }) => {
+    // The device record still says online, but the inverter's newest sample is
+    // 19 hours old - which is what makes a system offline everywhere else.
+    await stubApi(page, { invs: offlineSolis(), devs: devices() });
+    await page.goto('/#/devices');
+    await expect(page.locator('table.devices tbody tr').nth(0)).not.toContainText('producing');
+  });
+
+  test('the system page labels its string readings as the last ones reported', async ({ page }) => {
+    await stubApi(page, { invs: offlineSolis(), devs: staleDevices() });
+    await page.goto(`/#/system/${SOLIS}`);
+    const card = page.locator('.card', { hasText: 'PV strings' });
+    await expect(card).toBeVisible();
+    // No wattage presented as if it were flowing now.
+    await expect(card.locator('.bar-row .num').first()).toHaveText('offline');
+    await expect(card).toContainText('last reported');
+  });
+});
+
+test.describe('PV strings: counting what is connected', () => {
+  test('an empty MPPT socket is not counted as a string that is not producing', async ({ page }) => {
+    // One array on input 1, nothing on input 2: that is one string, producing.
+    // "1 of 2" would read as a fault that does not exist.
+    const devs = devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+      ? { ...d, strings: JSON.stringify([
+          { index: 1, powerW: 2289, voltageV: 253.6, currentA: 9.2 },
+          { index: 2, powerW: 0, voltageV: 0.5, currentA: 0 },
+        ]) }
+      : d);
+    await stubApi(page, { devs });
+    await page.goto('/#/');
+    const tile = page.locator('.ovsys').first().locator('.ovtiles > div', { hasText: 'PV strings' });
+    await expect(tile).toContainText('1 producing');
+    await expect(tile).not.toContainText('of 2');
+
+    await page.goto('/#/devices');
+    const row = page.locator('table.devices tbody tr').nth(0);
+    await expect(row).toContainText('1 producing');
+  });
+
+  test('a connected string reading zero in daylight is reported as a shortfall', async ({ page }) => {
+    const devs = devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+      ? { ...d, strings: JSON.stringify([
+          { index: 1, powerW: 4100, voltageV: 480, currentA: 8.5 },
+          { index: 2, powerW: 0, voltageV: 310, currentA: 0 },
+        ]) }
+      : d);
+    await stubApi(page, { devs });
+    await page.goto('/#/');
+    const tile = page.locator('.ovsys').first().locator('.ovtiles > div', { hasText: 'PV strings' });
+    // A string with real voltage and no current is connected and not
+    // producing - the one case "1 of 2" is the right thing to say.
+    await expect(tile).toContainText('1 of 2');
+  });
+});
