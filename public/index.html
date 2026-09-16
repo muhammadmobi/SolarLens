@@ -481,6 +481,10 @@
               border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   .rangebtn:hover, .groupbtn:hover { border-color: var(--muted); }
   .rangesep { width: 1px; background: var(--line); margin: 2px 4px; }
+  .faulthist { padding: 6px 20px 18px; border-top: 1px solid var(--line-soft); }
+  .fh-title { margin: 14px 0 4px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .fh-sum { margin-bottom: 10px; }
+  table.faults td { vertical-align: top; }
   td.partial { color: var(--muted); }
   .rangebtn.on, .groupbtn.on { background: var(--accent, var(--ink)); color: var(--surface); border-color: transparent; }
   .daybar { rx: 2; }
@@ -1522,8 +1526,77 @@
     return (state.latest?.inverters ?? []).reduce((a, i) => a + alertsFor(i).length, 0);
   }
 
+  /** Fault history is read when the Alerts tab is opened, and again once it is ten minutes old. */
+  const ALARMS_STALE_MS = 10 * 60_000;
+  async function loadAlarms() {
+    state.alarms = { loading: true, at: Date.now() };
+    try {
+      state.alarms = { ...(await api('/api/alarms?days=3650')), at: Date.now() };
+    } catch (e) {
+      state.alarms = { error: e.message, at: Date.now() };
+    }
+    if (location.hash === '#/alerts') renderAlerts();
+  }
+
+  /** "under a minute", "40 min", "2 h 5 min", "3 d 4 h". */
+  function lasted(a) {
+    if (a.end_ts == null) return a.state === 'active' ? 'ongoing' : 'not recorded';
+    const s = Math.max(0, a.end_ts - a.begin_ts);
+    if (s < 60) return 'under a minute';
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+    return `${Math.floor(s / 86400)} d ${Math.round((s % 86400) / 3600)} h`;
+  }
+
+  /**
+   * A system's fault history: every alarm its vendor has on record, newest first.
+   *
+   * What the vendor says is what is printed. SolisCloud gives advice with each
+   * alarm and SolarMan gives none, so the column appears only where there is
+   * something in it. SolarMan also never records when a fault cleared, and the
+   * page says "not recorded" rather than implying the fault is still going on.
+   */
+  const FAULTS_SHOWN = 50;
+  function faultHistory(inv) {
+    const s = state.alarms;
+    const head = `<h3 class="fh-title">Fault history</h3>`;
+    if (!s || s.loading) return `${head}<div class="ac-sub">Loading…</div>`;
+    if (s.error) return `${head}<div class="ac-sub">Could not load fault history: ${esc(s.error)}</div>`;
+    const rows = (s.alarms ?? []).filter((a) => a.inverter_id === inv.id);
+    if (!rows.length) {
+      return `${head}<div class="ac-sub">${esc(providerName(inv.provider))} has no alarms on record for this system.</div>`;
+    }
+    const oldest = rows[rows.length - 1].begin_ts;
+    const counts = new Map();
+    for (const a of rows) {
+      const k = a.message || a.code;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    const [common, commonN] = [...counts.entries()].sort((x, y) => y[1] - x[1])[0];
+    const anyAdvice = rows.some((a) => a.advice);
+    const sev = (a) => `<span class="pill ${a.severity === 'fault' ? 'bad' : a.severity === 'warning' ? 'warn' : ''}"><i></i>${esc(a.severity ?? 'level ' + (a.vendor_level ?? '?'))}</span>`;
+    const body = rows.slice(0, FAULTS_SHOWN).map((a) => `<tr>
+        <td class="mono">${esc(when(a.begin_ts))}</td>
+        <td>${sev(a)}</td>
+        <td class="mono">${esc(a.code)}</td>
+        <td>${esc(a.message ?? '—')}</td>
+        <td>${esc(lasted(a))}</td>
+        ${anyAdvice ? `<td class="faint">${esc(a.advice ?? '—')}</td>` : ''}
+      </tr>`).join('');
+    return `${head}
+      <div class="ac-sub fh-sum"><b>${rows.length}</b> alarm${rows.length === 1 ? '' : 's'} since
+        ${esc(new Date(oldest * 1000).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }))}.
+        Most often: ${esc(common)}, ${commonN} time${commonN === 1 ? '' : 's'}.</div>
+      <div class="tablewrap"><table class="devices faults">
+        <thead><tr><th>Started</th><th>Severity</th><th>Code</th><th>What</th><th>Lasted</th>${anyAdvice ? '<th>Vendor advice</th>' : ''}</tr></thead>
+        <tbody>${body}</tbody>
+      </table></div>
+      ${rows.length > FAULTS_SHOWN ? `<div class="ac-sub">Showing the newest ${FAULTS_SHOWN} of ${rows.length}.</div>` : ''}`;
+  }
+
   function renderAlerts() {
     const invs = state.latest?.inverters ?? [];
+    if (!state.alarms || (!state.alarms.loading && Date.now() - state.alarms.at > ALARMS_STALE_MS)) loadAlarms();
     if (!invs.length) {
       $('view').innerHTML = `<div class="card"><div class="empty">No systems yet, so nothing to report on.</div></div>`;
       return;
@@ -1553,7 +1626,7 @@
           <span class="snow"><small>${rows.length ? `${rows.length} to look at` : 'clear'}</small></span>
           <span class="pill ${worst === 'bad' ? 'bad' : worst === 'warn' ? 'warn' : 'ok'}"><i></i>${esc(st.text)}</span>
         </summary>
-        <div class="secbody">${body}</div>
+        <div class="secbody">${body}<div class="faulthist">${faultHistory(inv)}</div></div>
       </details>`;
     }).join('');
 
@@ -1594,13 +1667,16 @@
    * after that. Each period therefore carries how many days were recorded and
    * how many the period has, and the page prints both.
    */
+  /** How many days a period has: 2026-02 has 28, 2024 has 366. */
+  function periodSpan(k, group) {
+    const y = Number(k.slice(0, 4));
+    if (group === 'year') return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
+    return new Date(Date.UTC(y, Number(k.slice(5, 7)), 0)).getUTCDate();
+  }
+
   function rollup(rows, group) {
     const key = (d) => (group === 'month' ? d.slice(0, 7) : d.slice(0, 4));
-    const span = (k) => {
-      const y = Number(k.slice(0, 4));
-      if (group === 'year') return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
-      return new Date(Date.UTC(y, Number(k.slice(5, 7)), 0)).getUTCDate();
-    };
+    const span = (k) => periodSpan(k, group);
     const add = (a, b) => (a == null && b == null ? null : (a ?? 0) + (b ?? 0));
     const out = new Map();
     for (const r of rows) {
@@ -1624,6 +1700,44 @@
     return [...out.values()].sort((a, b) => (a.day < b.day ? 1 : -1));
   }
 
+  /**
+   * A system's months or years, with the vendor's own totals wherever it has one.
+   *
+   * SolarLens's record starts on the day it first polled, so on its own the
+   * first month is a fraction of a month and every earlier year is missing. The
+   * vendors counted all of it. Where a vendor total exists it is the figure for
+   * that period, and SolarLens's own record supplies only what the vendor does
+   * not report - the peak, and how many of the period's days it saw itself.
+   * A period the vendor never reported stays exactly as recorded.
+   */
+  function withVendor(own, vendorRows, group) {
+    const byKey = new Map(own.map((r) => [r.day, r]));
+    const keys = new Set([...byKey.keys(), ...vendorRows.map((v) => v.key)]);
+    const out = [];
+    for (const k of keys) {
+      const r = byKey.get(k);
+      const v = vendorRows.find((x) => x.key === k);
+      out.push(v ? {
+        day: k,
+        yield_kwh: v.yield_kwh, load_kwh: v.load_kwh, import_kwh: v.import_kwh, export_kwh: v.export_kwh,
+        batt_charge_kwh: v.charge_kwh, batt_discharge_kwh: v.discharge_kwh,
+        peak_w: r?.peak_w ?? null, samples: r?.samples ?? 0, days: r?.days ?? 0, span: periodSpan(k, group),
+        recorded_kwh: r?.yield_kwh ?? null, source: 'vendor',
+      } : { ...r, recorded_kwh: r.yield_kwh, source: 'recorded' });
+    }
+    return out.sort((a, b) => (a.day < b.day ? 1 : -1));
+  }
+
+  async function loadPeriods() {
+    state.periods = { loading: true };
+    try {
+      state.periods = await api('/api/periods');
+    } catch (e) {
+      state.periods = { error: e.message };
+    }
+    if (location.hash === '#/history') renderHistory();
+  }
+
   async function loadHistory(days) {
     state.historyDays = days;
     try {
@@ -1640,6 +1754,8 @@
 
     const days = state.historyDays ?? 30;
     const group = state.historyGroup ?? 'day';
+    // Vendor totals matter only once days are folded into months or years.
+    if (group !== 'day' && !state.periods) loadPeriods();
     // The day ranges mean nothing once rows are folded into months, so the
     // month and year views show only the grouping switch.
     const picker = `<div class="rangepick">${GROUPS.map(([g, label]) =>
@@ -1661,7 +1777,12 @@
     const rows = state.history.rows ?? [];
     const byInv = {};
     for (const r of rows) (byInv[r.inverter_id] ||= []).push(r);
-    if (group !== 'day') for (const id of Object.keys(byInv)) byInv[id] = rollup(byInv[id], group);
+    if (group !== 'day') {
+      const vendor = (state.periods?.periods ?? []).filter((p) => p.period === group);
+      for (const inv of invs) {
+        byInv[inv.id] = withVendor(rollup(byInv[inv.id] ?? [], group), vendor.filter((p) => p.inverter_id === inv.id), group);
+      }
+    }
     const periodWord = group === 'month' ? 'Month' : group === 'year' ? 'Year' : 'Day';
 
     const sections = invs.map((inv, i) => {
@@ -1686,7 +1807,7 @@
 
       const head = [periodWord, 'Produced', anyLoad ? 'Consumed' : null, anyGrid ? 'Imported' : null,
         anyGrid ? 'Exported' : null, anyBatt ? 'Charged' : null, anyBatt ? 'Discharged' : null,
-        'Peak', group === 'day' ? null : 'Days recorded', 'Samples'].filter(Boolean);
+        'Peak', group === 'day' ? null : 'Days recorded', 'Samples', group === 'day' ? null : 'Source'].filter(Boolean);
 
       const body = mine.map((r) => `<tr>
         <td class="mono">${esc(r.day)}</td>
@@ -1697,14 +1818,16 @@
         <td>${fmtWs(r.peak_w)}</td>
         ${group === 'day' ? '' : `<td class="${r.days < r.span ? 'partial' : ''}">${r.days} of ${r.span}</td>`}
         <td class="faint">${r.samples}</td>
+        ${group === 'day' ? '' : `<td class="faint">${r.source === 'vendor' ? esc(providerName(inv.provider)) : 'SolarLens'}</td>`}
       </tr>`).join('');
+      const usesVendor = mine.some((r) => r.source === 'vendor');
 
       // The one comparison that says how much of a period the record is
       // missing: the vendor counted the whole of this month and year, even the
       // part before SolarLens was collecting.
       const nowKey = group === 'month' ? mine[0]?.day : group === 'year' ? mine[0]?.day : null;
       const vendorNow = group === 'month' ? m.genMonthKwh : group === 'year' ? m.genYearKwh : null;
-      const shortfall = nowKey && vendorNow != null && mine[0].yield_kwh != null && vendorNow - mine[0].yield_kwh > 0.5
+      const shortfall = !usesVendor && nowKey && vendorNow != null && mine[0].yield_kwh != null && vendorNow - mine[0].yield_kwh > 0.5
         ? `<p class="cardnote" style="margin:0 20px 4px">${esc(providerName(inv.provider))} counts ${fmtKwh(vendorNow)} for ${esc(nowKey)};
            SolarLens recorded ${fmtKwh(mine[0].yield_kwh)} across ${mine[0].days} of its ${mine[0].span} days.
            The difference is the part of the ${group} before collecting began, or days a feed was down.</p>`
@@ -1721,12 +1844,15 @@
         <div class="secbody">
           <section class="card"><div class="body">${dailyBars(mine, colorFor(inv.provider), 'hb' + i, group)}</div></section>
           ${shortfall}
+          ${usesVendor ? `<p class="cardnote" style="margin:0 20px 4px">Figures are ${esc(providerName(inv.provider))}'s own
+            ${group} totals, which cover the whole ${group} including any part before SolarLens began collecting.
+            "Days recorded" is how much of it SolarLens saw itself, and the peak comes from those days.</p>` : ''}
           <div class="tablewrap"><table class="devices">
             <thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
             <tbody>${body}</tbody>
           </table></div>
           <dl class="kv" style="padding:16px 20px 20px">
-            <dt>Recorded here</dt><dd>${fmtKwh(totals.yield)} over ${group === 'day' ? mine.length : mine.reduce((a, r) => a + r.days, 0)} day${(group === 'day' ? mine.length : mine.reduce((a, r) => a + r.days, 0)) === 1 ? '' : 's'}</dd>
+            <dt>Recorded here</dt><dd>${fmtKwh(group === 'day' ? totals.yield : mine.reduce((a, r) => a + (r.recorded_kwh ?? 0), 0))} over ${group === 'day' ? mine.length : mine.reduce((a, r) => a + r.days, 0)} day${(group === 'day' ? mine.length : mine.reduce((a, r) => a + r.days, 0)) === 1 ? '' : 's'}</dd>
             ${m.genMonthKwh != null ? `<dt>Vendor · this month</dt><dd>${fmtKwh(m.genMonthKwh)}</dd>` : ''}
             ${m.genYearKwh != null ? `<dt>Vendor · this year</dt><dd>${fmtKwh(m.genYearKwh)}</dd>` : ''}
             ${m.genTotalKwh != null ? `<dt>Vendor · lifetime</dt><dd>${fmtKwh(m.genTotalKwh)}</dd>` : ''}
@@ -1764,7 +1890,9 @@
 
   /** Daily yield as bars: the shape of a month reads faster than 30 numbers. */
   function dailyBars(rows, colour, id, group = 'day') {
-    const W = 1000, H = 200, L = 54, R = 12, T = 18, B = 34;
+    // T leaves the unit label its own line: at 18 it sat on top of the highest
+    // axis value, and "kWh per year" and "18.4k" printed over each other.
+    const W = 1000, H = 210, L = 54, R = 12, T = 34, B = 34;
     const days = [...rows].reverse(); // oldest first, left to right
     const max = Math.max(1, ...days.map((r) => r.yield_kwh ?? 0));
     const bw = (W - L - R) / days.length;
@@ -1788,7 +1916,7 @@
         out += `<text class="axis" x="${(x + bw * 0.35).toFixed(1)}" y="${H - 12}" text-anchor="middle">${esc(label)}</text>`;
       }
     });
-    out += `<text class="axis unit" x="6" y="${T - 4}">kWh per ${group}</text>`;
+    out += `<text class="axis unit" x="6" y="14">kWh per ${group}</text>`;
     return `<svg class="combined" id="${id}" viewBox="0 0 ${W} ${H}">${out}</svg>`;
   }
 
