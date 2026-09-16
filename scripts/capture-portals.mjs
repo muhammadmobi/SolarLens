@@ -22,7 +22,9 @@ const PROFILE = join(ROOT, '.capture-profile');
 const STOP = join(CAPTURES, 'STOP');
 const LOG = join(CAPTURES, 'log.jsonl');
 const CHROME = process.env.CHROME_PATH ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const MAX_MS = 9 * 60 * 1000;
+// Nine minutes by default; CAPTURE_MINUTES=25 for a session that has to log in
+// to both portals and walk several pages in each.
+const MAX_MS = (Number(process.env.CAPTURE_MINUTES) || 9) * 60 * 1000;
 
 const PORTALS = [
   'https://www.soliscloud.com',
@@ -43,6 +45,14 @@ const PII_KEY_RE = new RegExp([
 ].join('|'));
 const sensitive = (k) => SECRET_KEY_RE.test(k) || PII_KEY_RE.test(k);
 
+// Redacting by key name alone missed an email address: SolisCloud's message
+// records carry it under "contactWay", which no key list would think to name.
+// So any string that *looks* like an email is redacted too, whatever it is
+// called. Phone numbers are not pattern-matched: the vendors' long numeric
+// plant and device ids look like them, and those ids are what a capture is for.
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const scrubValue = (s) => s.replace(EMAIL_RE, (m) => `<redacted email len=${m.length}>`);
+
 mkdirSync(CAPTURES, { recursive: true });
 if (existsSync(STOP)) unlinkSync(STOP);
 
@@ -57,7 +67,7 @@ function redactForm(s) {
   return p.toString();
 }
 function redact(obj) {
-  if (typeof obj === 'string') return redactForm(obj);
+  if (typeof obj === 'string') return scrubValue(redactForm(obj));
   if (Array.isArray(obj)) return obj.map(redact);
   if (obj && typeof obj === 'object') {
     const out = {};
@@ -90,7 +100,12 @@ const ctx = await chromium.launchPersistentContext(PROFILE, {
   executablePath: CHROME,
   headless: false,
   viewport: null,
-  args: ['--start-maximized', '--disable-blink-features=AutomationControlled'],
+  // CAPTURE_CDP_PORT lets a second script drive this same window while it
+  // records. Bound to 127.0.0.1, so nothing off this machine can reach it.
+  args: ['--start-maximized', '--disable-blink-features=AutomationControlled',
+    ...(process.env.CAPTURE_CDP_PORT
+      ? [`--remote-debugging-port=${process.env.CAPTURE_CDP_PORT}`, '--remote-debugging-address=127.0.0.1']
+      : [])],
   ignoreDefaultArgs: ['--enable-automation'],
 });
 
