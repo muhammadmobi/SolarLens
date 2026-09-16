@@ -4,26 +4,27 @@ import { dayStartSec } from '../../src/db';
 
 describe('tzOffsetSec', () => {
   it('reads SolisCloud whole hours', () => {
-    expect(tzOffsetSec({ timeZone: 5 })).toBe(5 * 3600);
+    expect(tzOffsetSec({ timeZone: 9 })).toBe(9 * 3600);
     expect(tzOffsetSec({ timeZone: -8 })).toBe(-8 * 3600);
   });
 
   it('reads a seconds offset, and prefers it over the hours field', () => {
-    expect(tzOffsetSec({ timeZoneOffset: 18000 })).toBe(18000);
+    expect(tzOffsetSec({ timeZoneOffset: 32400 })).toBe(32400);
     // Both present and disagreeing: seconds are the more precise statement,
     // and a half-hour zone cannot be expressed in the whole-hours field at all.
-    expect(tzOffsetSec({ timeZoneOffset: 19800, timeZone: 5 })).toBe(19800);
+    expect(tzOffsetSec({ timeZoneOffset: 34200, timeZone: 9 })).toBe(34200);
   });
 
   it('resolves an IANA name', () => {
-    // Karachi has no daylight saving, so this is stable whenever it runs.
-    expect(tzOffsetSec({ timezone: 'Asia/Karachi' })).toBe(5 * 3600);
-    expect(tzOffsetSec({ regionTimezone: 'Asia/Karachi' })).toBe(5 * 3600);
+    // Tokyo has no daylight saving, so this is stable whenever it runs.
+    expect(tzOffsetSec({ timezone: 'Asia/Tokyo' })).toBe(9 * 3600);
+    expect(tzOffsetSec({ regionTimezone: 'Asia/Tokyo' })).toBe(9 * 3600);
     expect(tzOffsetSec({ timezone: 'UTC' })).toBeNull(); // no slash: not a zone path
   });
 
   it('handles a half-hour zone through the name', () => {
-    expect(tzOffsetSec({ timezone: 'Asia/Kolkata' })).toBe(5.5 * 3600);
+    // Darwin: +09:30 and no daylight saving.
+    expect(tzOffsetSec({ timezone: 'Australia/Darwin' })).toBe(9.5 * 3600);
   });
 
   it('reads a zone that sits on Greenwich, where the label carries no sign', () => {
@@ -60,8 +61,8 @@ describe('dayStartSec', () => {
   });
 
   it('moves the boundary east with the plant', () => {
-    // 12:00 UTC is 17:00 in +05:00, so the day began at 19:00 UTC yesterday.
-    expect(dayStartSec(noon, 5 * 3600)).toBe(Date.UTC(2026, 8, 11, 19, 0, 0) / 1000);
+    // 12:00 UTC is 21:00 in +09:00, so the day began at 15:00 UTC yesterday.
+    expect(dayStartSec(noon, 9 * 3600)).toBe(Date.UTC(2026, 8, 11, 15, 0, 0) / 1000);
   });
 
   it('moves it west too', () => {

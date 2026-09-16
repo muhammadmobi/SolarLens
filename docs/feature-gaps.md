@@ -179,7 +179,7 @@ larger than they were, which is why none of it is marked S.
 - **Per-string *power* is reported; per-string voltage and current are not** — at least not on
   the plant Device page, where `pow1`…`pow32` are watts only.
 - **The two vendors state a timezone three different ways.** SolisCloud sends whole hours
-  (`timeZone: 5`), SolarMan's station detail sends seconds (`timeZoneOffset: 18000`) and its
-  station search sends an IANA name (`regionTimezone: "Asia/Karachi"`). All three are read, and
+  (`timeZone: 9`), SolarMan's station detail sends seconds (`timeZoneOffset: 32400`) and its
+  station search sends an IANA name (`regionTimezone: "Asia/Tokyo"`). All three are read, and
   seconds win over hours where a plant sends both, because a half-hour zone cannot be said in
   whole hours at all.

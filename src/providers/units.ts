@@ -75,9 +75,9 @@ export function pick(obj: Record<string, unknown>, ...keys: string[]): unknown {
  * the same only while you are sitting in the same country as the panels. Three
  * shapes turn up across the two portals and their web APIs:
  *
- *   timeZone: 5                 whole hours, SolisCloud's inverter list
- *   timeZoneOffset: 18000       seconds, SolarMan's station detail
- *   timezone: "Asia/Karachi"    IANA name, SolarMan's station search
+ *   timeZone: 9                 whole hours, SolisCloud's inverter list
+ *   timeZoneOffset: 32400       seconds, SolarMan's station detail
+ *   timezone: "Asia/Tokyo"      IANA name, SolarMan's station search
  *
  * The named zone is resolved for *now* rather than for the sample's own
  * instant, which is the right call here: these offsets are read when a plant is
@@ -102,7 +102,7 @@ export function tzOffsetSec(rec: Record<string, unknown>): number | null {
 /** UTC offset of an IANA zone right now, or null when the runtime rejects it. */
 function offsetOfZone(zone: string): number | null {
   try {
-    // longOffset gives "GMT+05:00" / "GMT-03:30" / bare "GMT" at zero.
+    // longOffset gives "GMT+09:00" / "GMT-03:30" / bare "GMT" at zero.
     const label = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longOffset' })
       .formatToParts(new Date())
       .find((p) => p.type === 'timeZoneName')?.value;

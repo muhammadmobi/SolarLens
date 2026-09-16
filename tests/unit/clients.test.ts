@@ -160,7 +160,7 @@ describe('SolisCloudProvider', () => {
       // Number.MAX_SAFE_INTEGER, so sent as a JSON number it would arrive
       // rounded - ...001 becomes ...000 and every later lookup misses.
       data: { page: { records: [
-        { id: '1000000000000000001', stationName: 'Demo Plant', capacity: 12, capacityStr: 'kWp', timeZone: 5 },
+        { id: '1000000000000000001', stationName: 'Demo Plant', capacity: 12, capacityStr: 'kWp', timeZone: 9 },
         { id: 2, name: 'Second', capacity: 500, capacityStr: 'Wp' },
       ] } },
     })]]);
@@ -169,7 +169,7 @@ describe('SolisCloudProvider', () => {
     expect(plants).toEqual([
       // SolisCloud reports whole hours; a plant that says nothing keeps null,
       // and the caller's own offset is used for it instead.
-      { id: '1000000000000000001', name: 'Demo Plant', capacityW: 12_000, tzOffsetSec: 5 * 3600 },
+      { id: '1000000000000000001', name: 'Demo Plant', capacityW: 12_000, tzOffsetSec: 9 * 3600 },
       { id: '2', name: 'Second', capacityW: 500, tzOffsetSec: null },
     ]);
   });
