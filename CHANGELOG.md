@@ -75,6 +75,26 @@ The three gaps `docs/feature-gaps.md` had carried since the first release, close
 
 ### Fixed
 
+- **An offline inverter's strings no longer read as producing.** Solis went
+  offline at dusk and the header said so, while the overview tile and the
+  Devices table both said its strings were producing. The offline handling
+  zeroes an inverter's own live figures, but per-string readings live on the
+  device record, which keeps the last values the inverter sent - a few watts
+  on each input, at dusk - and is not touched again until it comes back.
+
+  The Devices table had a fault of its own: it printed the number of string
+  entries followed by "producing" without reading a wattage, so every string
+  on every inverter read as live. And the overview counted an empty MPPT socket
+  as a string, so a hybrid with one array on a two-input inverter read "1 of
+  2", which looks like a failed string that does not exist.
+
+  One rule now answers all three views: count only connected strings, and say
+  "offline" rather than any count for an inverter that is offline, by its
+  device record or by the age of its own sample. The system page keeps the
+  bars and labels them as the last reported. Against live data, Solis went
+  from "2 producing" to "offline" and the hybrid from "1 of 2" and "2
+  producing" to "1 producing" in both places.
+
 - **Three rows of `docs/feature-gaps.md` claimed less than the app does.**
   Full-load hours were listed as captured but not surfaced after shipping on the
   overview in 2.1.0; BMS detail was listed as unsurfaced while pack voltage,
