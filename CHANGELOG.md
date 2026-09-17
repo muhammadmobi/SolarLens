@@ -14,6 +14,22 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [2.4.1] — 2026-09-17
+
+### Fixed
+
+- **Re-running the installer on a computer whose relay is already running no
+  longer races that relay for its browser.** Since 2.4.0 a re-run checks the
+  SolisCloud login in a visible window, but it opened that window while the
+  hidden relay still held the same Chrome profile. Chrome lets one program use a
+  profile at a time, so the new window killed the hidden relay's browser to get
+  in, and the hidden relay could kill the new window's on its next cycle - in
+  the middle of a login. The installer now stops the hidden relay, and the
+  Chrome it drives, before the check, and starts it again afterwards, as
+  `renew-solis-login.cmd` already did. A personalised `setup-solarlens-relay.cmd`
+  made earlier picks the fix up by itself: it updates the code before it runs
+  the installer.
+
 ## [2.4.0] — 2026-09-17
 
 Warning before a relay's SolisCloud login runs out, and renewing it in one
@@ -753,6 +769,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.4.1]: https://github.com/muhammadmobi/SolarLens/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.1.0...v2.2.0

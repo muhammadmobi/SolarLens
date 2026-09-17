@@ -341,6 +341,13 @@ them already filled in. Copy it to the other machine and double-click it: it
 installs what is missing, fetches the code, configures itself, and registers
 the scheduled task without asking you anything.
 
+The same file also updates a machine later. Double-clicked again, it stops the
+hidden relay, pulls the new code, installs any new dependencies, checks the
+SolisCloud login in a visible window and starts the relay again. If you deleted
+the file, as its warning suggests, `renew-solis-login.cmd` in the SolarLens
+folder updates the code, checks the login and restarts the relay without needing
+the token, though it does not install new dependencies.
+
 The one step that stays manual is the SolisCloud login, in the browser window
 it opens. That is not an omission — the relay works by driving a logged-in
 browser session, and no script can type your password into a login form for
