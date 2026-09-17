@@ -4,7 +4,8 @@ REM
 REM It only launches the PowerShell script beside it, which does the work:
 REM installs what is missing, fetches the code, asks for the ingest token,
 REM walks you through one SolisCloud login, and registers the relay to start
-REM itself at every logon.
+REM itself at every logon. The window closes by itself when setup worked, and
+REM stays open when it did not, so the message saying why can still be read.
 REM
 REM The -ExecutionPolicy Bypass is scoped to this one invocation; it does not
 REM change any machine setting.
@@ -25,5 +26,13 @@ if exist "%HERE%scripts\setup-relay.ps1" (
     "& $f %*"
 )
 
+if errorlevel 1 (
+  echo.
+  echo  Setup did not finish - the message above says why.
+  pause
+  exit /b 1
+)
 echo.
-pause
+echo  Closing in 5 seconds.
+"%SystemRoot%\System32\timeout.exe" /t 5 >nul
+exit /b 0

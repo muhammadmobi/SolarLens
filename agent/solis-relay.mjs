@@ -25,6 +25,8 @@
  *   SOLIS_PLANT_IDS     comma-separated plant ids to push; unset = every plant on the account
  *   RELAY_INTERVAL_MIN  minutes between pushes (default 5; Solis updates ~5 min)
  *   RELAY_HEADLESS      "1" to run without a window (only after the session exists)
+ *   RELAY_ONCE          "1" runs one cycle and exits: 0 sent, 3 needs a login, 1 other failure
+ *   RELAY_SKIP_EXTRAS   "1" skips alarm history and period totals, for a quick login check
  *   RELAY_PROFILE       Chrome profile dir (default ./.relay-profile)
  *   CHROME_PATH         explicit Chrome binary; default uses the installed Google Chrome
  *   RELAY_CDP           attach to a Chrome you already have open instead of
@@ -55,7 +57,7 @@ import { chromium } from 'playwright-core';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readAlarms, readPeriods } from './solis-extras.mjs';
-import { loginExpiryFromCookies, relayId, relayName, stateForError } from './relay-status.mjs';
+import { loginExpiryFromCookies, onceExitCode, relayId, relayName, stateForError } from './relay-status.mjs';
 
 /**
  * The Worker's own secrets already live in .dev.vars, and the agent needs two
@@ -98,7 +100,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 mkdirSync(PROFILE, { recursive: true });
 const firstRun = !existsSync(resolve(PROFILE, 'Default'));
-if (HEADLESS && firstRun) {
+// Attached to someone's own Chrome, this profile folder is never used, so its
+// being empty says nothing about whether there is a login.
+if (HEADLESS && firstRun && !CDP) {
   console.error('No saved session yet - run once without RELAY_HEADLESS=1 and log in, then go headless.');
   process.exit(2);
 }
@@ -295,16 +299,39 @@ async function onResponse(res) {
   } catch { /* non-JSON or partial - ignore */ }
 }
 
+/** Whether the page in front of us is SolisCloud's login page. */
+async function onLoginPage() {
+  if (/login/i.test(page.url())) return true;
+  return (await page.locator('input[type=password]').count().catch(() => 0)) > 0;
+}
+
 async function ensureLoggedIn() {
+  // The portal decides whether a login is needed only once its own scripts
+  // have run. Measured with no login at all: the page sat on
+  // /overview/plantStation for three seconds and moved to /login between three
+  // and five. The old check looked once, at three seconds, and so could call a
+  // missing login fine - then send nothing and report success. Now it watches
+  // until the portal shows its hand: the plant list loading means logged in,
+  // the login page means not, and fifteen seconds of neither means carry on.
+  const listed = page
+    .waitForResponse((r) => r.url().endsWith('/api/station/list') && r.ok(), { timeout: 15_000 })
+    .then(() => true, () => false);
+  let loaded = false;
+  listed.then((ok) => { loaded = ok; });
   await page.goto(`${PORTAL}/overview/plantStation`, { waitUntil: 'domcontentloaded' }).catch(() => {});
-  await sleep(3000);
-  if (!/login/i.test(page.url()) && !(await page.locator('input[type=password]').count())) return;
+  const decideBy = Date.now() + 15_000;
+  let needed = false;
+  while (!loaded && Date.now() < decideBy) {
+    if (await onLoginPage()) { needed = true; break; }
+    await sleep(500);
+  }
+  if (!needed) return;
   if (HEADLESS) throw new Error('session expired - run headed once to log in again');
   log('Please log in to SolisCloud in the Chrome window. Waiting…');
   const until = Date.now() + 15 * 60_000;
   while (Date.now() < until) {
     await sleep(5000);
-    if (!/login/i.test(page.url()) && !(await page.locator('input[type=password]').count())) { log('logged in - session saved'); return; }
+    if (!(await onLoginPage())) { log('logged in - session saved'); return; }
   }
   throw new Error('gave up waiting for login');
 }
@@ -467,33 +494,54 @@ async function cycle() {
   await ensureLoggedIn();
   await discoverPlants();
   const ids = PLANTS.length ? PLANTS : [...known.keys()];
-  if (!ids.length) { log('no plants discovered yet (set SOLIS_PLANT_IDS or wait for the plant list to load)'); return; }
+  if (!ids.length) throw new Error('no plants discovered yet (set SOLIS_PLANT_IDS or wait for the plant list to load)');
   log(`plants: ${ids.map((id) => known.get(id)?.name ?? id).join(', ')}`);
+  // A cycle that delivered no reading has failed, whatever else it managed.
+  // Counting only per-plant errors let a cycle that sent nothing report
+  // success, and a single run (RELAY_ONCE) then told setup a reading was through.
+  let sent = 0;
+  let lastError = null;
   for (const id of ids) {
     try {
       const { detail, chart } = await snapshot(id);
       await push(id, detail);
+      sent++;
       // Backfill after the snapshot, so a chart problem can never cost us the
       // live reading - which is the one thing this agent exists to deliver.
       try { await pushHistory(id, await chart); }
       catch (e) { log(`history ${id}: ${e.message}`); }
     }
-    catch (e) { log(`plant ${id}: ${e.message}`); }
+    catch (e) { lastError = e; log(`plant ${id}: ${e.message}`); }
+    if (!sent && lastError && await onLoginPage()) {
+      // The portal sent us to its login page part-way through: that is a login
+      // to renew, not a portal fault, and saying so puts the right alert up.
+      throw new Error('session expired while reading the plant - log in again');
+    }
     await sleep(2500); // stay well under Solis's 3 calls / 5 s
     try { await pushDevices(id, await devices(id)); }
     catch (e) { log(`devices ${id}: ${e.message}`); }
     await sleep(2500);
     // Last, and never fatal: a portal redesign that moves the alarm filter must
     // not cost the live reading, which is the thing this agent exists for.
+    // Skipped for a login check: a first read of the whole alarm history adds
+    // most of a minute, and the background relay started next reads it anyway.
+    if (SKIP_EXTRAS) continue;
     try { await extras(id); }
     catch (e) { log(`extras ${id}: ${e.message}`); }
   }
+  if (!sent) throw new Error(`no reading sent: ${lastError?.message ?? 'no plant answered'}`);
 }
 
 async function shutdown(code) {
   // A browser we attached to belongs to whoever opened it; close only our tab.
   if (attached) await page?.close().catch(() => {});
-  else if (ctx) await ctx.close().catch(() => {});
+  else if (ctx) {
+    // Never leave a window behind: a visible run that exits with its Chrome
+    // still open looks to the person watching as if it never finished. Give
+    // Chrome fifteen seconds to close, then close it the hard way.
+    const closed = await Promise.race([ctx.close().then(() => true, () => true), sleep(15_000).then(() => false)]);
+    if (!closed) log(`browser did not close - killed ${await killStaleProfileHolders()} process(es)`);
+  }
   process.exit(code);
 }
 
@@ -512,6 +560,7 @@ process.on('SIGINT', async () => { log('stopping'); await shutdown(0); });
  * One cycle, an exit code that says whether it worked, and no keystroke.
  */
 const ONCE = process.env.RELAY_ONCE === '1';
+const SKIP_EXTRAS = process.env.RELAY_SKIP_EXTRAS === '1';
 
 log(`relay -> ${SOLARLENS_URL}  ${ONCE ? 'one cycle' : `every ${INTERVAL_MS / 60000} min`}  plants=${PLANTS.length ? PLANTS.join(',') : 'auto'}  ${CDP ? `attached to ${CDP}` : `profile=${PROFILE}`}`);
 
@@ -524,7 +573,7 @@ if (ONCE) {
   } catch (e) {
     log(`cycle failed: ${e.message}`);
     await reportStatus(stateForError(e));
-    await shutdown(1);
+    await shutdown(onceExitCode(e));
   }
 }
 

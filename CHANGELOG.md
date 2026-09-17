@@ -14,6 +14,63 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [2.5.0] — 2026-09-17
+
+Renewing and updating a relay now shows nothing when nothing needs doing.
+
+### Changed
+
+- **The login check runs hidden, and a window opens only when a login is
+  needed.** Since 2.4.0, `renew-solis-login.cmd` and every re-run of the
+  installer opened a visible Chrome window to check the saved SolisCloud login,
+  even when it worked, which is most weeks. On a machine that needed nothing,
+  a browser appearing and a terminal waiting looked like something going
+  wrong. Both now check in a hidden browser first. When the login works, a
+  reading goes through and nothing appears. When SolisCloud wants a login, a
+  window opens for it and closes itself once a reading has been sent. The check
+  also skips the alarm history and period totals, so it takes about twenty
+  seconds instead of a minute; the background relay started straight afterwards
+  reads them.
+- **The `.cmd` windows close themselves when the run worked.**
+  `renew-solis-login.cmd` and `setup-relay.cmd` used to end on "press any key",
+  and a personalised `setup-solarlens-relay.cmd` waited twenty seconds. All three
+  now close five seconds after success, and stay open only after a failure, so
+  its reason can still be read.
+- **The installer skips what is already in place.** Dependencies are installed
+  only when `package-lock.json` changed since the last install, and a relay task
+  someone disabled is left disabled rather than switched back on. Its `.dev.vars`
+  now says `RELAY_HEADLESS=1` from the start.
+
+### Added
+
+- **The installer installs Google Chrome when it is missing**, with winget, as
+  it already did for Node and Git. It used to warn and carry on, leaving a relay
+  that could not start a browser.
+- `RELAY_SKIP_EXTRAS=1`, and distinct exit codes for a single run
+  (`RELAY_ONCE=1`): `0` a reading went through, `3` SolisCloud wants a login,
+  `1` anything else.
+
+### Fixed
+
+- **A relay with no working login could report success.** It checked for the
+  login page once, three seconds after opening the portal. Measured with no
+  login at all, the portal stays on the plant page for about three seconds and
+  moves to its login page between three and five, so the check could miss it.
+  The cycle then sent no reading, logged the timeout as a per-plant error, and
+  reported success, and a single run told the installer a reading was through.
+  The relay now watches until the plant list loads or the login page appears,
+  and a cycle that sends no reading counts as failed. A login lost part-way
+  through a cycle is reported as a login to renew.
+- **The background relay can no longer show a browser window.**
+  `scripts\relay-hidden.vbs` forces `RELAY_HEADLESS=1` for the relay it starts.
+  Before, it followed `.dev.vars`, where a `0` left by a login done by hand, or
+  by an installer run that stopped part-way, put a Chrome window on screen at
+  every logon.
+- **A relay can no longer leave its browser open when it exits.** If Chrome
+  does not close within fifteen seconds, the relay closes it the hard way.
+- A relay attached to your own Chrome (`RELAY_CDP`) is no longer refused as
+  having no saved session when run hidden.
+
 ## [2.4.1] — 2026-09-17
 
 ### Fixed
@@ -769,6 +826,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.5.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/muhammadmobi/SolarLens/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.2.0...v2.3.0

@@ -148,8 +148,8 @@ echo.
 echo  Finished. The relay is running hidden and will start itself at every logon.
 echo  You can delete this file now.
 echo.
-echo  Closing in 20 seconds - press a key to close it sooner.
-timeout /t 20
+echo  Closing in 5 seconds.
+"%SystemRoot%\System32\timeout.exe" /t 5 >nul
 exit /b 0
 "@
 

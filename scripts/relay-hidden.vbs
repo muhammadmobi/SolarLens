@@ -34,6 +34,13 @@ Else
   nodeExe = "node"
 End If
 
+' Always headless, whatever .dev.vars says. This is the background relay:
+' nobody is watching its window, and a RELAY_HEADLESS=0 left in .dev.vars by a
+' login done by hand would otherwise put a Chrome window on screen at every
+' logon. A process variable wins over .dev.vars. Logins happen through
+' renew-solis-login.cmd, which opens its own window when one is needed.
+shell.Environment("PROCESS")("RELAY_HEADLESS") = "1"
+
 shell.CurrentDirectory = root
 cmd = """" & nodeExe & """ """ & fso.BuildPath(root, "agent\solis-relay.mjs") & """"
 

@@ -6,8 +6,9 @@
 #
 #   1. Stops the hidden relay, so its browser profile is free.
 #   2. Updates the code, when it can do so without touching local changes.
-#   3. Runs the relay once in a visible window. If the saved login still works it
-#      sends a reading and closes by itself; if not, it waits for you to log in.
+#   3. Checks the saved login in the background, with no window. If it still
+#      works, a reading is sent and nothing appears. Only if SolisCloud wants a
+#      login does a Chrome window open, and it waits for you to log in.
 #   4. Starts the hidden relay again - unless you had disabled it on purpose.
 #
 # Usually run through renew-solis-login.cmd, from the SolarLens folder.
@@ -20,6 +21,26 @@ function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "    OK  $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "    !!  $t" -ForegroundColor Yellow }
 function Die($t)  { Write-Host "`nSTOPPED: $t" -ForegroundColor Red; exit 1 }
+
+# Run the relay for one cycle and return its exit code: 0 a reading went
+# through, 3 SolisCloud wants a login, anything else another failure. Hidden
+# unless -Visible. Alarm history and period totals are skipped - they add most
+# of a minute, and the background relay started afterwards reads them anyway.
+# setup-relay.ps1 carries the same function.
+function Invoke-RelayOnce([switch] $Visible) {
+  $env:RELAY_ONCE = '1'
+  $env:RELAY_SKIP_EXTRAS = '1'
+  $env:RELAY_HEADLESS = $(if ($Visible) { '0' } else { '1' })
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & node agent\solis-relay.mjs | Out-Host
+    return $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prev
+    foreach ($v in 'RELAY_ONCE', 'RELAY_SKIP_EXTRAS', 'RELAY_HEADLESS') { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
+  }
+}
 
 Write-Host 'SolarLens: renew the SolisCloud login' -ForegroundColor White
 Write-Host '--------------------------------------'
@@ -77,21 +98,27 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 
 # --- 3. the login itself ----------------------------------------------------
 Step 3 'Checking the SolisCloud login'
-Write-Host '    A Chrome window opens. If SolisCloud asks you to log in, log in there.'
-Write-Host '    If it does not ask, the saved login still works.'
-Write-Host '    Either way it closes by itself once a reading has been sent.' -ForegroundColor Yellow
-Write-Host ''
-$env:RELAY_HEADLESS = '0'
-$env:RELAY_ONCE = '1'
-try { & node agent\solis-relay.mjs }
-finally {
-  Remove-Item Env:\RELAY_HEADLESS -ErrorAction SilentlyContinue
-  Remove-Item Env:\RELAY_ONCE -ErrorAction SilentlyContinue
+# Hidden first. Most of the time the saved login still works, and then there is
+# nothing for anyone to see or do; a window opens only when a login is needed.
+$profileDir = if ($env:RELAY_PROFILE) { $env:RELAY_PROFILE } else { Join-Path $Root '.relay-profile' }
+$code = -1
+if (Test-Path (Join-Path $profileDir 'Default')) {
+  Write-Host '    Checking in the background - no window unless SolisCloud wants a login.'
+  $code = Invoke-RelayOnce
+  if ($code -eq 0) { Ok 'The saved login still works, and a reading went through' }
+  elseif ($code -eq 3) { Warn 'The saved login has expired' }
+  else { Warn "The background check did not get through (exit $code) - trying again in a window" }
 }
-if ($LASTEXITCODE -ne 0) {
-  Die 'No reading was sent, so the login is not renewed yet. Run this again and complete the login in the Chrome window.'
+if ($code -ne 0) {
+  Write-Host ''
+  Write-Host '    A Chrome window opens on SolisCloud. Log in there if it asks.'
+  Write-Host '    It closes by itself once a reading has been sent.' -ForegroundColor Yellow
+  Write-Host ''
+  if ((Invoke-RelayOnce -Visible) -ne 0) {
+    Die 'No reading was sent, so the login is not renewed yet. Run this again and complete the login in the Chrome window.'
+  }
+  Ok 'Logged in, and a reading went through'
 }
-Ok 'Logged in, and a reading went through'
 
 # --- 4. back to running hidden ----------------------------------------------
 Step 4 'Starting the hidden relay'
@@ -113,4 +140,6 @@ if (-not $taskInfo) {
   else { Warn "The task did not start the relay. Start it with: Start-ScheduledTask -TaskName '$Task'" }
 }
 
-Write-Host "`nDone. The new login lasts seven days; the dashboard warns two days before it runs out." -ForegroundColor Green
+Write-Host "`nDone. A login lasts seven days; the dashboard warns two days before it runs out." -ForegroundColor Green
+# An explicit success code, so renew-solis-login.cmd can close its window.
+exit 0
