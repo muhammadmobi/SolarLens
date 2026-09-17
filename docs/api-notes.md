@@ -39,6 +39,12 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   reproduce it, and the bundle name changes on every release — so the portal cannot be
   called from a Worker with a copied token. `agent/solis-relay.mjs` therefore lets the
   real portal make the calls and relays the responses.
+- **The `token` login cookie lasts exactly seven days from the moment of login**, on the
+  `.soliscloud.com` domain, and use does not extend it: a relay calling the portal every five
+  minutes still found the same expiry a week out. Several computers can hold valid logins at
+  once; logging in on one does not end another's. The login page ships hCaptcha and a
+  verification-code step, so a login cannot be scripted, and it has no "keep me signed in"
+  option - its one checkbox accepts the privacy policy.
 - `station/list` → `data.page.records[]` — plant list. Same record shape as detail below.
 - `station/detailMix` body `{id}` → `data` — plant live snapshot. Fields used:
   - `dataTimestamp` (epoch **ms** as string), `state` (1 online, 2 offline, 3 alarm)

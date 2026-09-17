@@ -170,6 +170,11 @@ close - see section 6. What remains:
 
 ## 6. Data-quality notes
 
+- **A SolisCloud relay needs a person once a week.** The portal's web login lasts exactly
+  seven days, use does not extend it, and the login page carries hCaptcha, so no relay can
+  keep itself logged in. SolarLens cannot remove that; it warns two days ahead and makes
+  renewing one double-click. Only an official SolisCloud API key, which does not expire,
+  would take the person out of it.
 - **SolarMan reports no battery device for a hybrid plant.** Its device-type list for the
   plant is inverter and datalogger only, so a battery's own firmware, serial and status are
   not available from SolarMan at all - not merely unfetched. Its live figures are carried in
