@@ -61,6 +61,32 @@ function Ok($t)   { Write-Host "    OK  $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "    !!  $t" -ForegroundColor Yellow }
 function Die($t)  { Write-Host "`nSTOPPED: $t" -ForegroundColor Red; exit 1 }
 
+# Stop a relay this machine is already running, and the Chrome it drives.
+#
+# Chrome lets one program at a time use a profile. When a relay already runs
+# here, the login check below would start a second one on the same profile: the
+# new one kills the hidden relay's browser to get in, and the hidden relay kills
+# the new one's on its next cycle - mid-login if you are still typing. Stop the
+# task first, then its wrapper, then node, then the relay's Chrome. Killing only
+# node.exe leaves the wscript wrapper alive, Task Scheduler still counts the task
+# as running, and Start-ScheduledTask on an already-running task does nothing.
+function Stop-HiddenRelay {
+  Stop-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue
+  foreach ($p in @(
+    @{ Name = 'wscript.exe'; Match = '*relay-hidden.vbs*' },
+    @{ Name = 'node.exe';    Match = '*solis-relay*' }
+  )) {
+    Get-CimInstance Win32_Process -Filter "Name='$($p.Name)'" |
+      Where-Object { $_.CommandLine -like $p.Match } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  }
+  Start-Sleep -Seconds 2
+  Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+    Where-Object { $_.CommandLine -like '*relay-profile*' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Seconds 1
+}
+
 Write-Host "SolarLens relay setup" -ForegroundColor White
 Write-Host "---------------------"
 
@@ -245,6 +271,8 @@ try {
     # and it failed silently every cycle after. The login is checked instead:
     # the window below closes by itself when the saved login still works, and
     # waits for a sign-in when it does not.
+    Stop-HiddenRelay
+
     $profileDir = Join-Path $InstallDir '.relay-profile'
     $hadSession = Test-Path (Join-Path $profileDir 'Default')
     if ($hadSession) {
@@ -362,21 +390,11 @@ try {
       Die "Could not register the scheduled task. The relay is installed and works if you start it by hand (npm run relay:solis in $InstallDir), but it will not start itself at logon."
     }
 
-    # Stop the task before killing anything. Killing only node.exe leaves the
-    # wscript wrapper alive, Task Scheduler still counts the task as running,
-    # and Start-ScheduledTask on an already-running task does nothing at all -
-    # then the wrapper notices its child is gone and exits, leaving the task
-    # Ready and no relay. That silence is what a bare "did not start" hid.
-    Stop-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue
-    foreach ($p in @(
-      @{ Name = 'wscript.exe'; Match = '*relay-hidden.vbs*' },
-      @{ Name = 'node.exe';    Match = '*solis-relay*' }
-    )) {
-      Get-CimInstance Win32_Process -Filter "Name='$($p.Name)'" |
-        Where-Object { $_.CommandLine -like $p.Match } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-    }
-    Start-Sleep -Seconds 3
+    # A relay started by -UseMyChrome, or by hand, may still be running. Start
+    # only after stopping it: Start-ScheduledTask on a task that is already
+    # running does nothing at all, and the wrapper then notices its child is
+    # gone and exits, leaving the task Ready and no relay.
+    Stop-HiddenRelay
 
     Start-ScheduledTask -TaskName 'SolarLens relay'
     # Poll rather than sleep once: wscript has to start, then node, then
