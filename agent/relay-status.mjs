@@ -30,6 +30,20 @@ export function stateForError(err) {
 }
 
 /**
+ * How a single run (RELAY_ONCE) that failed exits: 3 when a person has to log
+ * in, 1 for anything else.
+ *
+ * The renewal and setup scripts check the saved login in a hidden browser
+ * first, so nobody sees a window when nothing needs doing. The code tells them
+ * why that check failed: 3 means open a window for a login; 1 means something
+ * else went wrong, which a visible run shows more plainly. Exit 2 is taken by
+ * the relay's own start-up refusals.
+ */
+export function onceExitCode(err) {
+  return stateForError(err) === 'login-expired' ? 3 : 1;
+}
+
+/**
  * A random id for this relay, kept beside its browser profile.
  *
  * Deliberately not the computer's name: a Windows hostname often carries a

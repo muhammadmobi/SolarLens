@@ -45,6 +45,11 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   once; logging in on one does not end another's. The login page ships hCaptcha and a
   verification-code step, so a login cannot be scripted, and it has no "keep me signed in"
   option - its one checkbox accepts the privacy policy.
+- **Without a login, the portal redirects late.** Opening `/overview/plantStation` in a browser
+  with no login, the page stays on that address for about three seconds - `user/find` and the
+  global config still answer 200 - and moves to `/login` between three and five. `station/list`
+  is only requested once logged in, so its response is the reliable "logged in" signal and the
+  login page the reliable "not"; any single look at a fixed moment races the redirect.
 - `station/list` → `data.page.records[]` — plant list. Same record shape as detail below.
 - `station/detailMix` body `{id}` → `data` — plant live snapshot. Fields used:
   - `dataTimestamp` (epoch **ms** as string), `state` (1 online, 2 offline, 3 alarm)

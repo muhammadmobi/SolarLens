@@ -6,7 +6,9 @@
 # background service on whatever machine you run it on.
 #
 # It is safe to run twice. Everything it does is checked first, so a second run
-# repairs whatever is missing and leaves the rest alone.
+# repairs whatever is missing and leaves the rest alone: Node, Git and Chrome
+# are installed only when absent, dependencies only when they changed, and a
+# browser window appears only when SolisCloud needs someone to log in.
 #
 #   powershell -ExecutionPolicy Bypass -File setup-relay.ps1
 #
@@ -87,10 +89,40 @@ function Stop-HiddenRelay {
   Start-Sleep -Seconds 1
 }
 
+# Run the relay for one cycle and return its exit code: 0 a reading went
+# through, 3 SolisCloud wants a login, anything else another failure. Hidden
+# unless -Visible. Alarm history and period totals are skipped - they add most
+# of a minute, and the background relay started afterwards reads them anyway.
+# renew-solis-login.ps1 carries the same function.
+function Invoke-RelayOnce([switch] $Visible) {
+  $env:RELAY_ONCE = '1'
+  $env:RELAY_SKIP_EXTRAS = '1'
+  $env:RELAY_HEADLESS = $(if ($Visible) { '0' } else { '1' })
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & node agent\solis-relay.mjs | Out-Host
+    return $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prev
+    foreach ($v in 'RELAY_ONCE', 'RELAY_SKIP_EXTRAS', 'RELAY_HEADLESS') { Remove-Item "Env:\$v" -ErrorAction SilentlyContinue }
+  }
+}
+
+# Chrome installs per-machine or per-user depending on who ran the installer,
+# so look in all three places rather than assuming Program Files.
+function Find-Chrome {
+  @(
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+  ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+}
+
 Write-Host "SolarLens relay setup" -ForegroundColor White
 Write-Host "---------------------"
 
-# --- 1. the things this cannot install for you -----------------------------
+# --- 1. prerequisites: install what is missing, skip what is there ---------
 Step 1 'Checking prerequisites'
 
 foreach ($tool in @(
@@ -115,18 +147,25 @@ foreach ($tool in @(
   }
 }
 
-# Chrome installs per-machine or per-user depending on who ran the installer,
-# so look in all three places rather than assuming Program Files.
-$chrome = @(
-  "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
-  "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
-  "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-
+# The relay drives Google Chrome itself, so a machine without it cannot relay.
+# winget's Chrome installer may ask for administrator approval; if that is
+# declined the setup carries on, in case CHROME_PATH points somewhere unusual.
+$chrome = Find-Chrome
 if ($chrome) { Ok "Google Chrome found ($chrome)" }
-else {
+elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+  Warn 'Google Chrome missing - installing with winget (Windows may ask for approval)'
+  try {
+    Invoke-Native 'winget' @('install','--id','Google.Chrome','-e','--accept-source-agreements','--accept-package-agreements') 'installing Google Chrome'
+  } catch { Warn "$_" }
+  $chrome = Find-Chrome
+  if ($chrome) { Ok "Google Chrome installed ($chrome)" }
+  else {
+    $chrome = 'chrome.exe'
+    Warn 'Chrome did not install - install it from https://www.google.com/chrome and run this again, or set CHROME_PATH in .dev.vars'
+  }
+} else {
   $chrome = 'chrome.exe'
-  Warn 'Chrome is not in any of the usual places - set CHROME_PATH in .dev.vars if the relay cannot find it'
+  Warn 'Chrome is not installed and winget is unavailable - install it from https://www.google.com/chrome, or set CHROME_PATH in .dev.vars'
 }
 
 # --- 2. the code -----------------------------------------------------------
@@ -173,12 +212,26 @@ if (Test-Path (Join-Path $InstallDir '.git')) {
 
 Push-Location $InstallDir
 try {
-  Step 3 'Installing dependencies (this takes a minute)'
-  Invoke-Native 'npm' @('install','--no-audit','--no-fund','--loglevel=error') 'npm install'
-  if (-not (Test-Path (Join-Path $InstallDir 'node_modules\playwright-core'))) {
-    Die 'npm install finished but playwright-core is missing - run "npm install" here by hand to see why.'
+  Step 3 'Checking dependencies'
+  # npm keeps its own record of what it installed, node_modules\.package-lock.json.
+  # When that is at least as new as package-lock.json, nothing has changed since
+  # the last install and a minute of npm can be skipped. A git pull that brings a
+  # new package-lock.json makes it newer, and the install runs.
+  $lockFile  = Join-Path $InstallDir 'package-lock.json'
+  $installed = Join-Path $InstallDir 'node_modules\.package-lock.json'
+  $upToDate  = (Test-Path (Join-Path $InstallDir 'node_modules\playwright-core')) -and
+               (Test-Path $installed) -and (Test-Path $lockFile) -and
+               ((Get-Item $installed).LastWriteTimeUtc -ge (Get-Item $lockFile).LastWriteTimeUtc)
+  if ($upToDate) {
+    Ok 'Dependencies already up to date - skipped'
+  } else {
+    Write-Host '    Installing (this takes a minute)'
+    Invoke-Native 'npm' @('install','--no-audit','--no-fund','--loglevel=error') 'npm install'
+    if (-not (Test-Path (Join-Path $InstallDir 'node_modules\playwright-core'))) {
+      Die 'npm install finished but playwright-core is missing - run "npm install" here by hand to see why.'
+    }
+    Ok 'Dependencies installed'
   }
-  Ok 'Dependencies installed'
 
   # --- 4. settings --------------------------------------------------------
   Step 4 'Configuring'
@@ -223,8 +276,11 @@ try {
     $lines += '# Attach to the Chrome you already have open rather than running one.'
     $lines += "RELAY_CDP=http://127.0.0.1:$DebugPort"
   } else {
-    $lines += '# 1 hides the relay browser. Set 0 and run by hand if you ever need to log in again.'
-    $lines += 'RELAY_HEADLESS=0'
+    # Hidden from the start. The login check below sets RELAY_HEADLESS for its
+    # own runs, and the background task forces it to 1, so this line only
+    # matters to someone running the relay by hand.
+    $lines += '# 1 hides the relay browser. renew-solis-login.cmd opens a window when a login is needed.'
+    $lines += 'RELAY_HEADLESS=1'
   }
   foreach ($k in $existing.Keys) {
     if ($k -notin @('SOLARLENS_URL','INGEST_TOKEN','SOLIS_PLANT_IDS','RELAY_HEADLESS','RELAY_CDP')) {
@@ -265,59 +321,60 @@ try {
   } else {
     Step 5 'Signing in to SolisCloud'
 
-    # A saved session is not a working one. A SolisCloud login lasts seven days
-    # and cannot renew itself, so on a re-run the old check - "a profile folder
-    # exists, skip the login" - restarted a relay whose login had long expired,
-    # and it failed silently every cycle after. The login is checked instead:
-    # the window below closes by itself when the saved login still works, and
-    # waits for a sign-in when it does not.
+    # A saved session is not a working one: a SolisCloud login lasts seven days
+    # and cannot renew itself, so a re-run checks it rather than trusting that a
+    # profile folder exists. The check runs hidden first. When the saved login
+    # works, which is the usual case on a re-run, no window appears at all;
+    # 2.4.0 opened one every time, which on a machine that needed nothing looked
+    # like something going wrong. A window opens only when a login is needed.
     Stop-HiddenRelay
 
-    $profileDir = Join-Path $InstallDir '.relay-profile'
+    $profileDir = if ($env:RELAY_PROFILE) { $env:RELAY_PROFILE } else { Join-Path $InstallDir '.relay-profile' }
     $hadSession = Test-Path (Join-Path $profileDir 'Default')
+    $code = -1
     if ($hadSession) {
-      Write-Host '    Checking the saved SolisCloud login. A Chrome window opens; if'
-      Write-Host '    SolisCloud asks you to sign in, the login had expired - sign in there.'
-      Write-Host ''
-    } else {
-      Write-Host '    A Chrome window will open on SolisCloud. Sign in there.'
-      Write-Host ''
-      Write-Host '    It is a browser of its own, not the one you use. Chrome will not let'
-      Write-Host '    two programs share one profile, so the agent cannot borrow the session'
-      Write-Host '    in your everyday browser. You sign in here once; after this it runs'
-      Write-Host '    hidden and you never see it again.'
-      Write-Host ''
-      Write-Host '    Nothing to press afterwards - it closes itself once the first'
-      Write-Host '    reading has been sent.' -ForegroundColor Yellow
-      Write-Host ''
+      Write-Host '    Checking the saved SolisCloud login in the background - no window'
+      Write-Host '    unless SolisCloud wants you to log in.'
+      $code = Invoke-RelayOnce
+      if ($code -eq 0) { Ok 'The saved SolisCloud login works, and a reading is through' }
+      elseif ($code -eq 3) { Warn 'The saved SolisCloud login has expired' }
+      else { Warn "The background check did not get through (exit $code) - trying again in a window" }
     }
-
-    # RELAY_ONCE so it exits by itself. The old instruction was "press Ctrl+C
-    # when it says pushed", which on Windows raises "Terminate batch job
-    # (Y/N)?" inside the .cmd wrapper and leaves setup stopped half-way.
-    # RELAY_HEADLESS=0 overrides the 1 a previous install wrote to .dev.vars: a
-    # headless browser cannot show a login page to anyone.
-    $env:RELAY_ONCE = '1'
-    $env:RELAY_HEADLESS = '0'
-    try { npm run relay:solis }
-    finally {
-      Remove-Item Env:\RELAY_ONCE -ErrorAction SilentlyContinue
-      Remove-Item Env:\RELAY_HEADLESS -ErrorAction SilentlyContinue
+    if ($code -ne 0) {
+      Write-Host ''
+      Write-Host '    A Chrome window opens on SolisCloud. Log in there if it asks.'
+      if (-not $hadSession) {
+        Write-Host ''
+        Write-Host '    It is a browser of its own, not the one you use. Chrome will not let'
+        Write-Host '    two programs share one profile, so the agent cannot borrow the session'
+        Write-Host '    in your everyday browser. You log in here once a week; the rest of the'
+        Write-Host '    time it runs hidden.'
+      }
+      Write-Host ''
+      Write-Host '    Nothing to press afterwards - the window closes itself once a reading'
+      Write-Host '    has been sent.' -ForegroundColor Yellow
+      Write-Host ''
+      # RELAY_ONCE, inside Invoke-RelayOnce, makes it exit by itself. The old
+      # instruction was "press Ctrl+C when it says pushed", which on Windows raises
+      # "Terminate batch job (Y/N)?" and leaves setup stopped half-way.
+      if ((Invoke-RelayOnce -Visible) -ne 0) {
+        Die 'No reading was sent - the SolisCloud login did not complete. Run this again.'
+      }
+      Ok 'Logged in, and a reading is through'
     }
-    if ($LASTEXITCODE -ne 0) {
-      Die 'The first reading was not sent - the SolisCloud sign-in did not complete. Run this again.'
-    }
-    Ok ($(if ($hadSession) { 'SolisCloud login works, and a reading is through' } else { 'Signed in, and the first reading is through' }))
-
-    # Hide it from now on.
-    (Get-Content $devVars) -replace '^RELAY_HEADLESS=0$', 'RELAY_HEADLESS=1' |
-      Set-Content $devVars -Encoding utf8
-    Ok 'Relay set to run hidden from now on'
   }
 
   # --- 6. start it on every logon -----------------------------------------
+  # A task someone disabled is a relay paused on purpose. Re-registering it
+  # would switch it back on, so it is left exactly as it is.
+  $pausedTask = Get-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue |
+    Where-Object { $_.State -eq 'Disabled' }
   if ($NoTask) {
     Warn 'Skipping the scheduled task (-NoTask). Start it yourself with: npm run relay:solis'
+  } elseif ($pausedTask) {
+    Step 6 'Starting the relay automatically at logon'
+    Warn "The 'SolarLens relay' task is disabled on this computer, so it was left off."
+    Write-Host "    To run it again: Enable-ScheduledTask -TaskName 'SolarLens relay'; Start-ScheduledTask -TaskName 'SolarLens relay'"
   } else {
     Step 6 'Starting the relay automatically at logon'
 
@@ -423,3 +480,5 @@ try {
   Write-Host "  To remove it: Unregister-ScheduledTask -TaskName 'SolarLens relay' -Confirm:`$false"
 }
 finally { Pop-Location }
+# An explicit success code, so the .cmd that ran this can close its window.
+exit 0

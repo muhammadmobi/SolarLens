@@ -49,8 +49,12 @@ SOLIS_PLANT_IDS=
 #   chrome.exe --remote-debugging-port=9222
 # Uses your own logins, but the relay's tab appears in your window and a
 # debugging port lets any local program drive your browser. Leave unset to keep
-# the separate profile (add RELAY_HEADLESS=1 there to hide its window).
+# the separate profile.
 RELAY_CDP=
+
+# 1 hides the relay's browser when you run it by hand. The background task
+# always runs hidden whatever this says, and renew-solis-login.cmd opens a
+# window by itself when SolisCloud wants a login.
 RELAY_HEADLESS=
 
 # A nickname the dashboard shows for this relay, such as "Office laptop", beside

@@ -265,8 +265,13 @@ scheduled task so the relay starts itself at every logon and keeps running
 after you close the terminal.
 
 It is safe to run twice, and a second run is how you update a machine: it pulls,
-reuses the saved session, and re-registers the task. Two details it gets right
-that are easy to get wrong by hand:
+checks the saved login, and re-registers the task. Anything already in place is
+skipped - Node, Git and Chrome that are installed, dependencies that have not
+changed - and the login is checked in a hidden browser, so a machine that needs
+nothing shows no window at all. A Chrome window opens only when SolisCloud wants
+someone to log in. The terminal closes by itself when setup worked and stays
+open when it did not, so the reason can be read. A relay task someone disabled
+is left disabled. Two details it gets right that are easy to get wrong by hand:
 
 - **No console window.** The task starts `scripts\relay-hidden.vbs`, not
   `node.exe` directly. node is a console application, so running it from a task
@@ -314,8 +319,10 @@ To keep it alive: `pm2 start agent/solis-relay.mjs --name solis-relay`, or a
 - **It retries a failed browser launch** twice with a short backoff, and clears the `Singleton*` files Chrome leaves when a machine is shut down under it — but only when nothing holds the profile, because a live Chrome owns those files. Without this, the first cycle after a restart fails and Solis loses a whole interval: Chrome starts, exits before Playwright can speak to it, and the error is not the one a message-matching retry would recognise.
 - **Hourly it also reads the plant's alarm history, and daily the vendor's own period totals**, by setting the alarm page's Status filter to Recovered and pressing Month, Lifetime and Year on the plant's chart - again waiting for the portal's own signed responses. The first cycle after the relay starts reads every page of alarms and steps back through every year of totals, which adds about a minute to that one cycle; later cycles read only the newest page and the current year. Neither step can cost the live reading: both run last and a failure is logged and skipped.
 - **After every cycle it reports whether its SolisCloud login works, and when that login runs out.** A SolisCloud web login lasts exactly seven days and using it does not extend it, and the login page carries hCaptcha, so a relay cannot renew its own login: once a week, someone logs in again. The relay reads the expiry from the portal's own login cookie, so the date is exact, and the dashboard warns two days ahead on the Alerts tab and lists every relay's expiry on the Devices tab. Each relay is named by `RELAY_NAME` if you set one, such as *Office laptop*, or else *Relay 1*, *Relay 2*. It identifies itself to the Worker with a random id it keeps beside its browser profile, never the computer's name, and that id never appears on the dashboard.
-- **To renew a login, double-click `renew-solis-login.cmd`** in the SolarLens folder on that computer. It stops the hidden relay, updates the code, opens a Chrome window, sends a reading as soon as the login works, and starts the hidden relay again. If the saved login is still valid, it sends the reading without asking. Re-running `setup-relay.cmd` now does the same check, instead of skipping the login whenever a saved session folder exists.
-- `RELAY_ONCE=1` runs a single cycle and exits with a code that says whether it worked. The installer uses it for the sign-in step, so that step ends by itself instead of asking anyone to press Ctrl+C — which on Windows raises *Terminate batch job (Y/N)?* inside a `.cmd` and strands the installer half-finished.
+- **To renew a login, double-click `renew-solis-login.cmd`** in the SolarLens folder on that computer. It stops the hidden relay, updates the code, checks the saved login in a hidden browser, and starts the hidden relay again. If the login still works, a reading goes through and nothing appears on screen. Only when SolisCloud wants a login does a Chrome window open, and it closes itself once a reading has been sent. Re-running `setup-relay.cmd` does the same check.
+- **A cycle that delivers no reading counts as failed.** The portal decides whether a login is needed only after its own scripts run: with no login, the plant page stays put for about three seconds, then moves to the login page. The relay now watches until the plant list loads or the login page appears, rather than looking once at three seconds, which could call a missing login fine and report success with nothing sent.
+- **The background relay is always hidden.** `scripts\relay-hidden.vbs` sets `RELAY_HEADLESS=1` for the process it starts, which beats anything in `.dev.vars`, so a `0` left there by a login done by hand can never put a Chrome window on screen at every logon.
+- `RELAY_ONCE=1` runs a single cycle and exits: `0` a reading went through, `3` SolisCloud wants a login, `1` anything else. The installer and the renewal script use it, so each step ends by itself instead of asking anyone to press Ctrl+C — which on Windows raises *Terminate batch job (Y/N)?* inside a `.cmd` and strands the installer half-finished. `RELAY_SKIP_EXTRAS=1` leaves out the alarm history and period totals, which turns that check from about a minute into about twenty seconds; the background relay started straight afterwards reads them anyway.
 
 ### Running it on more than one machine
 
@@ -343,15 +350,17 @@ the scheduled task without asking you anything.
 
 The same file also updates a machine later. Double-clicked again, it stops the
 hidden relay, pulls the new code, installs any new dependencies, checks the
-SolisCloud login in a visible window and starts the relay again. If you deleted
+SolisCloud login in a hidden browser - opening a window only if a login is
+needed - and starts the relay again. If you deleted
 the file, as its warning suggests, `renew-solis-login.cmd` in the SolarLens
 folder updates the code, checks the login and restarts the relay without needing
 the token, though it does not install new dependencies.
 
 The one step that stays manual is the SolisCloud login, in the browser window
-it opens. That is not an omission — the relay works by driving a logged-in
-browser session, and no script can type your password into a login form for
-you. Everything after it is automatic, and the window closes itself.
+it opens when one is needed. That is not an omission — the relay works by
+driving a logged-in browser session, and no script can type your password into
+a login form for you. Everything after it is automatic, and the window closes
+itself.
 
 It reaches the code three ways, in order of how reliable they proved to be:
 
@@ -440,11 +449,12 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 | `CF_D1_DATABASE_ID` | `scripts/wrangler.mjs` | Your D1 id, substituted into a temporary config so the real one stays out of git. Every `npm run` wrangler script needs it. |
 | `SOLARLENS_URL` | relay agent | Where to POST readings, e.g. `https://solar-lens.<your-subdomain>.workers.dev`. |
 | `SOLIS_PLANT_IDS` | relay agent | Which Solis plants to relay. Unset = all of them. |
-| `RELAY_HEADLESS` | relay agent | `1` runs the relay browser invisibly. `renew-solis-login.cmd` overrides it for its one visible run. |
+| `RELAY_HEADLESS` | relay agent | `1` runs the relay browser invisibly. The background task always runs hidden whatever this says; the installer and `renew-solis-login.cmd` set it for their own checks. Only matters when running the relay by hand. |
 | `RELAY_NAME` | relay agent | A nickname the dashboard uses for this relay, such as `Office laptop`. Shown publicly, so keep it vague. Unset = *Relay 1*, *Relay 2*. |
 | `RELAY_CDP` | relay agent | Attach to an already-running Chrome, e.g. `http://127.0.0.1:9222`, instead of starting one. Set by `setup-relay.cmd -UseMyChrome`. |
 | `RELAY_INTERVAL_MIN` | relay agent | Minutes between pushes (default 5). |
-| `RELAY_ONCE` | relay agent | `1` runs one cycle and exits with a code saying whether it worked. Used by the installer's sign-in step; not set in normal running. |
+| `RELAY_ONCE` | relay agent | `1` runs one cycle and exits: `0` sent, `3` needs a login, `1` other failure. Used by the installer and `renew-solis-login.cmd`; not set in normal running. |
+| `RELAY_SKIP_EXTRAS` | relay agent | `1` skips alarm history and period totals, for a quick login check. Not set in normal running. |
 | `RELAY_PROFILE` | relay agent | Where the relay's own Chrome profile lives (default `./.relay-profile`). |
 | `CHROME_PATH` | relay agent | Explicit Chrome binary, if it is not in a standard location. |
 
@@ -495,7 +505,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**187 unit tests** and **266 end-to-end tests** (133 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**189 unit tests** and **266 end-to-end tests** (133 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -519,7 +529,7 @@ Twelve files, one concern each. They are all pure-function tests against fixture
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
 - **`extras.test.ts`** — the hourly and daily schedule for those reads: what the first run walks back through, what later runs skip, and that an empty current year in January does not stop the walk.
-- **`relays.test.ts`** — a relay's report on itself: what the Worker refuses, including a computer name offered as an id; the login expiry read from the portal's cookie; the random id a relay keeps; and relays named by nickname or order, never by id.
+- **`relays.test.ts`** — a relay's report on itself: what the Worker refuses, including a computer name offered as an id; the login expiry read from the portal's cookie; the random id a relay keeps; relays named by nickname or order, never by id; and the exit code that tells the renewal script to open a window for a login.
 - **`timezone.test.ts`** — the three shapes a vendor states a timezone in, and where a plant's day begins once one is known: east and west of Greenwich, on it, and on the half hour.
 
 ### End-to-end tests — `tests/e2e/`
@@ -722,7 +732,8 @@ solar-lens/
 | SolarMan panel goes stale after ~24 h | The refresh grant failed; re-copy the refresh token (you may have logged out of SolarMan). Check `GET /api/health`. |
 | Alerts: *SolisCloud login on … expires in …* or *has expired* | A SolisCloud login lasts seven days and cannot renew itself. On the computer named in the alert, double-click `renew-solis-login.cmd` and log in. The alert clears on that relay's next report. |
 | Solis reads **offline** although the plant is producing, and the footer's SolisCloud feed is hours old | Either every relay's login has expired, which the Devices tab shows, or the computers running relays are asleep or off. A relay only works while its computer is awake: set sleep to *Never* when plugged in. Renew a login with `renew-solis-login.cmd`. |
-| Relay console: *session expired* | The login has expired; renew it with `renew-solis-login.cmd`. By hand: `RELAY_HEADLESS=0 RELAY_ONCE=1 node agent/solis-relay.mjs`, log in, then start the hidden relay again. |
+| Relay console: *session expired* | The login has expired; renew it with `renew-solis-login.cmd`. By hand: stop the hidden relay first, run `RELAY_HEADLESS=0 RELAY_ONCE=1 node agent/solis-relay.mjs`, log in, then start the hidden relay again. |
+| A `.cmd` window stays open with *Something did not work* or *Setup did not finish* | That run failed, and the window stays so the reason can be read. The lines above it say what; the usual one is a SolisCloud login that was not completed. Double-click it again. |
 | Deploy: *register a workers.dev subdomain* | One-time account step; follow the printed link or pick a name in the dashboard, then deploy again. |
 | PowerShell: *The token '&&' is not valid* | Run the two commands on separate lines. |
 | A shared plant you don't own shows up | Set `INCLUDE_PLANTS` to the ids you want. |

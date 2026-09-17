@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseRelayStatus } from '../../src/relays';
 import { publicRelays } from '../../src/public-view';
-import { loginExpiryFromCookies, relayId, relayName, stateForError } from '../../agent/relay-status.mjs';
+import { loginExpiryFromCookies, onceExitCode, relayId, relayName, stateForError } from '../../agent/relay-status.mjs';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -56,6 +56,19 @@ describe('publicRelays', () => {
   it('names an unnamed relay by its order, and keeps a given nickname', () => {
     const out = publicRelays([row('a'.repeat(16), null), row('b'.repeat(16), 'Office laptop'), row('c'.repeat(16), null)]);
     expect(out.map((r) => r.name)).toEqual(['Relay 1', 'Office laptop', 'Relay 3']);
+  });
+});
+
+describe('onceExitCode', () => {
+  it('exits 3 when a person has to log in, so the scripts know to open a window', () => {
+    expect(onceExitCode(new Error('session expired - run headed once to log in again'))).toBe(3);
+    expect(onceExitCode(new Error('gave up waiting for login'))).toBe(3);
+  });
+
+  it('exits 1 for every other failure, including none given', () => {
+    expect(onceExitCode(new Error('net::ERR_INTERNET_DISCONNECTED'))).toBe(1);
+    expect(onceExitCode(new Error('browserType.launchPersistentContext: Target page, context or browser has been closed'))).toBe(1);
+    expect(onceExitCode(undefined)).toBe(1);
   });
 });
 
