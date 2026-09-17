@@ -140,6 +140,7 @@ async function stubApi(page: Page, opts: {
   history?: unknown[] | null;
   alarms?: unknown[] | 'error';
   periods?: unknown[];
+  relays?: unknown[];
   feeds?: { ts: number; ok: number; detail: string; provider: string }[];
 } = {}) {
   const status = opts.status ?? 200;
@@ -157,7 +158,7 @@ async function stubApi(page: Page, opts: {
     : r.fulfill(json({ now: NOW, days: 3650, alarms: opts.alarms ?? [] }))));
   await page.route('**/api/periods', (r) => r.fulfill(json({ now: NOW, periods: opts.periods ?? [] })));
   const polls = [opts.poll ?? { ts: NOW - 30, provider: 'solarman', ok: 1, detail: 'plants=1 inverters=1 new=1' }];
-  await page.route('**/api/health', (r) => r.fulfill(json({ now: NOW, polls, feeds: opts.feeds ?? polls })));
+  await page.route('**/api/health', (r) => r.fulfill(json({ now: NOW, polls, feeds: opts.feeds ?? polls, relays: opts.relays ?? [] })));
 }
 
 test.describe('Overview', () => {
@@ -1753,5 +1754,103 @@ test.describe('History with vendor totals', () => {
     await expect(rows.nth(1)).toContainText('18421 kWh');
     const labels = await section(page, 'Demo Solis Plant').locator('svg text.axis').allTextContents();
     expect(labels).toEqual(expect.arrayContaining(['2024', '2025', '2026']));
+  });
+});
+
+test.describe('SolisCloud relay logins', () => {
+  const H = 3600;
+  const relay = (over: Record<string, unknown> = {}) => ({
+    provider: 'soliscloud', name: 'Office laptop', state: 'ok',
+    login_expires_at: NOW + 6 * 24 * H, first_seen: NOW - 30 * 24 * H, last_seen: NOW - 120, last_ok_at: NOW - 120,
+    ...over,
+  });
+  const solisAlerts = (page: Page) => page.locator('details.syssec', { hasText: 'Demo Solis Plant' }).locator('ul.alerts li');
+
+  test('says nothing while a login has more than two days left', async ({ page }) => {
+    await stubApi(page, { relays: [relay()] });
+    await page.goto('/#/alerts');
+    await expect(page.locator('details.syssec', { hasText: 'Demo Solis Plant' })).toBeVisible();
+    await expect(page.locator('details.syssec', { hasText: 'Demo Solis Plant' })).not.toContainText('SolisCloud login');
+  });
+
+  test('warns two days ahead, naming the relay and the fix', async ({ page }) => {
+    await stubApi(page, { relays: [relay({ login_expires_at: NOW + 20 * H })] });
+    await page.goto('/#/alerts');
+    const a = solisAlerts(page).filter({ hasText: 'SolisCloud login on Office laptop expires in 20 hours' });
+    await expect(a).toHaveCount(1);
+    await expect(a).toHaveClass(/warn/);
+    await expect(a).toContainText('renew-solis-login.cmd');
+  });
+
+  test('an expired login with no other relay is an outage', async ({ page }) => {
+    await stubApi(page, { relays: [relay({ state: 'login-expired', login_expires_at: NOW - H })] });
+    await page.goto('/#/alerts');
+    const a = solisAlerts(page).filter({ hasText: 'SolisCloud login expired on Office laptop' });
+    await expect(a).toHaveCount(1);
+    await expect(a).toHaveClass(/bad/);
+    await expect(a).not.toContainText('another relay');
+  });
+
+  test('an expiry date in the past counts as expired even before the relay says so', async ({ page }) => {
+    await stubApi(page, { relays: [relay({ state: 'ok', login_expires_at: NOW - 60 })] });
+    await page.goto('/#/alerts');
+    await expect(solisAlerts(page).filter({ hasText: 'SolisCloud login expired on Office laptop' })).toHaveCount(1);
+  });
+
+  test('while another relay still delivers, an expired login is a warning, not an outage', async ({ page }) => {
+    await stubApi(page, {
+      relays: [
+        relay({ name: 'Home laptop', state: 'login-expired', login_expires_at: NOW - H }),
+        relay({ name: 'Office laptop' }),
+      ],
+    });
+    await page.goto('/#/alerts');
+    const a = solisAlerts(page).filter({ hasText: 'SolisCloud login expired on Home laptop' });
+    await expect(a).toHaveClass(/warn/);
+    await expect(a).toContainText('Readings still arrive through another relay');
+  });
+
+  test('a relay silent for more than a week is a computer that is off, and raises nothing', async ({ page }) => {
+    await stubApi(page, { relays: [relay({ state: 'login-expired', login_expires_at: NOW - 9 * 24 * H, last_seen: NOW - 8 * 24 * H })] });
+    await page.goto('/#/alerts');
+    await expect(page.locator('details.syssec', { hasText: 'Demo Solis Plant' })).not.toContainText('SolisCloud login');
+  });
+
+  test('the Devices tab lists each relay with its login expiry', async ({ page }) => {
+    await stubApi(page, {
+      relays: [
+        relay({ name: 'Relay 1', login_expires_at: NOW + 30 * H }),
+        relay({ name: 'Office laptop' }),
+        relay({ name: 'Relay 3', state: 'login-expired', login_expires_at: NOW - H }),
+      ],
+    });
+    await page.goto('/#/devices');
+    const card = page.locator('section.relays');
+    await expect(card.locator('tbody tr')).toHaveCount(3);
+    await expect(card.locator('tbody tr').nth(0)).toContainText('renew soon');
+    await expect(card.locator('tbody tr').nth(0)).toContainText('in 30 hours');
+    await expect(card.locator('tbody tr').nth(1)).toContainText('working');
+    await expect(card.locator('tbody tr').nth(1)).toContainText('in 6 days');
+    await expect(card.locator('tbody tr').nth(2)).toContainText('login expired');
+    await expect(card).toContainText('lasts seven days');
+  });
+
+  test('with no relay reporting, the Devices tab shows no relay section', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/devices');
+    await expect(page.locator('table.devices').first()).toBeVisible();
+    await expect(page.locator('section.relays')).toHaveCount(0);
+  });
+
+  test('the alert badge counts a relay that needs renewing', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/');
+    await expect(page.locator('.ovsys').first()).toBeVisible();
+    const before = Number((await page.locator('#alertbadge').textContent()) || 0);
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await stubApi(page, { relays: [relay({ login_expires_at: NOW + 5 * H })] });
+    await page.reload();
+    await expect(page.locator('.ovsys').first()).toBeVisible();
+    await expect(page.locator('#alertbadge')).toHaveText(String(before + 1));
   });
 });

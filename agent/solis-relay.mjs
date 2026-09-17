@@ -55,6 +55,7 @@ import { chromium } from 'playwright-core';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readAlarms, readPeriods } from './solis-extras.mjs';
+import { loginExpiryFromCookies, relayId, relayName, stateForError } from './relay-status.mjs';
 
 /**
  * The Worker's own secrets already live in .dev.vars, and the agent needs two
@@ -107,6 +108,36 @@ const known = new Map();
 
 let ctx = null;
 let page = null;
+
+const RELAY_ID = relayId(PROFILE);
+const RELAY_NAME = relayName(process.env.RELAY_NAME);
+let lastReportedExpiry = null;
+
+/**
+ * Tell the Worker whether this relay's SolisCloud login works and when it runs
+ * out. Called after every cycle, including one that failed, because a failed
+ * cycle is exactly when the dashboard needs to hear from us. Advisory only: it
+ * is given fifteen seconds and a failure here never fails the cycle.
+ */
+async function reportStatus(state) {
+  let loginExpiresAt = null;
+  try {
+    if (ctx) loginExpiresAt = loginExpiryFromCookies(await ctx.cookies('https://www.soliscloud.com'));
+  } catch { /* a closed browser has no cookies to read */ }
+  if (loginExpiresAt && loginExpiresAt !== lastReportedExpiry) {
+    const days = (loginExpiresAt - Date.now() / 1000) / 86400;
+    log(`SolisCloud login valid until ${new Date(loginExpiresAt * 1000).toISOString().replace('T', ' ').slice(0, 16)} UTC (${days.toFixed(1)} days)`);
+    lastReportedExpiry = loginExpiresAt;
+  }
+  try {
+    await fetch(`${SOLARLENS_URL}/api/ingest/relay`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${INGEST_TOKEN}` },
+      body: JSON.stringify({ provider: 'soliscloud', id: RELAY_ID, name: RELAY_NAME, state, loginExpiresAt }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch { /* the status is a courtesy; the reading already went or failed on its own */ }
+}
 
 /** Launch Chrome, or relaunch it if the window was closed since the last cycle. */
 /**
@@ -487,15 +518,23 @@ log(`relay -> ${SOLARLENS_URL}  ${ONCE ? 'one cycle' : `every ${INTERVAL_MS / 60
 if (ONCE) {
   try {
     await cycle();
+    await reportStatus('ok');
     log('first reading pushed - setup can continue');
     await shutdown(0);
   } catch (e) {
     log(`cycle failed: ${e.message}`);
+    await reportStatus(stateForError(e));
     await shutdown(1);
   }
 }
 
 for (;;) {
-  try { await cycle(); } catch (e) { log(`cycle failed: ${e.message}`); }
+  try {
+    await cycle();
+    await reportStatus('ok');
+  } catch (e) {
+    log(`cycle failed: ${e.message}`);
+    await reportStatus(stateForError(e));
+  }
   await sleep(INTERVAL_MS);
 }
