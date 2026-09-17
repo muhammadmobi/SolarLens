@@ -481,6 +481,7 @@
               border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   .rangebtn:hover, .groupbtn:hover { border-color: var(--muted); }
   .rangesep { width: 1px; background: var(--line); margin: 2px 4px; }
+  .card.relays { margin-top: 18px; }
   .faulthist { padding: 6px 20px 18px; border-top: 1px solid var(--line-soft); }
   .fh-title { margin: 14px 0 4px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
   .fh-sum { margin-bottom: 10px; }
@@ -1424,6 +1425,58 @@
     ['consumerWarningStatus', 'Load warning'],
   ];
 
+  /**
+   * SolisCloud relays and their logins.
+   *
+   * A SolisCloud login lasts exactly seven days, and use does not extend it.
+   * Each relay reports its login's expiry after every cycle, so the page can
+   * warn two days ahead - early enough to renew without losing a reading - and
+   * say plainly once a login has run out. A relay not heard from for a week is
+   * a computer that is off, and its login is nobody's concern until it is on.
+   */
+  const RELAY_WARN_S = 2 * 86400;
+  const RELAY_QUIET_S = 7 * 86400;
+  const RENEW_HOW = 'On that computer, double-click renew-solis-login.cmd in the SolarLens folder and log in.';
+
+  function relayLogin(r, now = Math.floor(Date.now() / 1000)) {
+    const expired = r.state === 'login-expired' || (r.login_expires_at != null && r.login_expires_at <= now);
+    const left = r.login_expires_at != null ? r.login_expires_at - now : null;
+    return { expired, left, soon: !expired && left != null && left <= RELAY_WARN_S };
+  }
+
+  const untilText = (s) => s < 3600 ? 'within the hour'
+    : s < 48 * 3600 ? `in ${Math.round(s / 3600)} hours`
+    : `in ${Math.round(s / 86400)} days`;
+
+  function relayAlerts() {
+    const now = Math.floor(Date.now() / 1000);
+    const relays = (state.health?.relays ?? []).filter((r) => now - r.last_seen <= RELAY_QUIET_S);
+    // Another relay with a working login still delivers the readings, so one
+    // expired login is then something to fix, not an outage.
+    const covered = (r) => relays.some((o) => o !== r && o.state === 'ok' && !relayLogin(o, now).expired && now - o.last_seen <= 3600);
+    const out = [];
+    for (const r of relays) {
+      const l = relayLogin(r, now);
+      if (l.expired) {
+        out.push({
+          level: covered(r) ? 'warn' : 'bad',
+          title: `SolisCloud login expired on ${r.name}`,
+          detail: `${r.name} cannot send SolisCloud readings until someone logs in on it again.`
+            + (covered(r) ? ' Readings still arrive through another relay.' : '') + ` ${RENEW_HOW}`,
+          ts: r.last_seen,
+        });
+      } else if (l.soon) {
+        out.push({
+          level: 'warn',
+          title: `SolisCloud login on ${r.name} expires ${untilText(l.left)}`,
+          detail: `Renew it before then and no readings are lost. A login lasts seven days. ${RENEW_HOW}`,
+          ts: r.last_seen,
+        });
+      }
+    }
+    return out;
+  }
+
   function alertsFor(inv) {
     const out = [];
     const st = statusOf(inv);
@@ -1498,6 +1551,11 @@
       }
     }
 
+    // --- the relays that carry SolisCloud, which live on somebody's laptop ---
+    if (inv.provider === 'soliscloud') {
+      for (const a of relayAlerts()) add(a.level, a.title, a.detail, 'SolarLens', a.ts);
+    }
+
     // --- our own polling, which can fail without the vendor being at fault --
     const poll = (state.health?.polls ?? []).find((p) => p.provider === inv.provider);
     if (poll && !poll.ok) {
@@ -1515,7 +1573,7 @@
   /** What was looked at, so an empty list reads as "clear", not "not checked". */
   function checksFor(inv) {
     const list = ['feed freshness', 'vendor plant status'];
-    if (inv.provider === 'soliscloud') list.push('alarm count', 'alarm level');
+    if (inv.provider === 'soliscloud') list.push('alarm count', 'alarm level', 'relay logins');
     else list.push('inverter, service and load warning flags', 'datalogger link status');
     if (devicesFor(inv).length) list.push('device status', 'datalogger signal');
     list.push('last poll result');
@@ -1950,7 +2008,38 @@
         <thead><tr><th>Status</th><th>Device</th><th>Serial</th><th>Model</th><th>Firmware</th>
           <th>Rated / signal</th><th>Last contact</th><th>PV strings</th><th>Temp</th></tr></thead>
         <tbody>${state.devices.map(row).join('')}</tbody>
-      </table></div></section>`;
+      </table></div></section>${relaysCard()}`;
+  }
+
+  /** The SolisCloud relays, each with its login's expiry. Empty when no relay has reported. */
+  function relaysCard() {
+    const relays = state.health?.relays ?? [];
+    if (!relays.length) return '';
+    const now = Math.floor(Date.now() / 1000);
+    const rows = relays.map((r) => {
+      const l = relayLogin(r, now);
+      const [cls, text] = l.expired ? ['bad', 'login expired']
+        : r.state === 'error' ? ['warn', 'failing']
+        : l.soon ? ['warn', 'renew soon']
+        : now - r.last_seen > RELAY_QUIET_S ? ['', 'not reporting']
+        : ['ok', 'working'];
+      const login = l.expired ? 'expired'
+        : r.login_expires_at ? `until ${when(r.login_expires_at)} · ${untilText(l.left)}`
+        : 'not reported';
+      return `<tr>
+        <td><span class="pill ${cls}"><i></i>${esc(text)}</span></td>
+        <td><div class="dev-name">${esc(r.name)}</div></td>
+        <td>${esc(login)}</td>
+        <td>${esc(ago(r.last_seen))}</td>
+      </tr>`;
+    }).join('');
+    return `<section class="card relays"><h2>SolisCloud relays</h2><div class="tablewrap">
+      <table class="devices">
+        <thead><tr><th>Status</th><th>Relay</th><th>SolisCloud login</th><th>Last report</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p class="cardnote" style="margin:12px 20px 18px">A SolisCloud login lasts seven days and cannot renew itself. ${esc(RENEW_HOW)}</p>
+    </section>`;
   }
 
   // ---------- system detail ----------

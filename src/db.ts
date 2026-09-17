@@ -1,6 +1,7 @@
 import type { Device, Inverter, Reading } from './providers/types';
 import type { TokenStore } from './providers/solarman';
 import type { Alarm, Period } from './providers/events';
+import type { RelayStatus } from './relays';
 
 export interface Env {
   DB: D1Database;
@@ -600,4 +601,46 @@ export async function markDone(db: D1Database, key: string, everySec: number, no
     )
     .bind(key, String(now), now + everySec)
     .run();
+}
+
+// ---------- relays ----------
+
+/** Store a relay's report. A newer expiry replaces an older one; a report without one keeps what is known. */
+export async function upsertRelay(db: D1Database, r: RelayStatus, now = nowSec()): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO relays (id, provider, name, state, login_expires_at, first_seen, last_seen, last_ok_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, CASE WHEN ?4 = 'ok' THEN ?6 END)
+       ON CONFLICT(id) DO UPDATE SET
+         name             = COALESCE(excluded.name, relays.name),
+         state            = excluded.state,
+         login_expires_at = COALESCE(excluded.login_expires_at, relays.login_expires_at),
+         last_seen        = excluded.last_seen,
+         last_ok_at       = CASE WHEN excluded.state = 'ok' THEN excluded.last_seen ELSE relays.last_ok_at END`,
+    )
+    .bind(r.id, r.provider, r.name, r.state, r.loginExpiresAt, now)
+    .run();
+}
+
+export interface RelayRow {
+  id: string;
+  provider: string;
+  name: string | null;
+  state: string;
+  login_expires_at: number | null;
+  first_seen: number;
+  last_seen: number;
+  last_ok_at: number | null;
+}
+
+/** Relays heard from since `sinceTs`, oldest first, so their numbering is stable. */
+export async function listRelays(db: D1Database, sinceTs: number): Promise<RelayRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, provider, name, state, login_expires_at, first_seen, last_seen, last_ok_at
+       FROM relays WHERE last_seen >= ?1 ORDER BY first_seen, id`,
+    )
+    .bind(sinceTs)
+    .all<RelayRow>();
+  return results;
 }

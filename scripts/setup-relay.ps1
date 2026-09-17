@@ -239,9 +239,18 @@ try {
   } else {
     Step 5 'Signing in to SolisCloud'
 
+    # A saved session is not a working one. A SolisCloud login lasts seven days
+    # and cannot renew itself, so on a re-run the old check - "a profile folder
+    # exists, skip the login" - restarted a relay whose login had long expired,
+    # and it failed silently every cycle after. The login is checked instead:
+    # the window below closes by itself when the saved login still works, and
+    # waits for a sign-in when it does not.
     $profileDir = Join-Path $InstallDir '.relay-profile'
-    if (Test-Path (Join-Path $profileDir 'Default')) {
-      Ok 'A saved session already exists - skipping the login step'
+    $hadSession = Test-Path (Join-Path $profileDir 'Default')
+    if ($hadSession) {
+      Write-Host '    Checking the saved SolisCloud login. A Chrome window opens; if'
+      Write-Host '    SolisCloud asks you to sign in, the login had expired - sign in there.'
+      Write-Host ''
     } else {
       Write-Host '    A Chrome window will open on SolisCloud. Sign in there.'
       Write-Host ''
@@ -253,17 +262,24 @@ try {
       Write-Host '    Nothing to press afterwards - it closes itself once the first'
       Write-Host '    reading has been sent.' -ForegroundColor Yellow
       Write-Host ''
-
-      # RELAY_ONCE so it exits by itself. The old instruction was "press Ctrl+C
-      # when it says pushed", which on Windows raises "Terminate batch job
-      # (Y/N)?" inside the .cmd wrapper and leaves setup stopped half-way.
-      $env:RELAY_ONCE = '1'
-      try { npm run relay:solis } finally { Remove-Item Env:\RELAY_ONCE -ErrorAction SilentlyContinue }
-      if ($LASTEXITCODE -ne 0) {
-        Die 'The first reading was not sent - the SolisCloud sign-in did not complete. Run this again.'
-      }
-      Ok 'Signed in, and the first reading is through'
     }
+
+    # RELAY_ONCE so it exits by itself. The old instruction was "press Ctrl+C
+    # when it says pushed", which on Windows raises "Terminate batch job
+    # (Y/N)?" inside the .cmd wrapper and leaves setup stopped half-way.
+    # RELAY_HEADLESS=0 overrides the 1 a previous install wrote to .dev.vars: a
+    # headless browser cannot show a login page to anyone.
+    $env:RELAY_ONCE = '1'
+    $env:RELAY_HEADLESS = '0'
+    try { npm run relay:solis }
+    finally {
+      Remove-Item Env:\RELAY_ONCE -ErrorAction SilentlyContinue
+      Remove-Item Env:\RELAY_HEADLESS -ErrorAction SilentlyContinue
+    }
+    if ($LASTEXITCODE -ne 0) {
+      Die 'The first reading was not sent - the SolisCloud sign-in did not complete. Run this again.'
+    }
+    Ok ($(if ($hadSession) { 'SolisCloud login works, and a reading is through' } else { 'Signed in, and the first reading is through' }))
 
     # Hide it from now on.
     (Get-Content $devVars) -replace '^RELAY_HEADLESS=0$', 'RELAY_HEADLESS=1' |

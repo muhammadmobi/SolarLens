@@ -27,7 +27,7 @@ export default defineConfig({
       // public-view.ts was missing from this list until 2026-09-11, which meant
       // the one file deciding which vendor identifiers leave the Worker was the
       // one file not being measured. It sits at 100% statements.
-      include: ['src/providers/**/*.ts', 'src/public-view.ts'],
+      include: ['src/providers/**/*.ts', 'src/public-view.ts', 'src/relays.ts'],
       // Type declarations compile to nothing, so they only skew the figures.
       exclude: ['src/providers/types.ts'],
       // Lowered on 2026-09-09 when src/weather.ts was removed - not broken.

@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods } from './db';
+import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
 import { tzOffsetSec } from './providers/units';
-import { aliasFor, publicAlarms, publicDevices, publicInverters, publicRows } from './public-view';
+import { aliasFor, publicAlarms, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
+import { parseRelayStatus } from './relays';
 import { plantFilter, pollAll } from './poll';
 import type { Inverter, Reading } from './providers/types';
 import {
@@ -172,11 +173,15 @@ app.get('/api/health', async (c) => {
   // a feed that has gone quiet cannot be hidden by a busier one logging over it.
   // One read, two answers: the recent history, and the newest line per feed
   // folded out of the same rows. 200 covers well over a day of both feeds.
-  const polls = await recentPolls(c.env.DB, 200);
+  const now = nowSec();
+  // Relays that have reported in the last fortnight. A laptop switched off for
+  // longer than that drops out of the list instead of warning about a login
+  // nobody is using.
+  const [polls, relays] = await Promise.all([recentPolls(c.env.DB, 200), listRelays(c.env.DB, now - 14 * 86400)]);
   const feeds = latestPerProvider(polls);
   // The footer shows every feed; the table below it wants only the recent few.
   c.header('Cache-Control', CACHE);
-  return c.json({ now: nowSec(), polls: polls.slice(0, 20), feeds });
+  return c.json({ now, polls: polls.slice(0, 20), feeds, relays: publicRelays(relays) });
 });
 
 /**
@@ -363,6 +368,20 @@ function ingestRefusal(c: { env: Env; req: { header: (n: string) => string | und
   const given = bearer(c.req.header('Authorization')) ?? '';
   return timingSafeEqual(given, token) ? null : { error: 'unauthorized', status: 401 };
 }
+
+/**
+ * A relay's report on itself: whether its SolisCloud login works, and when that
+ * login expires. Sent after every cycle, so the dashboard can warn days before
+ * a relay goes quiet instead of only noticing afterwards.
+ */
+app.post('/api/ingest/relay', async (c) => {
+  const refused = ingestRefusal(c);
+  if (refused) return c.json({ error: refused.error }, refused.status);
+  const parsed = parseRelayStatus(await c.req.json().catch(() => null), nowSec());
+  if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+  await upsertRelay(c.env.DB, parsed);
+  return c.json({ stored: true });
+});
 
 /**
  * SolisCloud alarms, as the relay reads them off the portal's alarm page.

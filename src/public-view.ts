@@ -96,3 +96,14 @@ export function publicRows<T extends { inverter_id: string }>(rows: T[], alias: 
 export function publicAlarms<T extends { id: string; inverter_id: string }>(rows: T[], alias: Alias) {
   return rows.map((r) => ({ ...omit(r, ['id']), inverter_id: alias(r.inverter_id) }));
 }
+
+/**
+ * Relays for a public response.
+ *
+ * The relay's own id stays in the database. Each relay is named by the
+ * nickname its owner gave it, or by its order - "Relay 1", "Relay 2" - counted
+ * over every relay listed, so a relay keeps its number while it keeps reporting.
+ */
+export function publicRelays<T extends { id: string; name: string | null }>(rows: T[]) {
+  return rows.map((r, i) => ({ ...omit(r, ['id']), name: r.name || `Relay ${i + 1}` }));
+}
