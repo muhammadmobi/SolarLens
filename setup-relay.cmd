@@ -9,30 +9,36 @@ REM stays open when it did not, so the message saying why can still be read.
 REM
 REM The -ExecutionPolicy Bypass is scoped to this one invocation; it does not
 REM change any machine setting.
+REM
+REM Everything after setlocal sits in one parenthesised block on purpose. cmd
+REM reads a batch file a line at a time while it runs, and setup updates the
+REM code - this file included. A file replaced underneath a running batch
+REM carries on from the same byte offset in the new text, which in a test ran
+REM half a line as a command. A block is read whole before any of it runs.
 
 setlocal
 set "HERE=%~dp0"
-
-if exist "%HERE%scripts\setup-relay.ps1" (
-  REM Running from inside a checkout.
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%HERE%scripts\setup-relay.ps1" %*
-) else (
-  REM Copied somewhere on its own: fetch the script straight from the repo.
-  echo Fetching the setup script from GitHub...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$u='https://raw.githubusercontent.com/muhammadmobi/SolarLens/main/scripts/setup-relay.ps1';" ^
-    "$f=Join-Path $env:TEMP 'solarlens-setup-relay.ps1';" ^
-    "try { Invoke-WebRequest -Uri $u -OutFile $f -UseBasicParsing } catch { Write-Host 'Could not download the setup script. Check your internet connection.' -ForegroundColor Red; exit 1 };" ^
-    "& $f %*"
-)
-
-if errorlevel 1 (
+(
+  if exist "%HERE%scripts\setup-relay.ps1" (
+    REM Running from inside a checkout.
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%HERE%scripts\setup-relay.ps1" %*
+  ) else (
+    REM Copied somewhere on its own: fetch the script straight from the repo.
+    echo Fetching the setup script from GitHub...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$u='https://raw.githubusercontent.com/muhammadmobi/SolarLens/main/scripts/setup-relay.ps1';" ^
+      "$f=Join-Path $env:TEMP 'solarlens-setup-relay.ps1';" ^
+      "try { Invoke-WebRequest -Uri $u -OutFile $f -UseBasicParsing } catch { Write-Host 'Could not download the setup script. Check your internet connection.' -ForegroundColor Red; exit 1 };" ^
+      "& $f %*"
+  )
+  if errorlevel 1 (
+    echo.
+    echo  Setup did not finish - the message above says why.
+    pause
+    exit /b 1
+  )
   echo.
-  echo  Setup did not finish - the message above says why.
-  pause
-  exit /b 1
+  echo  Closing in 5 seconds.
+  "%SystemRoot%\System32\timeout.exe" /t 5 >nul
+  exit /b 0
 )
-echo.
-echo  Closing in 5 seconds.
-"%SystemRoot%\System32\timeout.exe" /t 5 >nul
-exit /b 0

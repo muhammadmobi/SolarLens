@@ -70,6 +70,15 @@ Renewing and updating a relay now shows nothing when nothing needs doing.
   does not close within fifteen seconds, the relay closes it the hard way.
 - A relay attached to your own Chrome (`RELAY_CDP`) is no longer refused as
   having no saved session when run hidden.
+- **`renew-solis-login.cmd` and `setup-relay.cmd` no longer trip over their own
+  update.** Both run a script that pulls new code, and that can replace the
+  `.cmd` file itself while it is still running. cmd reads a batch file a line at
+  a time and carries on from the same byte offset in whatever the file now
+  says: in a test, a file rewritten under a running batch went on to run half a
+  line as a command. Each is now one parenthesised block, which cmd reads whole
+  before running any of it. This protects updates from 2.5.0 on; the files in a
+  2.4 checkout are still the old shape, so move a computer to 2.5.0 with
+  `setup-solarlens-relay.cmd`, which lives outside the repository.
 
 ## [2.4.1] — 2026-09-17
 
