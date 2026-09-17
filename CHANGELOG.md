@@ -14,6 +14,60 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [2.4.0] — 2026-09-17
+
+Warning before a relay's SolisCloud login runs out, and renewing it in one
+double-click.
+
+### Added
+
+- **The dashboard warns before a relay's SolisCloud login expires.** A
+  SolisCloud web login lasts exactly seven days, and using it does not extend it:
+  a login made at 14:53 UTC carries a login cookie expiring at 14:53 UTC seven
+  days later, however often the relay uses it in between. The login page carries
+  hCaptcha, so a relay cannot renew its own login. Twice in one week that ended
+  the same way - a hidden, headless relay failed every cycle where nobody could
+  see it, and on the dashboard it looked exactly like the plant being down.
+
+  Each relay now reads its login's expiry from the portal's own cookie and
+  reports it, with whether its last cycle worked, after every cycle. The Alerts
+  tab warns two days ahead and says plainly once a login has run out, naming the
+  computer and the fix. When another relay still delivers, an expired login is a
+  warning rather than an outage, and a relay silent for over a week - a computer
+  that is off - raises nothing. The Devices tab lists every relay with its state,
+  its login's expiry and its last report.
+
+- **`renew-solis-login.cmd`: renewing a login is one double-click.** It stops the
+  hidden relay, updates the code, runs the relay once in a visible window, and
+  starts the hidden relay again. When the saved login still works it sends a
+  reading without asking; when it has expired, the window waits for you to log
+  in. A relay task disabled on purpose is left disabled.
+
+- **`RELAY_NAME`** gives a relay a nickname for the dashboard, such as *Office
+  laptop*. Without one, relays are *Relay 1*, *Relay 2*, in the order they first
+  reported.
+
+### Changed
+
+- **Re-running the installer checks the saved login instead of skipping it.**
+  `setup-relay.cmd` used to skip the login step whenever a saved browser session
+  folder existed, even when the login inside it had expired, and restarted a
+  relay that could not deliver. It now runs the relay once visibly either way:
+  the window closes by itself when the login works and waits when it does not.
+
+- **`GET /api/health` also lists SolisCloud relays** heard from in the last 14
+  days, with their login expiry. `POST /api/ingest/relay` receives their reports,
+  validated to a narrow shape. Migration 0011 adds the table.
+
+### Security
+
+- **A relay is never identified by its computer's name.** A Windows computer name
+  often carries a company prefix and a person's user name, and the relay list is
+  on a public page. Each relay makes a random id for itself, kept beside its
+  browser profile; the Worker refuses anything else as an id, and the id never
+  leaves the database. The nickname is cut down to letters, digits and a little
+  punctuation before it is stored.
+
 ## [2.3.0] — 2026-09-16
 
 Fault history, history back to installation, battery charge through the day,
@@ -699,6 +753,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.4.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.0.0...v2.1.0

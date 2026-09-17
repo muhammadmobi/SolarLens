@@ -53,6 +53,11 @@ SOLIS_PLANT_IDS=
 RELAY_CDP=
 RELAY_HEADLESS=
 
+# A nickname the dashboard shows for this relay, such as "Office laptop", beside
+# its SolisCloud login expiry. Shown on a public page, so keep it vague. Unset:
+# the dashboard calls it "Relay 1", "Relay 2" in the order relays first reported.
+RELAY_NAME=
+
 # Minutes between relay pushes (default 5), and an explicit Chrome binary if it
 # is not installed in one of the usual places. Both optional.
 RELAY_INTERVAL_MIN=

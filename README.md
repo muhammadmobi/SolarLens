@@ -313,6 +313,8 @@ To keep it alive: `pm2 start agent/solis-relay.mjs --name solis-relay`, or a
 - It reads `.dev.vars` itself, and clears its own stale Chrome profile lock if a previous run was killed.
 - **It retries a failed browser launch** twice with a short backoff, and clears the `Singleton*` files Chrome leaves when a machine is shut down under it — but only when nothing holds the profile, because a live Chrome owns those files. Without this, the first cycle after a restart fails and Solis loses a whole interval: Chrome starts, exits before Playwright can speak to it, and the error is not the one a message-matching retry would recognise.
 - **Hourly it also reads the plant's alarm history, and daily the vendor's own period totals**, by setting the alarm page's Status filter to Recovered and pressing Month, Lifetime and Year on the plant's chart - again waiting for the portal's own signed responses. The first cycle after the relay starts reads every page of alarms and steps back through every year of totals, which adds about a minute to that one cycle; later cycles read only the newest page and the current year. Neither step can cost the live reading: both run last and a failure is logged and skipped.
+- **After every cycle it reports whether its SolisCloud login works, and when that login runs out.** A SolisCloud web login lasts exactly seven days and using it does not extend it, and the login page carries hCaptcha, so a relay cannot renew its own login: once a week, someone logs in again. The relay reads the expiry from the portal's own login cookie, so the date is exact, and the dashboard warns two days ahead on the Alerts tab and lists every relay's expiry on the Devices tab. Each relay is named by `RELAY_NAME` if you set one, such as *Office laptop*, or else *Relay 1*, *Relay 2*. It identifies itself to the Worker with a random id it keeps beside its browser profile, never the computer's name, and that id never appears on the dashboard.
+- **To renew a login, double-click `renew-solis-login.cmd`** in the SolarLens folder on that computer. It stops the hidden relay, updates the code, opens a Chrome window, sends a reading as soon as the login works, and starts the hidden relay again. If the saved login is still valid, it sends the reading without asking. Re-running `setup-relay.cmd` now does the same check, instead of skipping the login whenever a saved session folder exists.
 - `RELAY_ONCE=1` runs a single cycle and exits with a code that says whether it worked. The installer uses it for the sign-in step, so that step ends by itself instead of asking anyone to press Ctrl+C — which on Windows raises *Terminate batch job (Y/N)?* inside a `.cmd` and strands the installer half-finished.
 
 ### Running it on more than one machine
@@ -431,7 +433,8 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 | `CF_D1_DATABASE_ID` | `scripts/wrangler.mjs` | Your D1 id, substituted into a temporary config so the real one stays out of git. Every `npm run` wrangler script needs it. |
 | `SOLARLENS_URL` | relay agent | Where to POST readings, e.g. `https://solar-lens.<your-subdomain>.workers.dev`. |
 | `SOLIS_PLANT_IDS` | relay agent | Which Solis plants to relay. Unset = all of them. |
-| `RELAY_HEADLESS` | relay agent | `1` runs the relay browser invisibly. Set `0` and run by hand when you need to log in again. |
+| `RELAY_HEADLESS` | relay agent | `1` runs the relay browser invisibly. `renew-solis-login.cmd` overrides it for its one visible run. |
+| `RELAY_NAME` | relay agent | A nickname the dashboard uses for this relay, such as `Office laptop`. Shown publicly, so keep it vague. Unset = *Relay 1*, *Relay 2*. |
 | `RELAY_CDP` | relay agent | Attach to an already-running Chrome, e.g. `http://127.0.0.1:9222`, instead of starting one. Set by `setup-relay.cmd -UseMyChrome`. |
 | `RELAY_INTERVAL_MIN` | relay agent | Minutes between pushes (default 5). |
 | `RELAY_ONCE` | relay agent | `1` runs one cycle and exits with a code saying whether it worked. Used by the installer's sign-in step; not set in normal running. |
@@ -485,7 +488,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**169 unit tests** and **248 end-to-end tests** (124 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**187 unit tests** and **266 end-to-end tests** (133 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -497,7 +500,7 @@ npm run test:e2e:ui         # playwright's inspector, for stepping through a fai
 
 ### Unit tests — `tests/unit/`
 
-Eleven files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
+Twelve files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
 - **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
@@ -509,11 +512,12 @@ Eleven files, one concern each. They are all pure-function tests against fixture
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
 - **`extras.test.ts`** — the hourly and daily schedule for those reads: what the first run walks back through, what later runs skip, and that an empty current year in January does not stop the walk.
+- **`relays.test.ts`** — a relay's report on itself: what the Worker refuses, including a computer name offered as an id; the login expiry read from the portal's cookie; the random id a relay keeps; and relays named by nickname or order, never by id.
 - **`timezone.test.ts`** — the three shapes a vendor states a timezone in, and where a plant's day begins once one is known: east and west of Greenwich, on it, and on the half hour.
 
 ### End-to-end tests — `tests/e2e/`
 
-One spec file of 124 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
+One spec file of 133 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
 
 They assert what a person sees, grouped by what it is for: the overview and its layout at both widths, the theme toggle (including that the choice is applied before first paint), the labelled header totals, the energy-flow diagram (structure, direction from the signs, wire thickness tracking power, per-diagram marker ids), the battery panel and the derived cycle count, offline handling and zeroed figures, the Alerts tab, the collapsible Power sections and the clickable chart legend, the device inventory, raw telemetry filtering, and the token-gate guidance.
 
@@ -525,14 +529,15 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **Enforced** — `src/providers/` + `src/public-view.ts` | **85.3%** | **68.2%** | **87.8%** | **87.3%** |
-| &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 90% | **100%** | **100%** |
+| **Enforced** — `src/providers/`, `src/public-view.ts`, `src/relays.ts` | **85.9%** | **69.5%** | **88.1%** | **87.9%** |
+| &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 92% | **100%** | **100%** |
+| &nbsp;&nbsp;`relays.ts` — a relay's report, validated | **100%** | **100%** | **100%** | **100%** |
 | &nbsp;&nbsp;`events.ts` — alarms and period totals | 98% | 81% | 100% | 100% |
 | &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 92% | 91% | 100% | 100% |
 | &nbsp;&nbsp;`solarman.ts` | 85% | 63% | 78% | 85% |
 | &nbsp;&nbsp;`soliscloud.ts` | 84% | 63% | 88% | 86% |
 | &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 70% | 66% | 71% | 73% |
-| All of `src/`, Worker-only code included | 57.1% | 50.4% | 60.8% | 57.7% |
+| All of `src/`, Worker-only code included | 57.4% | 51.6% | 60.2% | 58.0% |
 | Thresholds enforced in CI | **80%** | **63%** | **80%** | **80%** |
 
 Two figures, because there are two honest answers. The enforced one measures what
@@ -602,7 +607,7 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 |---|---|---|
 | `GET /api/latest` | open | newest reading per inverter, with `metrics` |
 | `GET /api/series?from=&to=&tz=` | open | readings in a range (≤ 31 days). Omit `from` and the window opens at the earliest plant's own midnight; `tz` is the fallback for a plant whose vendor reports no timezone |
-| `GET /api/health` | open | recent poll log and the newest line per feed |
+| `GET /api/health` | open | recent poll log, the newest line per feed, and each SolisCloud relay heard from in the last 14 days with its login's expiry. Relay ids are never returned |
 | `GET /api/history?days=&tz=` | open | one row per inverter per day, each cut at that plant's own midnight (`tz` is the fallback, the caller's UTC offset in minutes) |
 | `GET /api/devices` | open | hardware inventory |
 | `GET /api/alarms?days=` | open | fault history, newest first (default 730 days). An alarm's internal id is never returned, since it contains the vendor's plant id |
@@ -612,6 +617,7 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |
 | `POST /api/ingest/devices` | INGEST_TOKEN | push raw vendor device records (`{provider, plantId, inverters[], collectors[]}`); normalised server-side |
 | `POST /api/ingest/history` | INGEST_TOKEN | backfill a day curve; rejects a peak above 5× nameplate |
+| `POST /api/ingest/relay` | INGEST_TOKEN | a relay's report on itself (`{provider, id, name?, state: ok\|login-expired\|error, loginExpiresAt?}`), validated to that narrow shape |
 | `POST /api/ingest/alarms` | INGEST_TOKEN | raw SolisCloud alarm records (`{provider, plantId, records[]}`), normalised and stripped of owner fields in the Worker |
 | `POST /api/ingest/periods` | INGEST_TOKEN | raw SolisCloud chart totals (`{provider, plantId, which: month\|year\|all, points[]}`); rejects a total the nameplate could not produce |
 | `GET /auth?t=` | — | set the cookie the write routes accept |
@@ -634,13 +640,15 @@ solar-lens/
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log
 │                              0009 the plant's own UTC offset on inverters
-│                              0010 alarms and vendor period totals)
+│                              0010 alarms and vendor period totals
+│                              0011 SolisCloud relays and their login expiry)
 ├── src/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
 │   ├── poll.ts               builds providers from present secrets; polls; plant filter;
 │   │                         hourly alarms and daily period totals
 │   ├── db.ts                 D1 queries and the Env type
 │   ├── public-view.ts        strips vendor identifiers from public responses
+│   ├── relays.ts             validates a relay's report on itself
 │   └── providers/
 │       ├── types.ts          Provider / Inverter / Reading / Metrics
 │       ├── units.ts          W / kWh / timestamp normalisation
@@ -659,11 +667,14 @@ solar-lens/
 │       icon-512.png
 ├── agent/
 │   ├── solis-relay.mjs       local Chrome relay for SolisCloud
-│   └── solis-extras.mjs      its slower reads: alarm history and period totals
+│   ├── solis-extras.mjs      its slower reads: alarm history and period totals
+│   └── relay-status.mjs      login expiry, and the relay's random id and nickname
 ├── setup-relay.cmd           double-click entry point for the relay installer
+├── renew-solis-login.cmd     double-click when a SolisCloud login needs renewing
 ├── scripts/
 │   ├── wrangler.mjs             fills CF_D1_DATABASE_ID into a temp config
 │   ├── setup-relay.ps1          installs the relay on a machine, start to finish
+│   ├── renew-solis-login.ps1    renews the login and restarts the hidden relay
 │   ├── relay-hidden.vbs         starts the relay with no console window
 │   ├── make-laptop-installer.ps1  writes a pre-filled installer for a 2nd machine
 │   ├── rotate-tokens.ps1        replaces API_TOKEN / INGEST_TOKEN in both places
@@ -684,6 +695,7 @@ solar-lens/
 │   ├── unit/events.test.ts      alarms and period totals from both vendors
 │   ├── unit/extras.test.ts      the hourly and daily schedule for them
 │   ├── unit/timezone.test.ts    plant timezones and where a plant's day begins
+│   ├── unit/relays.test.ts      relay reports, login expiry, and relay naming
 │   ├── fixtures/               captured vendor payloads, scrubbed of identifiers
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first
@@ -701,8 +713,9 @@ solar-lens/
 | `soliscloud: HTTP 403/401` on official API | Key not activated, or API access not enabled on the account. Check Basic Settings → API Management. |
 | `solarman: token refused` | Wrong `appId`/`appSecret`, or the password hash is not lowercase sha256 hex. |
 | SolarMan panel goes stale after ~24 h | The refresh grant failed; re-copy the refresh token (you may have logged out of SolarMan). Check `GET /api/health`. |
-| Solis reads **offline** although the plant is producing, and the footer's SolisCloud feed is hours old | The relay's SolisCloud login has expired. A hidden, headless relay cannot show a login page, so every cycle fails where nobody sees it. From the repository folder run `RELAY_HEADLESS=0 RELAY_ONCE=1 node agent/solis-relay.mjs`, log in in the window it opens, and once it prints *first reading pushed* start the background relay again (on Windows, the *SolarLens relay* scheduled task). |
-| Relay console: *session expired* | Same cause as above; the relay only says so in its own console. |
+| Alerts: *SolisCloud login on … expires in …* or *has expired* | A SolisCloud login lasts seven days and cannot renew itself. On the computer named in the alert, double-click `renew-solis-login.cmd` and log in. The alert clears on that relay's next report. |
+| Solis reads **offline** although the plant is producing, and the footer's SolisCloud feed is hours old | Either every relay's login has expired, which the Devices tab shows, or the computers running relays are asleep or off. A relay only works while its computer is awake: set sleep to *Never* when plugged in. Renew a login with `renew-solis-login.cmd`. |
+| Relay console: *session expired* | The login has expired; renew it with `renew-solis-login.cmd`. By hand: `RELAY_HEADLESS=0 RELAY_ONCE=1 node agent/solis-relay.mjs`, log in, then start the hidden relay again. |
 | Deploy: *register a workers.dev subdomain* | One-time account step; follow the printed link or pick a name in the dashboard, then deploy again. |
 | PowerShell: *The token '&&' is not valid* | Run the two commands on separate lines. |
 | A shared plant you don't own shows up | Set `INCLUDE_PLANTS` to the ids you want. |
