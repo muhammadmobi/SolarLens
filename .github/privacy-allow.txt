@@ -12,6 +12,8 @@
 300000002             # demo SolarMan alarm id, tests/unit/events
 212008641             # invented device serial, tests/unit/normalize
 233151400             # invented device serial, tests/unit/normalize
+3000000000000000003   # invented inverter id, tests/unit/worker-routes
+4000000000000000004   # invented datalogger id, tests/unit/worker-routes
 1000000000000000001   # demo SolisCloud plant, tests/fixtures/solis-station
 2000000000000000002   # demo SolisCloud plant, tests/unit/events
 10000000000           # demo plant id, tests/unit/pii
