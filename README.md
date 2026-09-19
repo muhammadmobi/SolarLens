@@ -769,7 +769,6 @@ solar-lens/
 │   ├── workflows/security.yml  CodeQL, dependency review, audit, secrets, lint
 │   ├── workflows/deploy.yml  migrations, deploy, smoke test, rollback
 │   ├── workflows/release.yml  the release button: tag and publish the notes
-│   ├── dependabot.yml        one grouped update pull request a week
 │   └── privacy-allow.txt     long numbers the privacy guard may let through
 ├── tsconfig.json             typecheck for src/
 ├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
