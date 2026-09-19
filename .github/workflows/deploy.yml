@@ -1,0 +1,114 @@
+# What happens after a merge, in order.
+#
+# It starts only when Checks has passed on main, so a merge that combines two
+# changes which each passed alone cannot reach the live dashboard. Then it
+# stops and waits: the `production` environment carries a required reviewer, so
+# nothing is deployed until a person approves the run on GitHub.
+#
+# After deploying, the live site is asked whether it actually works. If it does
+# not, the version that was serving a minute ago is put back automatically.
+
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [Checks]
+    types: [completed]
+  # For a deploy of the current main without a new commit - re-running a failed
+  # deploy, or pushing out a rollback of a rollback.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and never cancel one half-way.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to production
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The approval gate. Its secrets are the only place the Cloudflare token and
+    # the deployment's address exist.
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
+      SOLARLENS_URL: ${{ secrets.SOLARLENS_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The exact commit that passed its checks, not whatever main says by
+          # the time a person gets round to approving.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # Two commits, so the relay note below can see what this merge changed.
+          fetch-depth: 2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Remember the version serving right now
+        id: before
+        run: echo "version=$(node scripts/ci/worker-version.mjs)" >> "$GITHUB_OUTPUT"
+
+      # Migrations are additive by rule, so the version currently serving keeps
+      # working against the new schema - which is what makes a rollback of the
+      # Worker alone a safe answer.
+      - name: Apply database migrations
+        run: npm run db:remote
+
+      - name: Deploy the Worker
+        run: npm run deploy
+
+      - name: Ask the live site whether it works
+        id: smoke
+        run: node scripts/ci/smoke.mjs
+
+      - name: Put the previous version back
+        if: failure() && steps.before.outputs.version != ''
+        run: |
+          echo "The deploy or its smoke test failed - rolling back to ${{ steps.before.outputs.version }}"
+          npm run cf -- rollback "${{ steps.before.outputs.version }}" --yes \
+            --message "Smoke test failed for ${{ github.event.workflow_run.head_sha || github.sha }}"
+          {
+            echo "### Rolled back"
+            echo
+            echo "The deploy failed its smoke test, so version \`${{ steps.before.outputs.version }}\` was put back."
+            echo "The run is marked failed on purpose - the logs above say which check failed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Say whether the relay computers need updating
+        if: success()
+        run: |
+          changed=$(git diff --name-only HEAD^ HEAD || true)
+          {
+            echo "### Deployed"
+            echo
+            echo "Commit \`${{ github.event.workflow_run.head_sha || github.sha }}\` is live, and the smoke test passed."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if echo "$changed" | grep -qE '^(agent/|scripts/(setup-relay|renew-solis-login|relay-hidden)\.|.*\.cmd$)'; then
+            {
+              echo
+              echo "**The relay computers need updating.** This change touches the code that runs on them:"
+              echo
+              echo '```'
+              echo "$changed" | grep -E '^(agent/|scripts/|.*\.cmd$)' || true
+              echo '```'
+              echo
+              echo "On each relay laptop, double-click \`setup-solarlens-relay.cmd\`, or \`renew-solis-login.cmd\` in the SolarLens folder."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if echo "$changed" | grep -q '^scripts/make-laptop-installer.ps1$'; then
+            echo "Also make a new \`setup-solarlens-relay.cmd\`: its generator changed." >> "$GITHUB_STEP_SUMMARY"
+          fi

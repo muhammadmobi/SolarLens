@@ -1,0 +1,78 @@
+# The release button: tag a version and publish its notes.
+#
+# Run it from the Actions tab, giving the version. It refuses unless the
+# repository is actually ready - package.json carrying that version, a changelog
+# section for it, a link reference at the bottom, and no tag of that name yet -
+# because every one of those has been got wrong by hand here.
+#
+# The tag is pushed by its full ref name. A branch that shares a tag's name
+# makes a plain `git push origin <name>` ambiguous, which is exactly what
+# stopped a release on 17 September.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the v (for example 2.6.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Tags and the whole history, so an existing tag is seen.
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: The version, the changelog and the tag must agree
+        run: node scripts/ci/release-notes.mjs "${{ inputs.version }}" --out release-notes.md
+
+      # The notes are published to a public page, so they go through the same
+      # check as the code.
+      - name: The notes must carry no identifiers
+        run: |
+          PR_BODY="$(cat release-notes.md)" node scripts/ci/check-privacy.mjs --no-worktree
+        env:
+          PRIVACY_VALUES: ${{ secrets.PRIVACY_VALUES }}
+
+      - name: Tag this commit
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git -c user.name=muhammadmobi \
+              -c user.email=162428635+muhammadmobi@users.noreply.github.com \
+              tag "v${VERSION}" "${GITHUB_SHA}"
+          git push origin "refs/tags/v${VERSION}:refs/tags/v${VERSION}"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "v${VERSION}" \
+            --title "SolarLens v${VERSION}" \
+            --notes-file release-notes.md \
+            --latest
+          {
+            echo "### Released v${VERSION}"
+            echo
+            echo "Tagged \`${GITHUB_SHA}\` and published the notes from CHANGELOG.md."
+          } >> "$GITHUB_STEP_SUMMARY"
