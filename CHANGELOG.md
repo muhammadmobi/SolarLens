@@ -14,6 +14,64 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [2.7.0] — 2026-09-19
+
+The Worker's own routes, SQL and cron are tested for the first time, against a
+real database.
+
+### Added
+
+- **A database to test against, in `tests/helpers/d1.ts`.** D1 is SQLite, and
+  Node ships one: this puts `node:sqlite` behind the D1 interface, applies the
+  project's own migrations to it, and rewrites D1's `?1` placeholders to the
+  named form SQLite binds. The SQL a test exercises is therefore the SQL that
+  runs in production, and the queries had never been run by any test before.
+  It also refuses a bound value D1 would refuse, which turns a `D1_TYPE_ERROR`
+  in production into a failing test - it caught one such call while being
+  written.
+
+- **The Worker itself, in `tests/helpers/worker.ts`**: its exported fetch and
+  cron handlers, called with that database, a stub for the static-assets binding
+  and whichever tokens the case is about. Five new suites use it:
+
+  - `worker-routes.test.ts` - the security headers on an API response *and* on
+    the page the asset binding serves; reads open and writes refused, including
+    one token not opening the other's route; `/auth`'s cookie; every ingest
+    route's contract and what each refuses; the identifiers proved absent from
+    what is served; the cron entry point.
+  - `worker-edges.test.ts` - the generic ingest route, a Worker deployed with no
+    `API_TOKEN`, the poll log's trimming and its newest line per provider, the
+    token store, and the hardware fan-out that fetches each inverter's own page.
+  - `poll.test.ts` - which providers are built from which secrets, the
+    `INCLUDE_PLANTS` filter, a provider that throws not costing the other one, a
+    failing hardware list not costing the reading it came with, and the extras'
+    hourly and daily schedules including the first run's walk back through the
+    years until one comes back empty.
+  - `readings.test.ts` - SolisCloud's inverter page, with the portal's export
+    sign flipped to this project's "+ import"; SolarMan's per-device registers
+    layered over its station snapshot, including a register present but empty,
+    which must not be read as zero.
+  - `sparse.test.ts` - what happens when a vendor sends almost nothing: nulls
+    rather than zeros, an empty database answering every read, a device merged
+    rather than overwritten by a thinner second view, and an id with no alias
+    answered as `unknown` rather than echoed back.
+
+### Changed
+
+- **Coverage is measured over all of `src/` and enforced far higher.** One
+  honest figure replaces two: 97.1% of statements, 84.7% of branches, 97.5% of
+  functions and 99.3% of lines, against an enforced scope that used to leave out
+  `index.ts`, `db.ts` and `poll.ts` because nothing could reach them. Thresholds
+  rise from 80/63/80/80 to **95/82/95/97**. 275 unit tests, up from 189.
+
+  Branches stay below the rest deliberately, and the README says why: the vendor
+  payloads are long chains of optional fields and v8 counts every arm, so the
+  last few points would mean a fixture per arm for figures already proved.
+
+- The unit suite runs in forked processes with `--experimental-sqlite`, set in
+  `vitest.config.ts` rather than in an environment variable, so `npx vitest`
+  behaves the same as `npm test` on any shell. Node 24 and newer ignore the flag.
+
 ## [2.6.0] — 2026-09-19
 
 Every change now has to pass twelve checks before it can merge, and reaching
@@ -923,6 +981,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.7.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/muhammadmobi/SolarLens/compare/v2.4.0...v2.4.1
