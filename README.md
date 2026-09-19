@@ -669,6 +669,47 @@ dependency with a published vulnerability is separate: GitHub opens that as soon
 as the advisory lands, once **Dependabot alerts** are switched on in the
 repository's settings - which is a settings change, not a file in here.
 
+### What happens after a merge
+
+`.github/workflows/deploy.yml` runs only when **Checks** has passed on `main`,
+so a merge that combines two changes which each passed alone cannot reach the
+live dashboard. Then it stops: the `production` environment carries a required
+reviewer, and nothing deploys until someone approves the run on GitHub.
+
+1. **Remember the version serving right now**, which is what a rollback needs.
+2. **Apply database migrations** (`npm run db:remote`). Migrations stay additive
+   by rule, so the version still serving keeps working against the new schema -
+   which is what makes rolling back the Worker alone a safe answer.
+3. **Deploy the Worker.**
+4. **Ask the live site whether it works** - `scripts/ci/smoke.mjs`: the page
+   loads and still carries its security policy, `/api/health` and `/api/latest`
+   answer, a vendor feed is current, the public responses carry no identifiers,
+   and `/api/poll` and `/api/ingest/relay` still refuse a caller with no token.
+5. **If any of that fails, the previous version is put back automatically** and
+   the run is marked failed, with the reason in its log.
+6. **The run's summary says whether the relay computers need updating**, when
+   the merge touched `agent/`, the relay scripts or a `.cmd`.
+
+`.github/workflows/release.yml` is the release button: run it from the Actions
+tab with a version, and it refuses unless `package.json` carries that version,
+the changelog has a section and a link reference for it, and no such tag exists.
+Then it scans the notes for identifiers, tags the commit, and publishes the
+release. It pushes the tag by its full ref name, because a branch sharing a
+tag's name makes a plain `git push origin <name>` ambiguous.
+
+**What the deploy needs, and where it lives.** Four values, as secrets on the
+`production` environment - never in the repository:
+
+| Secret | What it is |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | A token limited to editing Workers and D1 on one account |
+| `CLOUDFLARE_ACCOUNT_ID` | The account the Worker belongs to |
+| `CF_D1_DATABASE_ID` | The database `wrangler.jsonc` refers to by placeholder |
+| `SOLARLENS_URL` | The deployment's address, which the smoke test asks |
+
+`PRIVACY_VALUES` is a repository secret rather than an environment one, because
+the privacy guard runs on every pull request.
+
 ## Data model
 
 Five tables in D1 (`migrations/`), plus a poll log:
@@ -718,6 +759,8 @@ solar-lens/
 ├── .github/
 │   ├── workflows/checks.yml  the checks every pull request must pass
 │   ├── workflows/security.yml  CodeQL, dependency review, audit, secrets, lint
+│   ├── workflows/deploy.yml  migrations, deploy, smoke test, rollback
+│   ├── workflows/release.yml  the release button: tag and publish the notes
 │   ├── dependabot.yml        one grouped update pull request a week
 │   └── privacy-allow.txt     long numbers the privacy guard may let through
 ├── tsconfig.json             typecheck for src/
@@ -767,6 +810,9 @@ solar-lens/
 │   ├── ci/check-headers.mjs     refuses drift between the two copies of the headers
 │   ├── ci/check-cmd-shape.mjs   refuses a .cmd that its own update could break
 │   ├── ci/check-pinned-actions.mjs  refuses an action pinned to a movable tag
+│   ├── ci/smoke.mjs             asks the live site whether the deploy worked
+│   ├── ci/worker-version.mjs    the version now serving, for a rollback
+│   ├── ci/release-notes.mjs     the changelog section, if the release is ready
 │   ├── setup-relay.ps1          installs the relay on a machine, start to finish
 │   ├── renew-solis-login.ps1    renews the login and restarts the hidden relay
 │   ├── relay-hidden.vbs         starts the relay with no console window
