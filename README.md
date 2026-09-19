@@ -637,8 +637,12 @@ The guards are small Node scripts in `scripts/ci/`, each runnable by hand:
   are genuinely invented — the ids in the fixtures — are listed in
   `.github/privacy-allow.txt` with a note saying so.
 - **`check-attribution.mjs`** — refuses a commit authored by anyone but this
-  repository's account, or a message carrying a co-author trailer, an
-  assistant's name, or a "generated with" line. Dependabot's own commits pass.
+  repository's account, or a message that hands authorship to something else: a
+  co-author trailer, a "generated with" line, or a sentence crediting an
+  assistant for the work. **Naming a tool is ordinary prose and passes** - the
+  rule is about credit, not vocabulary, which the commit configuring an
+  automated reviewer proved by failing the blunter version of it. Dependabot's
+  own commits pass.
 - **`check-headers.mjs`** — refuses drift between the two copies of the security
   headers, in `src/index.ts` and `public/_headers`. They exist twice because
   Cloudflare serves `public/` without running the Worker.

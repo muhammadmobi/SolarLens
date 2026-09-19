@@ -18,11 +18,31 @@ const ALLOWED_AUTHORS = [
   'dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>',
 ];
 
-/** Phrases that must not appear in a commit message. */
+/**
+ * What must not appear in a commit message.
+ *
+ * The rule is about *credit*, not about vocabulary. Naming a tool is ordinary
+ * prose - a commit that configures an automated reviewer has to say which one -
+ * and refusing the word outright failed exactly that commit. What is refused is
+ * a message that hands authorship to something: a trailer, a "generated with"
+ * line, or a sentence crediting an assistant for the work.
+ */
+const ASSISTANT = String.raw`(claude|anthropic|copilot|chatgpt|openai|gemini|cursor)`;
 const FORBIDDEN = [
   { name: 'a co-author trailer', re: /^\s*co-authored-by:/im },
-  { name: 'an assistant named', re: /\b(claude|anthropic|copilot|chatgpt|openai)\b/i },
   { name: 'a generated-with line', re: /generated with|🤖/i },
+  {
+    name: 'credit given to an assistant',
+    re: new RegExp(
+      // "written by Claude", "authored with Copilot", "created using ChatGPT"
+      String.raw`\b(written|authored|generated|created|produced|co-?authored|made)\b[^.\n]{0,20}\b(by|with|using)\b[^.\n]{0,20}\b${ASSISTANT}\b`
+      // "Claude wrote this", "Copilot generated the tests"
+      + String.raw`|\b${ASSISTANT}\b[^.\n]{0,20}\b(wrote|authored|generated|created|produced|implemented)\b`
+      // a sign-off naming one
+      + String.raw`|^\s*(signed-off-by|assisted-by|on-behalf-of):[^\n]*\b${ASSISTANT}\b`,
+      'im',
+    ),
+  },
 ];
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
