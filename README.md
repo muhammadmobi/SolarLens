@@ -663,11 +663,19 @@ because an advisory can be published against code nobody has touched.
 The two downloaded tools are pinned to a version *and* a SHA-256, checked before
 they run.
 
-`.github/dependabot.yml` opens one grouped pull request a week for npm packages
-and one for the actions, rather than a queue of single-package ones. A
-dependency with a published vulnerability is separate: GitHub opens that as soon
-as the advisory lands, once **Dependabot alerts** are switched on in the
-repository's settings - which is a settings change, not a file in here.
+**Dependencies are updated by hand, on purpose.** There is no `dependabot.yml`:
+automatic update pull requests were tried and turned off, because a queue of
+them is work rather than safety on a project this size. What replaces them is
+deliberate: `npm outdated` says what has moved, one pull request takes the lot,
+and the checks above decide whether it may land - the same bar as any other
+change.
+
+Safety is not left to that, though. The **npm audit** job fails the build on any
+advisory in a package the Worker ships with, whether or not anyone went looking,
+and **dependency review** refuses a pull request that introduces one. Turning
+**Dependabot alerts** on in the repository's settings adds a warning when an
+advisory is published against a package already here; it only notifies, and
+opens nothing.
 
 ### What happens after a merge
 
@@ -761,7 +769,6 @@ solar-lens/
 │   ├── workflows/security.yml  CodeQL, dependency review, audit, secrets, lint
 │   ├── workflows/deploy.yml  migrations, deploy, smoke test, rollback
 │   ├── workflows/release.yml  the release button: tag and publish the notes
-│   ├── dependabot.yml        one grouped update pull request a week
 │   └── privacy-allow.txt     long numbers the privacy guard may let through
 ├── tsconfig.json             typecheck for src/
 ├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
