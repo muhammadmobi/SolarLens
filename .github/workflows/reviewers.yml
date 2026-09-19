@@ -1,0 +1,66 @@
+# Who gets asked to review, without anybody remembering to ask.
+#
+# Two reviewers on every pull request that is ready for one:
+#
+#   - Copilot, which comments on the diff. It is a second pair of eyes, not a
+#     gate: its comments never block a merge, and the twelve required checks
+#     decide that on their own.
+#   - The repository's owner, when the pull request is somebody else's - a
+#     contributor's, or one of Dependabot's. GitHub will not let anyone be
+#     asked to review their own, so their own pull requests get Copilot alone.
+#
+# Draft pull requests are left alone until they are marked ready, which is what
+# "draft" is for.
+#
+# CODEOWNERS covers the same ground for human reviewers and is kept beside this,
+# because it also drives GitHub's own "review required" rules if they are ever
+# switched on.
+
+name: Reviewers
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: reviewers-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  request:
+    name: Ask for a review
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      AUTHOR: ${{ github.event.pull_request.user.login }}
+      OWNER: muhammadmobi
+    steps:
+      # A pull request from a fork gets a read-only token, so this cannot
+      # succeed there. It says so rather than failing the run: the checks that
+      # matter are required, and a missing review request is not a reason to
+      # stop them.
+      - name: Copilot
+        run: |
+          if gh api -X POST "repos/${REPO}/pulls/${PR}/requested_reviewers" \
+               -f 'reviewers[]=copilot-pull-request-reviewer[bot]' --silent; then
+            echo "Copilot was asked to review." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Copilot could not be asked - a fork's token cannot request reviewers, and Copilot review has a monthly allowance on the free plan." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: The repository's owner, when the pull request is not theirs
+        if: github.event.pull_request.user.login != 'muhammadmobi'
+        run: |
+          if gh api -X POST "repos/${REPO}/pulls/${PR}/requested_reviewers" \
+               -f "reviewers[]=${OWNER}" --silent; then
+            echo "${OWNER} was asked to review ${AUTHOR}'s pull request." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Could not ask ${OWNER} to review." >> "$GITHUB_STEP_SUMMARY"
+          fi

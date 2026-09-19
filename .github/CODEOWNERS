@@ -1,0 +1,9 @@
+# Everything here belongs to one person, so every pull request from anyone else
+# asks them for a review automatically - a contributor's, or one of
+# Dependabot's. GitHub never asks someone to review their own pull request, so
+# this is silent on the owner's own.
+#
+# .github/workflows/reviewers.yml does the same for Copilot, which GitHub's
+# CODEOWNERS cannot name.
+
+* @muhammadmobi
