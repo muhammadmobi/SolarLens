@@ -32,7 +32,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 5. [SolisCloud relay agent](#soliscloud-relay-agent) — [one command on Windows](#one-command-on-windows) · [more than one machine](#running-it-on-more-than-one-machine) · [replacing a token](#replacing-a-token)
 6. [Configuration reference](#configuration-reference)
 7. [Local development](#local-development)
-8. [Testing](#testing)
+8. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request)
 9. [Data model](#data-model)
 10. [HTTP API](#http-api)
 11. [Project layout](#project-layout)
@@ -604,6 +604,46 @@ in the file hangs.
 
 Request signing itself (`crypto.subtle` MD5 + HMAC) only runs in the Workers runtime, so it is verified against the live API by `npm run probe:solis`.
 
+## What runs on every pull request
+
+`.github/workflows/checks.yml` runs six jobs in parallel on every pull request
+and on every push to `main`. None of them needs a secret, a Cloudflare account
+or a SolisCloud login, so a fork gets the same checks.
+
+| Job | What it catches |
+|---|---|
+| **Type check** | Shape errors in the Worker and in the tests. |
+| **Unit tests** | Failures, and coverage falling below the thresholds in `vitest.config.ts`. The report is attached to the run. |
+| **End-to-end tests** | Dashboard regressions on desktop and mobile Chrome. On failure the screenshots and traces are attached. |
+| **Build check** | A Worker that would not bundle, found by `wrangler deploy --dry-run`, which uploads nothing. |
+| **Privacy, attribution and headers** | The four guards below. |
+| **Relay scripts (Windows)** | PowerShell that will not parse, analyser errors, and a relay that hangs instead of refusing when its settings are missing. |
+
+The guards are small Node scripts in `scripts/ci/`, each runnable by hand:
+
+- **`check-privacy.mjs`** — refuses an identifier: the deployment address, an
+  email that is not a vendor's or plainly fake, a database id, a coordinate, or
+  a long number that could be a plant or station id. It reads three places: every
+  file, every commit of the pull request (patch *and* message, because a value
+  added in one commit and removed in the next still lives in the pull request's
+  ref for good), and the pull request's own description. The real values come
+  from the optional `PRIVACY_VALUES` secret, which GitHub masks; **a failure
+  names the file and line and the rule, never the text it matched.** Numbers that
+  are genuinely invented — the ids in the fixtures — are listed in
+  `.github/privacy-allow.txt` with a note saying so.
+- **`check-attribution.mjs`** — refuses a commit authored by anyone but this
+  repository's account, or a message carrying a co-author trailer, an
+  assistant's name, or a "generated with" line. Dependabot's own commits pass.
+- **`check-headers.mjs`** — refuses drift between the two copies of the security
+  headers, in `src/index.ts` and `public/_headers`. They exist twice because
+  Cloudflare serves `public/` without running the Worker.
+- **`check-cmd-shape.mjs`** — refuses a `.cmd` that is not one parenthesised
+  block with Windows line endings. Both run a script that updates the code
+  underneath them, and cmd.exe reads a batch file a line at a time.
+
+Third-party actions are pinned to a commit rather than a tag, because a tag can
+be moved after it has been reviewed.
+
 ## Data model
 
 Five tables in D1 (`migrations/`), plus a poll log:
@@ -650,6 +690,9 @@ solar-lens/
 ├── wrangler.jsonc            Worker, D1 binding, cron, static assets
 ├── .gitattributes            Windows line endings for the relay's .cmd, .ps1 and .vbs
 ├── .nvmrc                    the Node version the automated checks use
+├── .github/
+│   ├── workflows/checks.yml  the checks every pull request must pass
+│   └── privacy-allow.txt     long numbers the privacy guard may let through
 ├── tsconfig.json             typecheck for src/
 ├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
 ├── vitest.config.ts          unit test runner, coverage provider and thresholds
@@ -692,6 +735,10 @@ solar-lens/
 ├── renew-solis-login.cmd     double-click when a SolisCloud login needs renewing
 ├── scripts/
 │   ├── wrangler.mjs             fills CF_D1_DATABASE_ID into a temp config
+│   ├── ci/check-privacy.mjs     refuses an identifier in a file, commit or description
+│   ├── ci/check-attribution.mjs refuses a commit credited to anyone else
+│   ├── ci/check-headers.mjs     refuses drift between the two copies of the headers
+│   ├── ci/check-cmd-shape.mjs   refuses a .cmd that its own update could break
 │   ├── setup-relay.ps1          installs the relay on a machine, start to finish
 │   ├── renew-solis-login.ps1    renews the login and restarts the hidden relay
 │   ├── relay-hidden.vbs         starts the relay with no console window
