@@ -79,8 +79,11 @@ const rules = [
   },
   {
     name: 'a long number that could be a plant or station id',
+    // A run of digits on its own, not part of a longer word: the digits inside
+    // a pinned commit hash are not an id, and reading them as one made this
+    // check fail on its own workflow file.
     test: (line) =>
-      (line.match(/(?<![\d.])\d{8,}(?![\d.])/g) ?? []).some((n) => !isEpoch(n) && !allow.has(n)),
+      (line.match(/(?<![\w.])\d{8,}(?![\w.])/g) ?? []).some((n) => !isEpoch(n) && !allow.has(n)),
   },
   {
     name: 'a value listed in the PRIVACY_VALUES secret',
