@@ -39,9 +39,10 @@ like the rest of the repository.
 git clone https://github.com/muhammadmobi/SolarLens
 cd SolarLens
 npm ci
-npm run typecheck        # types for src/ and tests/
-npm run test:unit        # ~190 tests, a few seconds
-npm run test:e2e         # ~265 tests, about three minutes, needs Chrome
+npm run typecheck             # types for src/ and tests/
+npm run test:unit             # ~275 tests, a few seconds
+npm run test:unit:coverage    # the same, with the coverage thresholds applied
+npm run test:e2e              # ~265 tests, about three minutes, needs Chrome
 ```
 
 All of that runs with no Cloudflare account, no database and no vendor
@@ -345,10 +346,12 @@ The short history a newcomer would otherwise repeat.
 
 `docs/feature-gaps.md` is the honest list. The two that matter:
 
-- **The Worker's own routes have no test that runs them before a merge.** The
-  end-to-end suite stubs `/api/*`; the build check proves the Worker bundles;
-  the smoke test exercises the real routes, but only after deploying. A Worker
-  harness would close this.
+- ~~The Worker's own routes have no test that runs them before a merge.~~
+  **Closed in 2.7**: `tests/helpers/d1.ts` puts SQLite behind the D1 interface,
+  so every route, the SQL and the cron fan-out run in the unit suite against a
+  real database. What no unit test can reach is workerd itself - `crypto`'s MD5,
+  the asset binding, real network - which the end-to-end suite, the probe script
+  and the deploy's smoke test cover.
 - **SolisCloud's official API key** would remove the weekly login, the laptop
   and the relay entirely.
 
