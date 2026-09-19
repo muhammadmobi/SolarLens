@@ -150,8 +150,16 @@ close - see section 6. What remains:
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
 | 1 | Daylight saving on a stored offset | A plant's UTC offset is read at discovery and refreshed on every poll, so a zone that observes DST is right within five minutes of the switch and wrong for those five. Storing the zone *name* instead of the offset would remove the window entirely | S |
-| 2 | An automated test for the Worker itself | Every route, the auth middleware, the SQL and the cron fan-out are checked by deploying and by hand-run local checks, and by no automated test: the end-to-end suite serves `public/` from a static server and stubs every `/api/*` route. A Worker harness would let routes run against a real D1 in CI | M |
+| 2 | An automated test for the Worker itself | Every route, the auth middleware, the SQL and the cron fan-out are still checked by no test that runs the Worker: the end-to-end suite serves `public/` from a static server and stubs every `/api/*` route. 2.6 narrowed the exposure without closing it - a build dry run proves the Worker bundles, and the deploy's smoke test exercises the real routes against the real database, but only after the change is live, and only the handful of things a smoke test can ask. A Worker harness (`unstable_dev` or `@cloudflare/vitest-pool-workers`) would let every route run against a real D1 before the merge | M |
 | 3 | SolarMan alarm detail | The alert list names a fault and when it was raised, but not when it cleared or what to do about it. SolarMan's portal may carry both on an alert's own detail page; it has not been captured | S |
+
+## 4b. What the pipeline checks, so this list stays honest
+
+Since 2.6, nothing merges until twelve checks pass, and nothing is deployed
+until a person approves it and the live site answers a smoke test. That changes
+what "still missing" means here: a gap left in this list is a gap nobody has
+built, not one that might have been fixed and forgotten. `README.md` describes
+each check; `Security` in the repository carries what the scanners found.
 
 ## 5. Out of scope, by decision
 

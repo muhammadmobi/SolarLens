@@ -32,7 +32,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 5. [SolisCloud relay agent](#soliscloud-relay-agent) — [one command on Windows](#one-command-on-windows) · [more than one machine](#running-it-on-more-than-one-machine) · [replacing a token](#replacing-a-token)
 6. [Configuration reference](#configuration-reference)
 7. [Local development](#local-development)
-8. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request)
+8. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request) · [where the reports are](#where-the-reports-are)
 9. [Data model](#data-model)
 10. [HTTP API](#http-api)
 11. [Project layout](#project-layout)
@@ -182,6 +182,11 @@ the same day.
 ```bash
 npm run deploy
 ```
+
+This is the first deploy, from your own machine. Afterwards deploys happen
+through the pipeline: merging to `main` runs the checks, waits for a person to
+approve on GitHub, applies migrations, deploys and checks the live site - see
+[what happens after a merge](#what-happens-after-a-merge).
 
 The first deploy asks you to register a `workers.dev` subdomain (a one-time name for your account); pick one and run the deploy again. It prints your URL, e.g. `https://solar-lens.<your-subdomain>.workers.dev`.
 
@@ -718,6 +723,32 @@ tag's name makes a plain `git push origin <name>` ambiguous.
 `PRIVACY_VALUES` is a repository secret rather than an environment one, because
 the privacy guard runs on every pull request.
 
+### Where the reports are
+
+Nothing here is emailed and nothing is buried: every report is one click from
+the repository.
+
+| Report | Where |
+|---|---|
+| **Coverage**, per file | The **Unit tests** job of any run → *Artifacts* → `coverage` (HTML and lcov, kept 14 days) |
+| **End-to-end failures**: screenshots, video-free traces, the exact step | The **End-to-end tests** job of a *failed* run → *Artifacts* → `playwright-report`. Open a trace with `npx playwright show-trace <file>` |
+| **Code analysis findings** (CodeQL) | Repository → **Security** → *Code scanning* |
+| **Vulnerable dependencies** | Repository → **Security** → *Dependabot* (alerts are on; they warn and open nothing) |
+| **Leaked secrets** | Repository → **Security** → *Secret scanning*, plus the **Secret scan** job, which reads the whole history |
+| **`npm audit`, development dependencies included** | The **npm audit** job's *summary*, printed on every run |
+| **What a deploy did**, and whether the relay laptops need updating | The **Deploy** run's *summary* |
+| **Which checks a pull request passed** | The pull request's own *Checks* tab |
+
+The same things locally, without GitHub:
+
+```bash
+npm run test:unit:coverage   # writes coverage/ - open coverage/index.html
+npm run test:e2e             # writes playwright-report/ on failure
+npm audit                    # dependencies, development included
+npm audit --omit=dev         # only what the Worker ships with
+node scripts/ci/check-privacy.mjs     # the guard, over the working tree
+```
+
 ## Data model
 
 Five tables in D1 (`migrations/`), plus a poll log:
@@ -945,6 +976,10 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] Hardware inventory: Devices view, datalogger status and RSSI, per-MPPT-string PV power
 - [x] Per-system detail view with searchable raw telemetry
 - [x] Energy-flow diagram (PV / grid / battery / load), battery arm omitted for on-grid
+- [x] Checks on every pull request, required before merging: types, unit, end-to-end, build, privacy, attribution, headers, relay scripts
+- [x] Vulnerability, secret and code scanning, weekly as well as per pull request
+- [x] Deployment behind an approval, with a live smoke test and automatic rollback
+- [ ] An automated test for the Worker's own routes against a real D1 in CI — the one gap the pipeline does not close
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed
@@ -957,6 +992,15 @@ Issues and pull requests are welcome. Please:
 - add or update a fixture and a unit test for any normaliser change, and an e2e assertion for anything a person can see;
 - never commit credentials, tokens, plant ids or portal captures — the `.gitignore` is set up for this, keep it that way;
 - run `npm run typecheck && npm test` before opening a PR.
+
+The same suites run on the pull request itself, along with the privacy,
+attribution, header and batch-file guards, vulnerability scanning and a Windows
+job for the relay scripts. All twelve must pass before a pull request can merge;
+[what runs on every pull request](#what-runs-on-every-pull-request) says what
+each one refuses. Two are worth knowing before you write the commit: an
+identifier in **any** commit of the branch fails the privacy guard even if a
+later commit removes it, and every commit must be authored by the repository's
+own account with no co-author trailer.
 
 If you have a different inverter brand on the same SolarMan/Solis platform family (Deye, Sofar, …), a new provider is one file implementing `Provider` in `src/providers/` plus a fixture — contributions there are especially welcome.
 
