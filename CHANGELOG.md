@@ -14,6 +14,94 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [2.6.0] — 2026-09-19
+
+Every change now has to pass twelve checks before it can merge, and reaching
+the live dashboard takes one approval and proves itself afterwards.
+
+### Added
+
+- **Checks on every pull request**, in parallel, in about five minutes:
+  type check, unit tests with coverage, end-to-end tests, and a build dry run
+  that bundles the Worker without uploading it. None of them needs a secret, a
+  Cloudflare account or a SolisCloud login, so a fork gets the same checks.
+  All twelve are now required before anything can merge to `main`.
+
+- **Four guards written for this project.** `check-privacy` refuses an
+  identifier - the deployment address, an email that is neither a vendor's nor
+  plainly fake, a database id, a coordinate, or a long number that could be a
+  plant or station id - in any file, in **every commit of the pull request**,
+  patch and message, and in the pull request's own description. A value added in
+  one commit and removed in the next still lives in that pull request's ref for
+  good, which is how this repository's identifiers escaped in the first place.
+  Real values come from a masked secret, and a failure names the file, line and
+  rule but never prints what it matched. `check-attribution` refuses a commit
+  credited to anyone else. `check-headers` refuses drift between the security
+  headers in the Worker and the copy the asset handler serves, which exist twice
+  because Cloudflare serves `public/` without running the Worker.
+  `check-cmd-shape` refuses a `.cmd` that is not the one shape that survives the
+  update it runs.
+
+- **A Windows job for the relay's own scripts**: every PowerShell file must
+  parse, the analyser must find no errors, and the relay must refuse and exit
+  when its settings are missing rather than hang. Every bug fixed in 2.5.0 was
+  found by running those scripts by hand.
+
+- **Vulnerability and secret scanning**, on every pull request, every push to
+  `main`, and again each Monday, because an advisory can be published against
+  code nobody has touched: CodeQL with the `security-extended` rules, dependency
+  review, `npm audit`, gitleaks over the whole history, actionlint, and a check
+  that every action names a commit rather than a movable tag. Downloaded tools
+  are pinned to a version *and* a SHA-256.
+
+- **Deployment, after an approval.** A merge deploys nothing by itself: the run
+  starts only once the checks have passed on `main`, then waits on a protected
+  environment until a person approves it. It then remembers the version serving,
+  applies migrations, deploys, and **asks the live site whether it worked** -
+  the page and its security policy, health and latest answering, a vendor feed
+  that is current, no identifiers in the public responses, and the
+  token-protected routes still refusing a caller without one. Any failure puts
+  the previous version back automatically. The summary says when the relay
+  computers need updating.
+
+- **A release button.** It refuses unless `package.json`, the changelog section
+  and its link reference all name the version and no such tag exists, scans the
+  notes for identifiers, tags the commit and publishes. It pushes the tag by its
+  full ref name, because a branch sharing a tag's name made that push fail by
+  hand on 17 September.
+
+### Changed
+
+- **Dependencies are updated by hand, on purpose.** Automatic update pull
+  requests were tried for a day and turned off; the config went with them. What
+  protects the project is not a queue of pull requests but `npm audit` failing
+  the build on an advisory in anything the Worker ships with, dependency review
+  refusing one that arrives with a new package, and Dependabot alerts warning
+  when an advisory is published against something already here.
+
+- **Node 22 is pinned for the checks**, and the repository decides line endings
+  rather than each machine: `.cmd`, `.ps1` and `.vbs` now arrive with Windows
+  line endings on any checkout. They were stored with Unix endings and only
+  became Windows ones through Git for Windows' own conversion setting, so a
+  machine without it handed cmd.exe batch files it can misparse.
+
+- **hono 4.13.8**, plus the tooling: Wrangler 4.135.0, workers-types,
+  `@types/node`, Vitest and its coverage provider. Wrangler's update cleared the
+  three high advisories that stood against the development dependencies;
+  production had none.
+
+### Fixed
+
+- **A deploy could have lost the ability to undo itself, quietly.** The version
+  to roll back to was read with a command substitution inside `echo`, which
+  cannot fail: a failed lookup left it empty and the step went green. It is
+  checked now, and a run that cannot roll back says so.
+
+- Dependabot signs every commit it makes as `support@github.com`, which the
+  privacy guard read as a leaked address and refused; GitHub's own domains are
+  allowed now. The guard also read the digits inside a pinned commit hash as a
+  possible plant id, and so failed on its own workflow file.
+
 ## [2.5.0] — 2026-09-17
 
 Renewing and updating a relay now shows nothing when nothing needs doing.
@@ -835,6 +923,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.6.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.4.1...v2.5.0
 [2.4.1]: https://github.com/muhammadmobi/SolarLens/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.3.0...v2.4.0
