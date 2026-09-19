@@ -1,0 +1,44 @@
+# Dependabot watches what this project depends on and opens the update.
+#
+# Weekly rather than daily, and grouped rather than one pull request per
+# package: the point is a single review a week, not a queue. A dependency with
+# a published vulnerability is separate - GitHub opens that on its own, as soon
+# as the advisory lands, once alerts are switched on in the repository settings.
+#
+# Its commits are the one exception the attribution check allows, because the
+# alternative is turning these off.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Karachi
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    groups:
+      # Everything this project ships with, together.
+      production:
+        dependency-type: production
+      # Wrangler, Vitest, Playwright and the types: one pull request for the lot.
+      tooling:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Karachi
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]

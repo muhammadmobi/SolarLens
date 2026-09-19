@@ -1,0 +1,150 @@
+# Vulnerability and secret scanning.
+#
+# Split from checks.yml because these answer a different question - not "does
+# this change work" but "does this change, or the code around it, put anything
+# at risk" - and because two of them also run on a schedule, which the
+# per-pull-request checks do not.
+#
+# All of it is free on a public repository. Third-party tools are pinned: the
+# actions to a commit, the downloaded binaries to a version and a checksum, so
+# a moved tag or a replaced release cannot quietly change what runs here.
+
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Monday early morning UTC: a weekly sweep catches an advisory published
+    # against code nobody has touched since.
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@977e6ceaea7361825998245d787fa3b4d6b9e5df # codeql-bundle-v2.27.0
+        with:
+          languages: javascript-typescript
+          # security-extended adds the rules that are worth a look but are not
+          # in the default set, such as tainted paths and unsafe dynamic calls.
+          queries: security-extended
+      - uses: github/codeql-action/analyze@977e6ceaea7361825998245d787fa3b4d6b9e5df # codeql-bundle-v2.27.0
+        with:
+          category: /language:javascript-typescript
+
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Refuses a pull request that adds a package with a known high or critical
+      # advisory, before it is ever installed on anyone's machine.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # What the Worker ships with must be clean, and that is the line that
+      # fails the job.
+      - name: Production dependencies must be clean
+        run: npm audit --omit=dev --audit-level=low
+      # Wrangler, Vitest and Playwright are not served to anyone. An advisory
+      # there is worth seeing and worth fixing, but it is not a reason to stop a
+      # change to the dashboard, so it is reported rather than enforced.
+      - name: Development dependencies, reported only
+        if: always()
+        run: |
+          npm audit || true
+          {
+            echo "### npm audit, development dependencies included"
+            echo
+            echo '```'
+            npm audit || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Gitleaks reads history, not just the current files: a token removed
+          # in a later commit is still a token that was published.
+          fetch-depth: 0
+      # GitHub's own secret scanning is already on for this repository. This is
+      # a second pair of eyes with different rules, and it runs before a push is
+      # merged rather than after it lands.
+      - name: Install gitleaks
+        env:
+          VERSION: 8.30.1
+          SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "${SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+      - name: Scan the history
+        run: ./gitleaks detect --source . --redact --no-banner --exit-code 1
+
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A workflow file's mistakes are invisible until the day it should have
+      # run: a bad expression, a misspelled context, a shell that would never
+      # have worked. actionlint reads them the way GitHub will.
+      - name: Install actionlint
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          curl -sSfL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+      - name: Lint the workflows
+        run: ./actionlint -color
+
+  pinned-actions:
+    name: Actions are pinned
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A tag can be moved to point at different code after it was reviewed, so
+      # every third-party action here names a commit instead.
+      - run: node scripts/ci/check-pinned-actions.mjs
