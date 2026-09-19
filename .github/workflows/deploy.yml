@@ -58,9 +58,20 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # Not fatal: the very first deploy has no previous version, and a deploy
+      # is still the right thing to do. But it is said out loud, because it is
+      # the difference between a failure that undoes itself and one that waits
+      # for someone to notice.
       - name: Remember the version serving right now
         id: before
-        run: echo "version=$(node scripts/ci/worker-version.mjs)" >> "$GITHUB_OUTPUT"
+        run: |
+          if version=$(node scripts/ci/worker-version.mjs); then
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "Rollback target: $version"
+          else
+            echo "Could not read the version now serving: this run cannot roll itself back." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # Migrations are additive by rule, so the version currently serving keeps
       # working against the new schema - which is what makes a rollback of the

@@ -34,8 +34,15 @@ const ALLOW_FILE = '.github/privacy-allow.txt';
 const SKIP_FILES = /^(package-lock\.json|\.github\/privacy-allow\.txt|scripts\/ci\/check-privacy\.mjs)$/;
 const SKIP_EXT = /\.(png|ico|svg|webp|jpg|jpeg|gif|woff2?|zip)$/i;
 
-/** Domains that may appear in an address: vendor support, and addresses that are plainly not real. */
-const EMAIL_OK = /@(example\.(com|org|net|invalid)|users\.noreply\.github\.com|solarmanpv\.com|soliscloud\.com)$/i;
+/**
+ * Domains that may appear in an address: GitHub's own, the vendors' support
+ * desks, and addresses that are plainly not real.
+ *
+ * GitHub's is here because Dependabot signs every commit it makes
+ * `Signed-off-by: dependabot[bot] <support@github.com>`, and refusing that
+ * refuses every dependency update it opens.
+ */
+const EMAIL_OK = /@(example\.(com|org|net|invalid)|([\w-]+\.)*github\.com|solarmanpv\.com|soliscloud\.com)$/i;
 
 /** A ten or thirteen digit number in this range is a timestamp, not an id. */
 const isEpoch = (s) =>
