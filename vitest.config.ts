@@ -1,58 +1,52 @@
 import { defineConfig } from 'vitest/config';
 
-// Unit tests cover the pure parts of the Worker (unit scaling, vendor payload
-// normalisation, the call queue). Anything that needs the
-// Workers runtime (D1, crypto.subtle MD5) is exercised by the probe scripts and
-// the e2e suite instead.
+// The unit suite covers the Worker itself, not only the pure parts of it.
+//
+// Until 2.7 this measured the vendor adapters and the public-view redactor and
+// left out index.ts, db.ts and poll.ts - the routing, the SQL and the cron
+// fan-out - because those need a Worker and a database. They are covered now:
+// `tests/helpers/d1.ts` puts SQLite behind the D1 interface, and
+// `tests/helpers/worker.ts` calls the exported fetch and scheduled handlers
+// with it, so a test makes the same request the dashboard does and reads the
+// rows that came out the other side. What still cannot be reached from here is
+// workerd itself - `crypto.subtle`'s MD5, the asset binding, real network -
+// which the end-to-end suite, `npm run probe:solis` and the deploy's smoke test
+// cover instead.
 export default defineConfig({
   test: {
     include: ['tests/unit/**/*.test.ts'],
     environment: 'node',
     reporters: 'default',
+    // node:sqlite is stable from Node 24 and behind a flag in 22, which is the
+    // version the checks run. Passed here rather than in an environment
+    // variable so `npx vitest` behaves the same as `npm test`, on any shell.
+    pool: 'forks',
+    poolOptions: { forks: { execArgv: ['--experimental-sqlite'] } },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: 'coverage',
-      // The modules a unit test can meaningfully reach: the vendor adapters and
-      // the public-view redactor, which are pure functions over payloads.
-      //
-      // index.ts, db.ts and poll.ts are left out deliberately - request
-      // routing, D1 SQL and cron fan-out need a Worker and a database, and the
-      // Playwright suite covers them through HTTP instead. Counting them here
-      // reports a low number for code that is tested, just not here: the same
-      // suite measures 55% with them and 84% without. To see that view per
-      // file when you want it:
-      //   npx vitest run --coverage --coverage.include='src/**/*.ts'
-      //
-      // public-view.ts was missing from this list until 2026-09-11, which meant
-      // the one file deciding which vendor identifiers leave the Worker was the
-      // one file not being measured. It sits at 100% statements.
-      include: ['src/providers/**/*.ts', 'src/public-view.ts', 'src/relays.ts'],
+      // Everything the Worker ships, now that everything can be reached.
+      include: ['src/**/*.ts'],
       // Type declarations compile to nothing, so they only skew the figures.
       exclude: ['src/providers/types.ts'],
-      // Lowered on 2026-09-09 when src/weather.ts was removed - not broken.
-      // It was 95% covered, so taking it out left the same tests measured
-      // against a less-covered remainder. Nothing stopped being tested.
+      // Files at 100% are left out of the printed table, not the measurement.
+      skipFull: true,
       //
-      // Set just under what the suite actually achieves, so a regression trips
-      // them and ordinary refactoring does not. Raise these when you add
-      // tests; never lower them to make a red build go green.
+      // Set just under what the suite achieves, so a regression trips them and
+      // ordinary refactoring does not. Raise these when you add tests; never
+      // lower one to make a red build go green.
       //
-      // Branches sits lower than the rest on purpose. The vendor payloads are
-      // full of optional fields, each read through a fallback chain - pick(r,
-      // 'stationName', 'name') ?? r.id - and covering every arm means a fixture
-      // per arm for figures that are already covered on the path that matters.
-      // The three that count are held at 80.
-      //
-      // What remains uncovered is the deep paging and device-detail fan-out in
-      // the vendor clients, and the parts of the browser-session fallback that
-      // only run without official keys. `npm run probe:solis` checks the
-      // signature against the live endpoint, which no mock can.
+      // Branches sits lower than the rest on purpose, and honestly. The vendor
+      // payloads are long chains of optional fields - pick(r, 'stationName',
+      // 'name') ?? r.id - and v8 counts every arm of every chain. Covering the
+      // last few points means a fixture per arm for figures already proved on
+      // the path that matters. The other three are held above 95.
       thresholds: {
-        statements: 80,
-        branches: 63,
-        functions: 80,
-        lines: 80,
+        statements: 95,
+        branches: 82,
+        functions: 95,
+        lines: 97,
       },
     },
   },

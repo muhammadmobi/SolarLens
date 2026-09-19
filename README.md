@@ -510,7 +510,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**189 unit tests** and **266 end-to-end tests** (133 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**275 unit tests** and **266 end-to-end tests** (133 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -522,7 +522,10 @@ npm run test:e2e:ui         # playwright's inspector, for stepping through a fai
 
 ### Unit tests — `tests/unit/`
 
-Twelve files, one concern each. They are all pure-function tests against fixtures shaped like real vendor payloads: no network, no clock, no database.
+Seventeen files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; five drive the Worker itself against a real database, through the two helpers in `tests/helpers/`:
+
+- **`helpers/d1.ts`** — SQLite behind the D1 interface, with the project's own migrations applied. D1 *is* SQLite and Node ships one, so the SQL a test exercises is the SQL that runs in production. It also refuses a bound value D1 would refuse, which is how a `undefined` reaches a test rather than a deploy.
+- **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
 - **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
@@ -535,6 +538,11 @@ Twelve files, one concern each. They are all pure-function tests against fixture
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
 - **`extras.test.ts`** — the hourly and daily schedule for those reads: what the first run walks back through, what later runs skip, and that an empty current year in January does not stop the walk.
 - **`relays.test.ts`** — a relay's report on itself: what the Worker refuses, including a computer name offered as an id; the login expiry read from the portal's cookie; the random id a relay keeps; relays named by nickname or order, never by id; and the exit code that tells the renewal script to open a window for a login.
+- **`worker-routes.test.ts`** — the Worker itself, against a real database: the security headers on both an API response and the page; reads open and writes refused; `/auth`'s cookie; every ingest route's contract, including what each refuses; identifiers proved absent from what is served; and the cron entry point.
+- **`worker-edges.test.ts`** — what only happens when something is unusual: the generic ingest route, a Worker deployed with no `API_TOKEN`, the poll log's trimming and per-provider newest line, the token store, and the hardware fan-out that fetches each inverter's own page.
+- **`poll.test.ts`** — the cron fan-out: which providers get built from which secrets, `INCLUDE_PLANTS`, a provider that throws not costing the other one, a hardware list failing without costing the reading, and the extras' hourly and daily schedules including the first run's walk back through the years.
+- **`readings.test.ts`** — turning a vendor reply into a reading: SolisCloud's inverter page with the grid sign flipped to the project's convention, and SolarMan's per-device registers layered over its station snapshot, including a register that is present but empty.
+- **`sparse.test.ts`** — what happens when a vendor sends almost nothing: nulls rather than zeros, an empty database answering every read, a device merged rather than overwritten by a thinner second view, and an id with no alias answered as `unknown` rather than echoed.
 - **`timezone.test.ts`** — the three shapes a vendor states a timezone in, and where a plant's day begins once one is known: east and west of Greenwich, on it, and on the half hour.
 
 ### End-to-end tests — `tests/e2e/`
@@ -551,38 +559,39 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **Enforced** — `src/providers/`, `src/public-view.ts`, `src/relays.ts` | **85.9%** | **69.5%** | **88.1%** | **87.9%** |
+| **All of `src/`** — everything the Worker ships | **97.1%** | **84.7%** | **97.5%** | **99.3%** |
+| &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 95% | 84% | 94% | **99.5%** |
+| &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 83% | 97% | **100%** |
+| &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 89% | 92% | **100%** |
 | &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 92% | **100%** | **100%** |
 | &nbsp;&nbsp;`relays.ts` — a relay's report, validated | **100%** | **100%** | **100%** | **100%** |
-| &nbsp;&nbsp;`events.ts` — alarms and period totals | 98% | 81% | 100% | 100% |
-| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 92% | 91% | 100% | 100% |
-| &nbsp;&nbsp;`solarman.ts` | 85% | 63% | 78% | 85% |
-| &nbsp;&nbsp;`soliscloud.ts` | 84% | 63% | 88% | 86% |
-| &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 70% | 66% | 71% | 73% |
-| All of `src/`, Worker-only code included | 57.4% | 51.6% | 60.2% | 58.0% |
-| Thresholds enforced in CI | **80%** | **63%** | **80%** | **80%** |
+| &nbsp;&nbsp;`events.ts` — alarms and period totals | **100%** | 87% | **100%** | **100%** |
+| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 94% | 92% | **100%** | **100%** |
+| &nbsp;&nbsp;`solarman.ts` | 98% | 83% | **100%** | 99% |
+| &nbsp;&nbsp;`soliscloud.ts` | 98% | 83% | **100%** | 99% |
+| &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 94% | 79% | 94% | 95% |
+| Thresholds enforced in CI | **95%** | **82%** | **95%** | **97%** |
 
-Two figures, because there are two honest answers. The enforced one measures what
-a unit test can reach: pure functions over payloads.
+**There is one figure now, and it covers the whole Worker.** Until 2.7 there
+were two: an enforced scope of pure functions at 85.9%, and a whole-`src/` row
+at 57.4% that existed as a warning, because `index.ts` had no automated test of
+any kind and neither did most of `db.ts` or `poll.ts`. The end-to-end suite does
+not reach them — it serves `public/` from a static server and stubs every
+`/api/*` route — so routing, the auth middleware, the SQL and the cron fan-out
+were covered by deploying them and watching.
 
-The whole-`src/` row is the other answer, and it is the one to read as a
-warning. **`index.ts` has no automated test of any kind.** Neither does most of
-`db.ts` or `poll.ts`. The end-to-end suite does not reach them: it serves
-`public/` from `scripts/serve-static.mjs` and stubs every `/api/*` route with a
-fixture, so the Worker never runs in a test. Request routing, the auth
-middleware, the SQL and the cron fan-out are covered by deploying them and
-watching, and by nothing else. Closing that needs a Worker test harness —
-`@cloudflare/vitest-pool-workers` or `unstable_dev` — which the project does not
-have yet. Per file:
+They are covered now, without Cloudflare's runtime: `tests/helpers/d1.ts` puts
+SQLite behind the D1 interface with the real migrations applied, and
+`tests/helpers/worker.ts` calls the exported handlers with it. What still cannot
+be reached from a unit test is workerd itself — `crypto.subtle`'s MD5, the asset
+binding, real network — which `npm run probe:solis`, the end-to-end suite and
+the deploy's smoke test cover instead.
 
-```bash
-npx vitest run --coverage --coverage.include=src/**/*.ts
-```
-
-Statements, functions and lines are held at **80%**. Branches sits lower by
-design: the vendor payloads are full of optional fields read through fallback
-chains — `pick(r, 'stationName', 'name') ?? r.id` — and covering every arm
-means a fixture per arm for figures already covered on the path that matters.
+Statements, functions and lines are held at **95% or above**. Branches sits at
+82, lower by design and stated honestly: the vendor payloads are long chains of
+optional fields — `pick(r, 'stationName', 'name') ?? r.id` — and v8 counts every
+arm of every chain. The last few points mean a fixture per arm for figures
+already proved on the path that matters.
 
 **Raise the thresholds when you add tests; never lower them to turn a red build green.**
 
