@@ -13,9 +13,18 @@
  */
 import { execFileSync } from 'node:child_process';
 
-const ALLOWED_AUTHORS = [
-  'muhammadmobi <162428635+muhammadmobi@users.noreply.github.com>',
-  'dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>',
+/**
+ * Identity is the address, not the display name.
+ *
+ * The name beside it is whatever the client was configured with: a commit made
+ * on github.com carries the account's profile name, a commit made on a laptop
+ * carries git's local one, and both are the same person. Checking the name
+ * refused a merge commit the "Update branch" button had made - correctly
+ * authored, differently labelled.
+ */
+const ALLOWED_EMAILS = [
+  '162428635+muhammadmobi@users.noreply.github.com',
+  '49699333+dependabot[bot]@users.noreply.github.com',
 ];
 
 /**
@@ -59,10 +68,11 @@ const problems = [];
 for (const sha of shas) {
   const short = sha.slice(0, 8);
   const author = git('log', '-1', '--format=%an <%ae>', sha).trim();
+  const email = git('log', '-1', '--format=%ae', sha).trim().toLowerCase();
   const message = git('log', '-1', '--format=%B', sha);
 
-  if (!ALLOWED_AUTHORS.includes(author)) {
-    problems.push(`commit ${short}: author is ${author}, which is not the account this repository commits under`);
+  if (!ALLOWED_EMAILS.includes(email)) {
+    problems.push(`commit ${short}: author is ${author}, whose address is not one this repository commits under`);
   }
   for (const { name, re } of FORBIDDEN) {
     if (re.test(message)) problems.push(`commit ${short}: message contains ${name}`);
