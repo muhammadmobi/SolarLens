@@ -31,7 +31,18 @@ const PORTALS = [
   'https://home.solarmanpv.com',
 ];
 // Only record traffic to the vendors' own hosts.
-const HOST_RE = /soliscloud\.com|solarmanpv\.com|ginlong\.com|solisinverters\.com/i;
+//
+// Matched against the URL's host rather than the whole URL. A bare pattern
+// tested against the address also matches one that merely mentions a vendor -
+// https://example.invalid/soliscloud.com - and a tool whose job is to record
+// whatever a page fetched, to a file, is the wrong place to be loose about
+// which host it believes it is talking to.
+const VENDOR_HOSTS = ['soliscloud.com', 'solarmanpv.com', 'ginlong.com', 'solisinverters.com'];
+const fromVendor = (url) => {
+  let host;
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return false; }
+  return VENDOR_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+};
 const SECRET_KEY_RE = /pass|pwd|secret|token|cookie|authorization|sign/i;
 // Personal details, on the same terms as src/providers/soliscloud.ts strips
 // them before storage. Location words only count at the start of a key or on a
@@ -112,7 +123,7 @@ const ctx = await chromium.launchPersistentContext(PROFILE, {
 ctx.on('response', async (res) => {
   const req = res.request();
   const url = res.url();
-  if (!HOST_RE.test(url)) return;
+  if (!fromVendor(url)) return;
   const type = req.resourceType();
   if (type !== 'xhr' && type !== 'fetch') return;
   let body;

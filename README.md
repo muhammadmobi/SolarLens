@@ -38,7 +38,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 11. [Project layout](#project-layout)
 12. [Troubleshooting](#troubleshooting)
 13. [Security and privacy](#security-and-privacy)
-14. [Changelog](CHANGELOG.md)
+14. [Changelog](CHANGELOG.md) · [Handover](docs/handoff.md)
 15. [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license)
 
 ---
@@ -877,6 +877,7 @@ solar-lens/
 │   ├── fixtures/               captured vendor payloads, scrubbed of identifiers
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first
+├── docs/handoff.md           running, repairing and handing over the system
 ├── docs/api-notes.md         observed vendor field names and conventions
 └── docs/feature-gaps.md      SolisCloud vs SolarMan vs SolarLens, feature by feature
 ```
