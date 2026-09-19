@@ -658,6 +658,24 @@ The guards are small Node scripts in `scripts/ci/`, each runnable by hand:
 Third-party actions are pinned to a commit rather than a tag, because a tag can
 be moved after it has been reviewed.
 
+### Who reviews a pull request
+
+Two reviewers are asked for on every pull request that is ready for one, so
+nobody has to remember:
+
+- **Copilot**, which comments on the diff. A second pair of eyes, not a gate:
+  its comments never block a merge, and the twelve required checks decide that
+  by themselves. On the free plan its reviews have a monthly allowance, so it
+  will sometimes not answer - the run's summary says when it could not be asked.
+- **The repository's owner**, when the pull request is somebody else's: a
+  contributor's, or one of Dependabot's. GitHub never asks anyone to review
+  their own, so the owner's own pull requests get Copilot alone.
+
+`.github/workflows/reviewers.yml` asks Copilot, which `CODEOWNERS` cannot name;
+`.github/CODEOWNERS` covers the human half and would also drive GitHub's own
+"review required" rule if that is ever switched on. A pull request left as a
+draft is not bothered until it is marked ready.
+
 ### What scans for vulnerabilities
 
 `.github/workflows/security.yml` answers a different question - not "does this
@@ -809,7 +827,9 @@ solar-lens/
 │   ├── workflows/security.yml  CodeQL, dependency review, audit, secrets, lint
 │   ├── workflows/deploy.yml  migrations, deploy, smoke test, rollback
 │   ├── workflows/release.yml  the release button: tag and publish the notes
-│   └── privacy-allow.txt     long numbers the privacy guard may let through
+│   ├── privacy-allow.txt     long numbers the privacy guard may let through
+│   ├── CODEOWNERS            asks the owner to review anyone elses pull request
+│   └── workflows/reviewers.yml  asks Copilot, and the owner, for a review
 ├── tsconfig.json             typecheck for src/
 ├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
 ├── vitest.config.ts          unit test runner, coverage provider and thresholds
