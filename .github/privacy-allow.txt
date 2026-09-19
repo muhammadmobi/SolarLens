@@ -5,6 +5,8 @@
 # Add a number here only after checking it is made up. If it came from a real
 # portal capture, sanitise the fixture instead.
 
+162428635             # this repository's own GitHub account id, in the commit address
+49699333              # Dependabot's GitHub account id, in the address its commits use
 62000000              # demo SolarMan station, tests/e2e and tests/unit
 60000000              # demo SolarMan station, tests/unit/events
 300000002             # demo SolarMan alarm id, tests/unit/events

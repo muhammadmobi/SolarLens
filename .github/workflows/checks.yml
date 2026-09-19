@@ -155,6 +155,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
+          cache: npm
+      # The relay imports playwright-core at startup, so it needs the packages
+      # installed before it can get as far as refusing for want of settings.
+      - run: npm ci
 
       # The relay's own scripts only ever run on Windows, so they are checked
       # there. Windows PowerShell 5.1 is what the laptops have, and it is
@@ -188,9 +192,9 @@ jobs:
         shell: powershell
         run: |
           # No .dev.vars and no environment: it must say what is missing and
-          # exit 2, rather than opening a browser or hanging.
-          $p = Start-Process node -ArgumentList 'agent\solis-relay.mjs' -NoNewWindow -PassThru -RedirectStandardError err.txt -RedirectStandardOutput out.txt
-          if (-not $p.WaitForExit(60000)) { $p.Kill(); Write-Host 'The relay did not exit within a minute'; exit 1 }
-          Get-Content err.txt, out.txt -ErrorAction SilentlyContinue | Write-Host
-          if ($p.ExitCode -ne 2) { Write-Host "Expected exit 2, got $($p.ExitCode)"; exit 1 }
+          # exit 2, rather than opening a browser. A relay that hangs instead is
+          # caught by this job's own timeout.
+          $ErrorActionPreference = 'Continue'
+          & node agent\solis-relay.mjs 2>&1 | Write-Host
+          if ($LASTEXITCODE -ne 2) { Write-Host "Expected exit 2, got $LASTEXITCODE"; exit 1 }
           Write-Host 'ok: refused cleanly'
