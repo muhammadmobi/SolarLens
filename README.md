@@ -96,7 +96,7 @@ Why the difference between the two fallbacks: SolarMan's portal uses a plain bea
 
 ## Quick start (≈10 minutes)
 
-**Prerequisites:** Node.js 20+, a free [Cloudflare account](https://dash.cloudflare.com/sign-up), and Git.
+**Prerequisites:** Node.js 22 or newer, a free [Cloudflare account](https://dash.cloudflare.com/sign-up), and Git. `.nvmrc` pins 22, the version the automated checks use; newer versions are fine to develop on.
 
 ```bash
 git clone https://github.com/<you>/SolarLens.git
@@ -648,6 +648,8 @@ a bearer header (`Authorization: Bearer …`) or the cookie set by `/auth`.
 ```
 solar-lens/
 ├── wrangler.jsonc            Worker, D1 binding, cron, static assets
+├── .gitattributes            Windows line endings for the relay's .cmd, .ps1 and .vbs
+├── .nvmrc                    the Node version the automated checks use
 ├── tsconfig.json             typecheck for src/
 ├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
 ├── vitest.config.ts          unit test runner, coverage provider and thresholds

@@ -4,6 +4,9 @@
   "private": true,
   "description": "One screen for both inverters: SolisCloud + SolarMan, unified.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "node scripts/wrangler.mjs dev",
     "deploy": "node scripts/wrangler.mjs deploy",
@@ -32,6 +35,6 @@
     "playwright-core": "^1.63.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0",
-    "wrangler": "^4.129.0"
+    "wrangler": "^4.135.0"
   }
 }

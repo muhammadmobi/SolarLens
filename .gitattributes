@@ -1,0 +1,21 @@
+# Line endings, decided here rather than left to each machine's Git setting.
+#
+# The files that run on the relay laptops must reach them with Windows line
+# endings. A .cmd with Unix endings is read by cmd.exe a line at a time and can
+# be misparsed - the batch files do their work inside one block for the same
+# reason - and PowerShell and WSH files are happier the same way. Until now
+# they were stored with Unix endings and only became Windows ones because Git
+# for Windows was set to convert them; a machine without that setting, or a
+# download straight from GitHub, got the Unix version.
+#
+# Everything else is normalised to Unix endings in the repository, whatever the
+# working copy looks like, so a diff never turns into "every line changed".
+
+* text=auto eol=lf
+
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+*.png binary
+*.ico binary
