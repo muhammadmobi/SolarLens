@@ -644,6 +644,31 @@ The guards are small Node scripts in `scripts/ci/`, each runnable by hand:
 Third-party actions are pinned to a commit rather than a tag, because a tag can
 be moved after it has been reviewed.
 
+### What scans for vulnerabilities
+
+`.github/workflows/security.yml` answers a different question - not "does this
+change work" but "does this, or the code around it, put anything at risk". It
+runs on every pull request, on every push to `main`, and again every Monday,
+because an advisory can be published against code nobody has touched.
+
+| Job | What it does |
+|---|---|
+| **CodeQL** | GitHub's analysis of the TypeScript and JavaScript, with the `security-extended` rules. Findings appear in the repository's Security tab. |
+| **Dependency review** | Refuses a pull request that adds a package with a known high or critical advisory. |
+| **npm audit** | What the Worker ships with must be clean, and that fails the job. Advisories in Wrangler, Vitest or Playwright are printed in the run's summary instead, because they are not served to anyone. |
+| **Secret scan** | Gitleaks over the whole history, not only the new files: a token removed in a later commit was still published. GitHub's own secret scanning is on as well; this is a second set of rules, and it runs before the merge. |
+| **Workflow lint** | actionlint reads the workflow files the way GitHub will, so a bad expression is found now rather than on the day it should have run. |
+| **Actions are pinned** | `scripts/ci/check-pinned-actions.mjs` refuses `uses: someone/action@v4`, because a tag can be moved to point at code written after anyone here read it. |
+
+The two downloaded tools are pinned to a version *and* a SHA-256, checked before
+they run.
+
+`.github/dependabot.yml` opens one grouped pull request a week for npm packages
+and one for the actions, rather than a queue of single-package ones. A
+dependency with a published vulnerability is separate: GitHub opens that as soon
+as the advisory lands, once **Dependabot alerts** are switched on in the
+repository's settings - which is a settings change, not a file in here.
+
 ## Data model
 
 Five tables in D1 (`migrations/`), plus a poll log:
@@ -692,6 +717,8 @@ solar-lens/
 ├── .nvmrc                    the Node version the automated checks use
 ├── .github/
 │   ├── workflows/checks.yml  the checks every pull request must pass
+│   ├── workflows/security.yml  CodeQL, dependency review, audit, secrets, lint
+│   ├── dependabot.yml        one grouped update pull request a week
 │   └── privacy-allow.txt     long numbers the privacy guard may let through
 ├── tsconfig.json             typecheck for src/
 ├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
@@ -739,6 +766,7 @@ solar-lens/
 │   ├── ci/check-attribution.mjs refuses a commit credited to anyone else
 │   ├── ci/check-headers.mjs     refuses drift between the two copies of the headers
 │   ├── ci/check-cmd-shape.mjs   refuses a .cmd that its own update could break
+│   ├── ci/check-pinned-actions.mjs  refuses an action pinned to a movable tag
 │   ├── setup-relay.ps1          installs the relay on a machine, start to finish
 │   ├── renew-solis-login.ps1    renews the login and restarts the hidden relay
 │   ├── relay-hidden.vbs         starts the relay with no console window
