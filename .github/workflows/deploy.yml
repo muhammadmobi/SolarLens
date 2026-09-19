@@ -22,8 +22,16 @@ permissions:
   contents: read
 
 # One deploy at a time, and never cancel one half-way.
+# One deploy at a time, and never cancel one half-way.
+#
+# The group carries the branch, which matters more than it looks: this workflow
+# starts whenever *any* Checks run finishes, pull requests included, and those
+# runs skip on the `if` below. Under one shared group they queued against each
+# other anyway, and GitHub keeps only the newest waiting run - so a deploy of
+# main sat waiting for an approval until a pull request's own check run
+# cancelled it. Three deploys of 2.7.0 died that way before the cause was clear.
 concurrency:
-  group: deploy
+  group: deploy-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
