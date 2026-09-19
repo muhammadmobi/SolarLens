@@ -1,0 +1,196 @@
+# Every check that has to pass before a change reaches main.
+#
+# The jobs run in parallel and each installs the same dependencies from the
+# lockfile, on the Node version .nvmrc pins. Nothing here needs a secret, a
+# Cloudflare account or a SolisCloud login: the end-to-end tests serve the real
+# page from a static server and stub the API, and the build check bundles the
+# Worker without uploading it.
+#
+# Third-party actions are pinned to a commit rather than a tag, because a tag
+# can be moved to point at different code after it has been reviewed.
+
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to the same branch makes the previous run pointless.
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Coverage thresholds live in vitest.config.ts; falling below them fails here.
+      - run: npm run test:unit:coverage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # The suite drives real Google Chrome, which the runner image already has;
+      # this makes sure of it rather than assuming.
+      - run: npx playwright install --with-deps chrome
+      - run: npm run test:e2e
+      # The report carries screenshots and a step-by-step trace of any failure.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  build:
+    name: Build check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # wrangler.jsonc carries a placeholder for the database id, and the wrapper
+      # fills it in. A dry run bundles the Worker and uploads nothing, so any
+      # string will do and no Cloudflare credentials are needed.
+      - run: npm run cf -- deploy --dry-run
+        env:
+          CF_D1_DATABASE_ID: dry-run-no-real-id
+
+  guards:
+    name: Privacy, attribution and headers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The checks read every commit of the pull request, not just the result.
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Privacy
+        env:
+          # Set this secret to the real ids, coordinates and addresses, one per
+          # line. GitHub masks it in logs, and the check never prints a match.
+          PRIVACY_VALUES: ${{ secrets.PRIVACY_VALUES }}
+          # Passed as an environment variable, never interpolated into a shell
+          # command: a description is written by whoever opens the pull request.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            node scripts/ci/check-privacy.mjs --range "$BASE_SHA..$HEAD_SHA"
+          else
+            node scripts/ci/check-privacy.mjs
+          fi
+
+      - name: Attribution
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci/check-attribution.mjs --range "$BASE_SHA..$HEAD_SHA"
+
+      - name: Security headers
+        run: node scripts/ci/check-headers.mjs
+
+      - name: Batch files
+        run: node scripts/ci/check-cmd-shape.mjs
+
+  relay-scripts:
+    name: Relay scripts (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # The relay's own scripts only ever run on Windows, so they are checked
+      # there. Windows PowerShell 5.1 is what the laptops have, and it is
+      # stricter than PowerShell 7 about some syntax.
+      - name: PowerShell parses
+        shell: powershell
+        run: |
+          $bad = 0
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors.Count) {
+              $bad++
+              Write-Host "FAIL $($_.Name)" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host "    $($_.Extent.StartLineNumber): $($_.Message)" }
+            } else { Write-Host "ok   $($_.Name)" }
+          }
+          if ($bad) { exit 1 }
+
+      - name: PowerShell lint
+        shell: powershell
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $found = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error, Warning
+          $found | Format-Table -AutoSize | Out-String | Write-Host
+          # Warnings are shown but do not fail: the scripts deliberately use
+          # Write-Host for an operator watching a window, which it dislikes.
+          if (@($found | Where-Object Severity -eq 'Error').Count) { exit 1 }
+
+      - name: The relay refuses to start without its settings
+        shell: powershell
+        run: |
+          # No .dev.vars and no environment: it must say what is missing and
+          # exit 2, rather than opening a browser or hanging.
+          $p = Start-Process node -ArgumentList 'agent\solis-relay.mjs' -NoNewWindow -PassThru -RedirectStandardError err.txt -RedirectStandardOutput out.txt
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); Write-Host 'The relay did not exit within a minute'; exit 1 }
+          Get-Content err.txt, out.txt -ErrorAction SilentlyContinue | Write-Host
+          if ($p.ExitCode -ne 2) { Write-Host "Expected exit 2, got $($p.ExitCode)"; exit 1 }
+          Write-Host 'ok: refused cleanly'

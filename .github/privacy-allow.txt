@@ -1,0 +1,22 @@
+# Long numbers the privacy check should let through: invented ids used by the
+# tests and fixtures. Everything else with eight or more digits is refused,
+# unless it is plainly a timestamp.
+#
+# Add a number here only after checking it is made up. If it came from a real
+# portal capture, sanitise the fixture instead.
+
+62000000              # demo SolarMan station, tests/e2e and tests/unit
+60000000              # demo SolarMan station, tests/unit/events
+300000002             # demo SolarMan alarm id, tests/unit/events
+212008641             # invented device serial, tests/unit/normalize
+233151400             # invented device serial, tests/unit/normalize
+1000000000000000001   # demo SolisCloud plant, tests/fixtures/solis-station
+2000000000000000002   # demo SolisCloud plant, tests/unit/events
+10000000000           # demo plant id, tests/unit/pii
+10000000001           # demo plant id, tests/unit/pii
+0000000000000000000   # obviously-blank id, tests/unit/pii
+00000000000           # obviously-blank phone number, tests/unit/events
+1234567890            # counting digits, tests/unit/clients
+9876543210            # counting digits, tests/unit/public-view
+0123456789            # counting digits, tests/unit/relays
+99999999              # all nines, tests/unit/public-view
