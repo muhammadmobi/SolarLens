@@ -3,7 +3,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
-import { tzOffsetSec } from './providers/units';
+import { tzNameOf, tzOffsetSec } from './providers/units';
 import { aliasFor, publicAlarms, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
 import { parseRelayStatus } from './relays';
 import { plantFilter, pollAll } from './poll';
@@ -331,6 +331,7 @@ app.post('/api/ingest/station', async (c) => {
     // plant's timezone. Without this the relayed plant was the one system whose
     // day was still cut at the reader's midnight.
     tzOffsetSec: tzOffsetSec(body.raw),
+    tzName: tzNameOf(body.raw),
   };
   const source = body.source ?? `${body.provider}-relay`;
   const reading =

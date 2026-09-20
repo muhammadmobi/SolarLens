@@ -1,7 +1,7 @@
 import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
-import { num, pick, toEpochSeconds, toKwh, toWatts, tzOffsetSec } from './units';
+import { num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
 
 export interface SolarmanCredentials {
   appId: string;
@@ -278,6 +278,7 @@ export function stationInverter(plant: Plant): Inverter {
     plantName: plant.name,
     capacityW: plant.capacityW ?? null,
     tzOffsetSec: plant.tzOffsetSec ?? null,
+    tzName: plant.tzName ?? null,
   };
 }
 
@@ -361,6 +362,7 @@ export class SolarmanProvider implements Provider {
       // installedCapacity is reported in kW.
       capacityW: toWatts(pick(s, 'installedCapacity'), 'kW'),
       tzOffsetSec: tzOffsetSec(s),
+      tzName: tzNameOf(s),
     }));
     for (const p of plants) this.plants.set(p.id, p);
     return plants;

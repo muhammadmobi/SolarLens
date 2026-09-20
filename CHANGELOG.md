@@ -14,6 +14,63 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [2.9.0] — 2026-09-20
+
+Daylight saving handled properly, history as a file, a dashboard that can speak
+up, and accessibility checked rather than assumed.
+
+### Added
+
+- **Download CSV, on the Historical Data tab.** The rows on screen - day, month
+  or year - written out as a file, with the systems named, times in ISO, and a
+  figure the vendor never reported left empty rather than written as zero. A
+  value containing a comma is quoted the way every spreadsheet expects. Built in
+  the page from what is already fetched, so it costs no database read and adds
+  no route to guard.
+
+- **"Tell me when something changes", on the Alerts tab.** The browser raises a
+  notification when a new alert appears - a system going offline, a fault, a
+  relay login about to expire - on whichever device has the dashboard open.
+  Permission is asked for only when the switch is turned on. Turning it on
+  records what is already wrong without announcing it: you turned it on to hear
+  what happens next, not to be told the last week at once. A fault that clears
+  and returns is announced again.
+
+  Honest about what it is: the browser runs the page only while a tab holds it
+  open, so this is a louder dashboard rather than a pager. Reaching a closed
+  browser needs Web Push, which is written up in `docs/feature-gaps.md` rather
+  than half-built here.
+
+- **Accessibility is checked on every view**, desktop and mobile, with axe-core's
+  WCAG 2 A and AA rules, failing the run on anything serious or critical - plus
+  a keyboard walk-through and a check that every control shows its focus.
+
+- **The dashboard's own script is measured.** V8 coverage during an end-to-end
+  walk-through, written to `coverage/page-coverage.json` and attached to the
+  run: **69.6%**, with a floor of 68% that fails the run if it drops. Until now
+  only the Worker's half of the project had a number.
+
+### Fixed
+
+- **Daylight saving no longer moves a day of history.** The plant's UTC offset
+  was a number on the inverter row, refreshed on every poll, and every day of
+  history was cut with whatever that number said *today*: a summer evening read
+  back in winter landed in the wrong day, and for the five minutes around a
+  switch the current day was cut wrong too.
+
+  The zone's own name is stored now, where the vendor states one, and each
+  reading carries the offset that was in force at its own timestamp - so a day
+  keeps the boundary it was recorded under, whatever the clocks do afterwards. A
+  plant whose vendor only ever sends a number still falls back to that number,
+  which is the best that can be said for it. Migration 0012 adds both columns.
+
+- **Four accessibility faults, found by the new checks on their first run**:
+  muted text at 2.93:1 against the page's own ground where 4.5 is the bar; the
+  brand orange used for 16px type at 3.42:1; the *normal* and *warning* pills a
+  shade under; and tables that scroll sideways with no way to reach them from a
+  keyboard. The brand colours now have darker ink versions for type, while the
+  charts keep the brighter ones.
+
 ## [2.8.0] — 2026-09-20
 
 Coverage above 90% on every measure, branches included - and a bug found on the
@@ -1009,6 +1066,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.9.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.5.0...v2.6.0

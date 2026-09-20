@@ -354,6 +354,12 @@ The short history a newcomer would otherwise repeat.
   and the deploy's smoke test cover.
 - **SolisCloud's official API key** would remove the weekly login, the laptop
   and the relay entirely.
+- **Notifications while the browser is closed.** The Alerts tab can raise a
+  notification when a new alert appears, but only on a device with the
+  dashboard open. Reaching a closed browser needs Web Push - a key pair, a
+  subscription stored per device, and the cron sending to each.
+- **SolarMan alarm detail**: when a fault cleared, and the vendor's advice. It
+  needs one capture from the alert's own page in a logged-in browser.
 
 Neither is urgent. Both are written down so they are not rediscovered as
 surprises.

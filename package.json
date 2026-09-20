@@ -1,6 +1,6 @@
 {
   "name": "solar-lens",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "private": true,
   "description": "One screen for both inverters: SolisCloud + SolarMan, unified.",
   "type": "module",
@@ -28,6 +28,7 @@
     "hono": "^4.13.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@cloudflare/workers-types": "^5.20260919.1",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.4",

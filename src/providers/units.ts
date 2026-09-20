@@ -99,12 +99,34 @@ export function tzOffsetSec(rec: Record<string, unknown>): number | null {
   return null;
 }
 
+/**
+ * The zone's own name, where the vendor states one.
+ *
+ * An offset is a fact about a moment; a zone name is a fact about a place. Only
+ * the name survives a daylight-saving switch, which is why it is now stored
+ * beside the offset rather than thrown away once the offset has been read.
+ */
+export function tzNameOf(rec: Record<string, unknown>): string | null {
+  const name = pick(rec, 'timezone', 'regionTimezone', 'timeZoneStandardId');
+  return typeof name === 'string' && name.includes('/') ? name : null;
+}
+
+/**
+ * UTC offset of an IANA zone at a given moment, or null when the runtime
+ * rejects the zone. Taking the moment as an argument is the whole point: the
+ * same zone is two different offsets either side of a switch, and a reading
+ * belongs to the one that was in force when it was taken.
+ */
+export function offsetOfZoneAt(zone: string, atSec: number): number | null {
+  return offsetOfZone(zone, new Date(atSec * 1000));
+}
+
 /** UTC offset of an IANA zone right now, or null when the runtime rejects it. */
-function offsetOfZone(zone: string): number | null {
+function offsetOfZone(zone: string, at: Date = new Date()): number | null {
   try {
     // longOffset gives "GMT+09:00" / "GMT-03:30" / bare "GMT" at zero.
     const label = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longOffset' })
-      .formatToParts(new Date())
+      .formatToParts(at)
       .find((p) => p.type === 'timeZoneName')?.value;
     if (!label) return null;
     const m = /^GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?$/.exec(label);

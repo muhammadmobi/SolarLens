@@ -1,7 +1,7 @@
 import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
-import { num, pick, toEpochSeconds, toKwh, toWatts, tzOffsetSec } from './units';
+import { num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
 
 export interface SolisCredentials {
   keyId: string;

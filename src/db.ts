@@ -1,6 +1,7 @@
 import type { Device, Inverter, Reading } from './providers/types';
 import type { TokenStore } from './providers/solarman';
 import type { Alarm, Period } from './providers/events';
+import { offsetOfZoneAt } from './providers/units';
 import type { RelayStatus } from './relays';
 
 export interface Env {
@@ -28,18 +29,19 @@ export function nowSec(): number {
 export async function upsertInverter(db: D1Database, inv: Inverter, seenAt = nowSec()): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO inverters (id, provider, vendor_id, serial, name, plant_id, plant_name, capacity_w, tz_offset_sec, first_seen, last_seen)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?9, ?9)
+      `INSERT INTO inverters (id, provider, vendor_id, serial, name, plant_id, plant_name, capacity_w, tz_name, tz_offset_sec, first_seen, last_seen)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?10, ?11, ?9, ?9)
        ON CONFLICT(id) DO UPDATE SET
          serial     = COALESCE(excluded.serial, inverters.serial),
          name       = COALESCE(excluded.name, inverters.name),
          plant_id   = excluded.plant_id,
          plant_name = CASE WHEN excluded.plant_name = '' THEN inverters.plant_name ELSE excluded.plant_name END,
          capacity_w = COALESCE(excluded.capacity_w, inverters.capacity_w),
+         tz_name       = COALESCE(excluded.tz_name, inverters.tz_name),
          tz_offset_sec = COALESCE(excluded.tz_offset_sec, inverters.tz_offset_sec),
          last_seen  = excluded.last_seen`,
     )
-    .bind(inv.id, inv.provider, inv.vendorId, inv.serial, inv.name, inv.plantId, inv.plantName, inv.capacityW, seenAt, inv.tzOffsetSec ?? null)
+    .bind(inv.id, inv.provider, inv.vendorId, inv.serial, inv.name, inv.plantId, inv.plantName, inv.capacityW, seenAt, inv.tzName ?? null, inv.tzOffsetSec ?? null)
     .run();
 }
 
@@ -47,13 +49,34 @@ export async function upsertInverter(db: D1Database, inv: Inverter, seenAt = now
  * INSERT OR IGNORE on the (inverter, ts, source) key means re-polling a vendor
  * that has not produced a new sample is a no-op rather than a duplicate row.
  */
+/**
+ * The offset in force where this plant is, at the moment this reading was
+ * taken.
+ *
+ * A zone name is asked what it meant at that instant; a plant whose vendor only
+ * ever states a number falls back to that number, which is the best that can be
+ * said for it. Stored on the reading rather than read from the inverter later,
+ * so a day's rows keep the boundary they were recorded under even after the
+ * clocks change.
+ */
+async function offsetForReading(db: D1Database, inverterId: string, tsSec: number): Promise<number | null> {
+  const row = await db
+    .prepare('SELECT tz_name, tz_offset_sec FROM inverters WHERE id = ?1')
+    .bind(inverterId)
+    .first<{ tz_name: string | null; tz_offset_sec: number | null }>();
+  if (!row) return null;
+  if (row.tz_name) return offsetOfZoneAt(row.tz_name, tsSec) ?? row.tz_offset_sec;
+  return row.tz_offset_sec;
+}
+
 export async function insertReading(db: D1Database, r: Reading): Promise<boolean> {
+  const tzOffsetSec = await offsetForReading(db, r.inverterId, r.ts);
   const res = await db
     .prepare(
       `INSERT OR IGNORE INTO readings
          (inverter_id, ts, source, ac_power_w, dc_power_w, today_kwh, total_kwh,
-          battery_soc, battery_power_w, grid_power_w, load_power_w, temp_c, status, raw, metrics)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)`,
+          battery_soc, battery_power_w, grid_power_w, load_power_w, temp_c, status, raw, metrics, tz_offset_sec)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)`,
     )
     .bind(
       r.inverterId,
@@ -71,6 +94,7 @@ export async function insertReading(db: D1Database, r: Reading): Promise<boolean
       r.status,
       JSON.stringify(r.raw ?? null),
       r.metrics ? JSON.stringify(r.metrics) : null,
+      tzOffsetSec,
     )
     .run();
   if ((res.meta.changes ?? 0) > 0) return true;
@@ -356,7 +380,7 @@ export async function daily(
   const { results } = await db
     .prepare(
       `SELECT r.inverter_id AS inverter_id,
-              date(r.ts + COALESCE(i.tz_offset_sec, ?3), 'unixepoch') AS day,
+              date(r.ts + COALESCE(r.tz_offset_sec, i.tz_offset_sec, ?3), 'unixepoch') AS day,
               MAX(r.today_kwh)                                    AS yield_kwh,
               MAX(r.ac_power_w)                                   AS peak_w,
               MAX(json_extract(r.metrics, '$.loadTodayKwh'))      AS load_kwh,
