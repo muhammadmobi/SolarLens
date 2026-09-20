@@ -130,13 +130,19 @@ export function deviceFromRecord(d: Rec, plantId: string | null = null): Device 
 
   // deviceStatus: 1 online, 2 alarm, 3 offline (0/absent = unknown).
   const firmware = (pick(feature, 'MDUv1') as string | null) ?? null;
+  const stationId = pick(d, 'stationId');
   const statusCode = String(pick(d, 'deviceStatus') ?? '');
   const status = statusCode === '1' ? 'online' : statusCode === '2' ? 'alarm' : statusCode === '3' ? 'offline' : null;
 
   return {
     id: `solarman:${kind}:${sn ?? String(pick(d, 'deviceId') ?? 'unknown')}`,
     provider: 'solarman',
-    plantId: plantId ?? (pick(d, 'stationId') !== undefined ? String(pick(d, 'stationId')) : null),
+    // `pick` answers null for a key that is missing, so testing it against
+    // undefined was always true: a record without a station id was stored with
+    // the plant id "null", the four-character string. It never bit, because
+    // every caller passes the plant in - which is exactly the kind of latent
+    // wrong a test that walks the fallback finds.
+    plantId: plantId ?? (stationId === null ? null : String(stationId)),
     kind,
     sn,
     name: (pick(d, 'deviceName') as string | null) ?? (kind === 'datalogger' ? 'Datalogger' : null),
