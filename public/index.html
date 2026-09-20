@@ -32,18 +32,25 @@
     --surface-2: #f1f0ea;
     --ink: #17191a;
     --muted: #5f6570;
-    --faint: #8b919b;
+    /* 4.58:1 on the page's own ground, where #8b919b measured 2.93 and failed
+       AA. Muted text on a phone in daylight is exactly the case that matters. */
+    --faint: #646a75;
     --line: #e5e4dc;
     --line-soft: #efeee7;
-    --ok: #15803d;
+    --ok: #136b33;
     --ok-bg: #e8f3ec;
-    --warn: #b45309;
+    --warn: #97450a;
     --warn-bg: #fbf1e2;
     --bad: #b91c1c;
     --bad-bg: #fbeaea;
     --solis: #db6b1c;
+    /* Type versions of the brand colours. The chart keeps the brighter ones,
+       which measured 3.42:1 as 11px bold text on white, where 4.5 is the bar. */
+    --solis-ink: #a44f0e;
     --solarman: #2f6fde;
+    --solarman-ink: #2a62c4;
     --local: #6b4fbb;
+    --local-ink: #5b3fa8;
     --total: #17191a;
     --shadow: 0 1px 2px rgba(20, 24, 30, .05), 0 10px 28px -12px rgba(20, 24, 30, .16);
     --shadow-lift: 0 2px 6px rgba(20, 24, 30, .07), 0 18px 40px -16px rgba(20, 24, 30, .22);
@@ -67,8 +74,11 @@
       --warn: #fbbf24; --warn-bg: #2a2113;
       --bad: #f87171; --bad-bg: #2a1616;
       --solis: #f0913f;
+      --solis-ink: #f0913f;
       --solarman: #6fa0f0;
+      --solarman-ink: #6fa0f0;
       --local: #a78bfa;
+      --local-ink: #a78bfa;
       --total: #edeee9;
       --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
       --shadow-lift: 0 2px 6px rgba(0,0,0,.5), 0 18px 40px -16px rgba(0,0,0,.7);
@@ -80,6 +90,7 @@
     --ok: #4ade80; --ok-bg: #12251a; --warn: #fbbf24; --warn-bg: #2a2113;
     --bad: #f87171; --bad-bg: #2a1616;
     --solis: #f0913f; --solarman: #6fa0f0; --local: #a78bfa; --total: #edeee9;
+    --solis-ink: #f0913f; --solarman-ink: #6fa0f0; --local-ink: #a78bfa;
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
     --shadow-lift: 0 2px 6px rgba(0,0,0,.5), 0 18px 40px -16px rgba(0,0,0,.7);
   }
@@ -210,7 +221,7 @@
   a.sys:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
   .sys-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
   .vendor {
-    font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--accent);
+    font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink);
   }
   .sys-name { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; margin-top: 2px; }
   .sys-plant { font-size: 13px; color: var(--muted); }
@@ -333,7 +344,7 @@
   .ovmain:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; border-radius: var(--r); }
   .ovchart:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; border-radius: var(--r); }
   .ovhead { display: flex; align-items: center; gap: 10px; padding: 14px 18px 0; flex: 0 0 auto; }
-  .ovname { font-weight: 700; font-size: 16px; letter-spacing: -.01em; color: var(--accent); }
+  .ovname { font-weight: 700; font-size: 16px; letter-spacing: -.01em; color: var(--accent-ink, var(--accent)); }
   .ovchip {
     font-size: 10.5px; padding: 2px 9px; border-radius: 999px; white-space: nowrap;
     border: 1px solid var(--line); color: var(--muted); background: var(--surface-2);
@@ -477,6 +488,10 @@
   .bar-row.unused .num { color: var(--faint); font-weight: 650; }
   .cardnote { margin: 12px 0 0; font-size: 12.5px; color: var(--faint); }
   .rangepick { display: flex; gap: 8px; flex-wrap: wrap; }
+  .exportrow { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  .notifyrow { display: grid; gap: 6px; padding: 16px 20px; }
+  .notifylabel { display: flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; }
+  .notifylabel input { width: 18px; height: 18px; accent-color: var(--solarman); cursor: pointer; }
   .rangebtn, .groupbtn { font: inherit; font-size: 12.5px; font-weight: 650; color: var(--muted); background: var(--surface-2);
               border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   .rangebtn:hover, .groupbtn:hover { border-color: var(--muted); }
@@ -497,6 +512,7 @@
 
   /* ---------- devices ---------- */
   .tablewrap { overflow-x: auto; }
+  .tablewrap:focus-visible { outline: 2px solid var(--solarman); outline-offset: 2px; border-radius: 8px; }
   table.devices { width: 100%; border-collapse: collapse; font-size: 14px; }
   table.devices th {
     text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
@@ -653,6 +669,162 @@
   const state = { latest: null, series: null, devices: [], health: null, error: null, hidden: savedHidden };
 
   const colorFor = (p) => ({ soliscloud: 'var(--solis)', solarman: 'var(--solarman)', local: 'var(--local)' }[p] || 'var(--muted)');
+
+  /**
+   * History, as a file.
+   *
+   * The Historical tab already holds every figure the vendors publish per day,
+   * month and year; this writes the same rows out so they can be opened in a
+   * spreadsheet. Built in the page from what is already on screen - no new
+   * request, and nothing the Worker has to spend a database read on.
+   *
+   * Semicolon-safe: a value containing a comma, a quote or a newline is quoted
+   * and its quotes doubled, which is the rule every spreadsheet agrees on.
+   */
+  const csvCell = (v) => {
+    if (v === null || v === undefined) return '';
+    const text = String(v);
+    return /[",\n\r]/.test(text) ? '"' + text.split('"').join('""') + '"' : text;
+  };
+
+  function toCsv(header, rows) {
+    return [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  }
+
+  /**
+   * Hand the browser a file.
+   *
+   * A blob and an anchor, rather than a route on the Worker: the data is
+   * already here, and a download endpoint would be one more thing to guard.
+   */
+  function downloadCsv(name, text) {
+    const blob = new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoked on the next turn of the loop: Safari needs the URL to outlive the
+    // click, and every browser leaks the blob if it is never revoked at all.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  /** The Historical tab's rows, in the shape they are shown in. */
+  /**
+   * Telling you once, when something changes.
+   *
+   * The Alerts tab has always been right and always been silent: it says a
+   * system is offline only while somebody is looking at it. This raises the
+   * browser's own notification when a row appears that was not there before -
+   * on the laptop or the wall display that keeps the dashboard open, which is
+   * where a fault is worth hearing about.
+   *
+   * Deliberately modest about what it claims. The browser only runs this page
+   * while a tab holds it open, so this is a louder dashboard rather than a
+   * pager: a machine that is asleep tells nobody anything. Notifications that
+   * arrive with the browser closed need Web Push, a key pair and a
+   * subscription per device, which is a bigger thing and is written up in
+   * docs/feature-gaps.md rather than half-built here.
+   *
+   * Permission is asked for only when the switch is turned on, never on load.
+   */
+  const NOTIFY_KEY = 'solarlens-notify';
+  const notifySupported = () => typeof Notification !== 'undefined';
+  const notifyOn = () => {
+    try { return localStorage.getItem(NOTIFY_KEY) === 'on' && notifySupported() && Notification.permission === 'granted'; }
+    catch { return false; }
+  };
+
+  /** What has already been announced, so a standing fault is not repeated. */
+  const announced = new Set();
+  let announcedPrimed = false;
+
+  /** One stable key per alert: the same fault on the same system is one thing. */
+  const alertKey = (inv, row) => `${inv.id}|${row.level}|${row.title}`;
+
+  /** Every alert on screen right now, as keys. */
+  function currentAlertRows() {
+    const rows = [];
+    for (const inv of state.latest?.inverters ?? []) {
+      for (const row of alertsFor(inv)) rows.push({ inv, row, key: alertKey(inv, row) });
+    }
+    return rows;
+  }
+
+  function notifyOfAlerts() {
+    if (!notifyOn()) return;
+    const rows = currentAlertRows();
+    const keys = new Set(rows.map((r) => r.key));
+    // Drop anything that has cleared, so it can announce itself if it returns.
+    for (const key of [...announced]) if (!keys.has(key)) announced.delete(key);
+
+    // The first pass after the switch is turned on records what is already
+    // wrong without shouting about it: you turned this on to hear what happens
+    // next, not to be told the last week at once.
+    if (!announcedPrimed) {
+      for (const k of keys) announced.add(k);
+      announcedPrimed = true;
+      return;
+    }
+
+    for (const { inv, row, key } of rows) {
+      if (announced.has(key)) continue;
+      announced.add(key);
+      try {
+        const n = new Notification(`${inv.name}: ${row.title}`, {
+          body: row.detail,
+          tag: key,            // one notification per fault, replaced rather than stacked
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
+          requireInteraction: row.level === 'bad',
+        });
+        n.onclick = () => { window.focus(); location.hash = '#/alerts'; n.close(); };
+      } catch { /* a browser that refuses is not a reason to break the refresh */ }
+    }
+  }
+
+  /** The switch itself, on the Alerts tab. */
+  async function toggleNotify(on) {
+    try {
+      if (!on) { localStorage.setItem(NOTIFY_KEY, 'off'); announcedPrimed = false; return true; }
+      if (!notifySupported()) return false;
+      const permission = Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
+      if (permission !== 'granted') return false;
+      localStorage.setItem(NOTIFY_KEY, 'on');
+      // Prime here, from what is on screen, rather than on the next refresh:
+      // that refresh is often the one carrying the new alert, and priming then
+      // would swallow the first thing you turned this on to hear about.
+      announced.clear();
+      for (const { key } of currentAlertRows()) announced.add(key);
+      announcedPrimed = true;
+      return true;
+    } catch { return false; }
+  }
+
+  function historyCsv() {
+    const group = state.historyGroup ?? 'day';
+    const rows = state.history?.rows ?? [];
+    const nameOf = (id) => (state.latest?.inverters ?? []).find((i) => i.id === id)?.name ?? id;
+    const header = [
+      group === 'day' ? 'day' : group, 'system', 'generated_kwh', 'peak_w', 'consumed_kwh',
+      'imported_kwh', 'exported_kwh', 'battery_charged_kwh', 'battery_discharged_kwh',
+      'samples', 'first_reading_utc', 'last_reading_utc',
+    ];
+    const iso = (ts) => (ts ? new Date(ts * 1000).toISOString() : '');
+    const body = rows.map((r) => [
+      r.day ?? r.key, nameOf(r.inverter_id), r.yield_kwh, r.peak_w, r.load_kwh,
+      r.import_kwh, r.export_kwh, r.batt_charge_kwh, r.batt_discharge_kwh,
+      r.samples, iso(r.first_ts), iso(r.last_ts),
+    ]);
+    return { header, body, name: `solarlens-history-${group}-${new Date().toISOString().slice(0, 10)}.csv` };
+  }
+  // The same vendor in a colour that can be read as small bold type: axe
+  // measured the brand orange at 3.42:1 against white, and 4.5 is the bar.
+  const inkFor = (p) => ({ soliscloud: 'var(--solis-ink)', solarman: 'var(--solarman-ink)', local: 'var(--local-ink)' }[p] || 'var(--muted)');
   const providerName = (p) => p === 'soliscloud' ? 'SolisCloud' : p === 'solarman' ? 'SolarMan' : p;
 
   const fmtW = (w) => {
@@ -1035,7 +1207,7 @@
       const [v, u] = fmtW(inv.ac_power_w);
       return `<details class="syssec" open>
         <summary>
-          <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
           <span class="snow">${v}<small> ${u}</small></span>
           <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
@@ -1337,7 +1509,7 @@
       // the way the whole card was before: a reader who wants more about a
       // figure clicks the figure, not a title bar above it. The chart is the
       // exception and goes to Power, where it is drawn full width.
-      return `<section class="ovsys" style="--accent:${colorFor(inv.provider)}">
+      return `<section class="ovsys" style="--accent:${colorFor(inv.provider)};--accent-ink:${inkFor(inv.provider)}">
         <a class="ovmain" href="#/system/${encodeURIComponent(inv.id)}" title="Open ${esc(inv.name)}">
           <div class="ovhead">
             <span class="ovname">${esc(inv.name)}</span>
@@ -1645,7 +1817,7 @@
       <div class="ac-sub fh-sum"><b>${rows.length}</b> alarm${rows.length === 1 ? '' : 's'} since
         ${esc(new Date(oldest * 1000).toLocaleDateString(undefined, { month: 'short', year: 'numeric' }))}.
         Most often: ${esc(common)}, ${commonN} time${commonN === 1 ? '' : 's'}.</div>
-      <div class="tablewrap"><table class="devices faults">
+      <div class="tablewrap" tabindex="0" role="region" aria-label="Table, scrolls sideways"><table class="devices faults">
         <thead><tr><th>Started</th><th>Severity</th><th>Code</th><th>What</th><th>Lasted</th>${anyAdvice ? '<th>Vendor advice</th>' : ''}</tr></thead>
         <tbody>${body}</tbody>
       </table></div>
@@ -1660,6 +1832,19 @@
       return;
     }
     const dot = (l) => `<span class="pill ${l === 'bad' ? 'bad' : l === 'warn' ? 'warn' : ''}"><i></i>${l === 'bad' ? 'fault' : l === 'warn' ? 'warning' : 'note'}</span>`;
+
+    // Told once, when something changes - on whichever device has the
+    // dashboard open. See the note above notifyOfAlerts for what that is and
+    // is not.
+    const notifyRow = !notifySupported()
+      ? ''
+      : `<section class="card"><div class="body notifyrow">
+          <label class="notifylabel"><input type="checkbox" id="notify" ${notifyOn() ? 'checked' : ''}>
+            <span>Tell me when something changes</span></label>
+          <small class="faint" id="notifynote">${notifyOn()
+            ? 'This browser will raise a notification when a new alert appears, while the dashboard is open.'
+            : 'Raises a notification on this device when a new alert appears, while the dashboard is open here.'}</small>
+        </div></section>`;
 
     const sections = invs.map((inv) => {
       const rows = alertsFor(inv);
@@ -1679,7 +1864,7 @@
            </div>`;
       return `<details class="syssec" open>
         <summary>
-          <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
           <span class="snow"><small>${rows.length ? `${rows.length} to look at` : 'clear'}</small></span>
           <span class="pill ${worst === 'bad' ? 'bad' : worst === 'warn' ? 'warn' : 'ok'}"><i></i>${esc(st.text)}</span>
@@ -1695,7 +1880,21 @@
           : `Nothing to look at. Both clouds report normal, and both feeds are current.`}
         </div>
         <div class="ac-sub">SolarLens reports what the vendors report, plus what it can see about its own polling. It does not raise alerts of its own beyond a feed going quiet.</div>
-      </div></section>${sections}`;
+      </div></section>${notifyRow}${sections}`;
+
+    const box = $('notify');
+    if (box) {
+      box.onchange = async () => {
+        const wanted = box.checked;
+        const ok = await toggleNotify(wanted);
+        box.checked = wanted && ok;
+        $('notifynote').textContent = box.checked
+          ? 'This browser will raise a notification when a new alert appears, while the dashboard is open.'
+          : wanted
+            ? 'This browser refused permission to notify. Allow notifications for this site and try again.'
+            : 'Raises a notification on this device when a new alert appears, while the dashboard is open here.';
+      };
+    }
   }
 
   // ---------- historical data ----------
@@ -1848,7 +2047,7 @@
       const m = parse(inv.metrics) ?? {};
       if (!mine.length) {
         return `<details class="syssec" open><summary>
-            <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+            <span class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
             <span class="sname">${esc(inv.name)}</span></summary>
           <div class="secbody"><div class="empty">No days recorded yet for this system.</div></div></details>`;
       }
@@ -1893,7 +2092,7 @@
 
       return `<details class="syssec" open>
         <summary>
-          <span class="vendor" style="color:${colorFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
           <span class="snow">${fmtKwh(totals.yield)}<small> in ${group === 'day'
             ? `${mine.length} day${mine.length === 1 ? '' : 's'}`
@@ -1905,7 +2104,7 @@
           ${usesVendor ? `<p class="cardnote" style="margin:0 20px 4px">Figures are ${esc(providerName(inv.provider))}'s own
             ${group} totals, which cover the whole ${group} including any part before SolarLens began collecting.
             "Days recorded" is how much of it SolarLens saw itself, and the peak comes from those days.</p>` : ''}
-          <div class="tablewrap"><table class="devices">
+          <div class="tablewrap" tabindex="0" role="region" aria-label="Table, scrolls sideways"><table class="devices">
             <thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
             <tbody>${body}</tbody>
           </table></div>
@@ -1921,11 +2120,21 @@
 
     $('view').innerHTML = `<section class="card"><h2>Historical Data</h2><div class="body">
         ${picker}
+        <div class="exportrow"><button type="button" class="rangebtn" id="csv"
+          title="Download these rows as a CSV file">Download CSV</button>
+          <small class="faint">${rows.length} row${rows.length === 1 ? '' : 's'}, as shown</small></div>
         <p class="cardnote" style="margin-top:14px">Built from the samples SolarLens has stored, so the record begins when it
         started collecting — not when the array was installed. Each vendor's own running totals are shown at the
         foot of its section for comparison.</p>
       </div></section>${sections}`;
     bindRange();
+    const csvBtn = $('csv');
+    if (csvBtn) {
+      csvBtn.onclick = () => {
+        const { header, body, name } = historyCsv();
+        downloadCsv(name, toCsv(header, body));
+      };
+    }
   }
 
   function bindRange() {
@@ -2003,7 +2212,7 @@
         <td>${d.temp_c != null ? `${d.temp_c} °C` : '—'}</td>
       </tr>`;
     };
-    $('view').innerHTML = `<section class="card"><h2>Hardware</h2><div class="tablewrap">
+    $('view').innerHTML = `<section class="card"><h2>Hardware</h2><div class="tablewrap" tabindex="0" role="region" aria-label="Table, scrolls sideways">
       <table class="devices">
         <thead><tr><th>Status</th><th>Device</th><th>Serial</th><th>Model</th><th>Firmware</th>
           <th>Rated / signal</th><th>Last contact</th><th>PV strings</th><th>Temp</th></tr></thead>
@@ -2033,7 +2242,7 @@
         <td>${esc(ago(r.last_seen))}</td>
       </tr>`;
     }).join('');
-    return `<section class="card relays"><h2>SolisCloud relays</h2><div class="tablewrap">
+    return `<section class="card relays"><h2>SolisCloud relays</h2><div class="tablewrap" tabindex="0" role="region" aria-label="Table, scrolls sideways">
       <table class="devices">
         <thead><tr><th>Status</th><th>Relay</th><th>SolisCloud login</th><th>Last report</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -2318,7 +2527,7 @@
     return {
       header: `<div class="sys-head" style="margin-bottom:18px">
         <div>
-          <div class="vendor" style="color:${accent}">${esc(providerName(inv.provider))}</div>
+          <div class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</div>
           <div class="sys-name" style="font-size:26px">${esc(inv.name)}</div>
         </div>
         <div style="text-align:right">
@@ -2408,7 +2617,7 @@
         inv.load_power_w != null && !st.offline ? ['House', fmtWs(inv.load_power_w)] : null,
         inv.grid_power_w != null && !st.offline ? ['Grid', gridText(inv.grid_power_w)] : null,
       ].filter(Boolean);
-      return `<section class="tvsys" style="--accent:${colorFor(inv.provider)}">
+      return `<section class="tvsys" style="--accent:${colorFor(inv.provider)};--accent-ink:${inkFor(inv.provider)}">
         <div class="tvname"><span>${esc(inv.name)}</span><span class="pill ${st.cls}"><i></i>${esc(st.text)}</span></div>
         <div class="tvnow${st.offline ? ' off' : ''}">${pw}<small>${pu}</small></div>
         <div class="tvfigs">${figs.map(([k, v]) => `<div><span class="k">${esc(k)}</span>${esc(v)}</div>`).join('')}</div>
@@ -2516,6 +2725,9 @@
       }
       // The tab carries the count, so a fault is visible from any page.
       const n = alertCount();
+      // Same moment the badge is counted: one pass over the alerts, and the
+      // switch on the Alerts tab decides whether anything is said out loud.
+      notifyOfAlerts();
       $('alertbadge').hidden = !n;
       $('alertbadge').textContent = String(n);
       $('alertbadge').className = 'navbadge' + ((state.latest?.inverters ?? []).some((i) => alertsFor(i).some((r) => r.level === 'bad')) ? ' bad' : '');

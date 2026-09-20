@@ -8,6 +8,8 @@ export interface Plant {
   capacityW?: number | null;
   /** The plant's own UTC offset in seconds, where the vendor reports one. */
   tzOffsetSec?: number | null;
+  /** The plant's IANA zone name, where the vendor states one. */
+  tzName?: string | null;
 }
 
 export interface Inverter {
@@ -25,6 +27,12 @@ export interface Inverter {
    * Null when the vendor does not say, and the caller's offset is used instead.
    */
   tzOffsetSec?: number | null;
+  /**
+   * The plant's IANA zone name, where the vendor states one. An offset is a
+   * fact about a moment; only the name stays true through a daylight-saving
+   * switch, so it is kept and used to date each reading.
+   */
+  tzName?: string | null;
 }
 
 /** Pack-level battery figures the inverter reports alongside SOC. */

@@ -510,7 +510,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**314 unit tests** and **266 end-to-end tests** (133 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**323 unit tests** and **290 end-to-end tests** (145 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -546,6 +546,7 @@ Seventeen files, one concern each. Most are pure-function tests against fixtures
 - **`device-shapes.test.ts`** — the shapes a device record arrives in and the fallback each takes: serial, then device id, then nothing; the plant from the record when the caller did not say; every status code the portals use; per-phase AC when only the voltage or only the current is there; import and export preferred over a net wire figure; and metering decided on lifetime totals rather than on a number being present.
 - **`fallbacks.test.ts`** — the arms that only run when something is missing: a Worker deployed with no ingest token refusing every write with 503, an `Authorization` header that is not a bearer token, a curve nested inside `data`, a provider with no hardware list, an inverter that already knows its own name, and the three ways a vendor states a timezone.
 - **`series-rules.test.ts`** — the two rules the chart depends on: a live sample beats a backfilled one for the same instant, whichever arrived first, and a window with no `from` opens at the earliest of the plants' own midnights, falling back to the reader's offset only for a plant the vendor never placed.
+- **`daylight-saving.test.ts`** — a plant in a zone that switches: the zone name kept rather than only its offset, a different offset either side of a real switch, each reading stamped with the offset in force when it was taken, and a summer evening still landing in its own day when the history is read back in winter.
 - **`timezone.test.ts`** — the three shapes a vendor states a timezone in, and where a plant's day begins once one is known: east and west of Greenwich, on it, and on the half hour.
 
 ### End-to-end tests — `tests/e2e/`
@@ -556,13 +557,39 @@ They assert what a person sees, grouped by what it is for: the overview and its 
 
 One retry is allowed locally (two on CI): the suite drives two real Chrome projects in parallel and a page load occasionally overruns the timeout on a loaded laptop. A genuine break still fails twice.
 
+### The dashboard's own script
+
+The end-to-end suite drives `public/index.html`, which carries the whole
+dashboard in one inline script. `tests/e2e/page-coverage.spec.ts` records what
+that walk-through actually executes, using V8's own coverage, and writes the
+figure to `coverage/page-coverage.json` — attached to every run.
+
+**69.6% of the dashboard script**, against a floor of 68% that fails the run if
+it drops. What is not covered is the dashboard answering situations the fixture
+does not create: a vendor error, TV mode's rotation, and the branches behind
+figures neither system reports.
+
+### Accessibility
+
+`tests/e2e/accessibility.spec.ts` runs axe-core's WCAG 2 A and AA rules over
+every view, on desktop and mobile, with real data on screen, and fails the run
+on anything rated **serious or critical**. It also checks that the page can be
+worked through with a keyboard alone, and that every control shows when it has
+focus.
+
+It found real faults on its first run, all since fixed: muted text at 2.93:1
+where 4.5 is the bar, the brand orange used for 16px type at 3.42:1, status
+pills a shade under, and tables that scroll sideways with no way to reach them
+from a keyboard. The brand colours now have darker *ink* versions for type,
+while charts keep the brighter ones.
+
 ### Coverage
 
 `npm run test:unit:coverage` writes a terminal summary plus `coverage/index.html` (and `lcov.info` for CI tooling), and fails the run if it drops below the thresholds in `vitest.config.ts`.
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **98.0%** | **90.5%** | **98.5%** | **99.4%** |
+| **All of `src/`** — everything the Worker ships | **98.0%** | **90.4%** | **98.5%** | **99.4%** |
 | &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 98% | 90% | 97% | **100%** |
 | &nbsp;&nbsp;`db.ts` — every line of SQL | **100%** | 95% | **100%** | **100%** |
 | &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |
@@ -845,6 +872,7 @@ solar-lens/
 ├── vitest.config.ts          unit test runner, coverage provider and thresholds
 ├── playwright.config.ts      two browser projects, static server, retries
 ├── migrations/               D1 schema, applied with `wrangler d1 migrations apply`
+│                             (0012 zone names, and the offset each reading was taken under)
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log

@@ -149,7 +149,7 @@ close - see section 6. What remains:
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | Daylight saving on a stored offset | A plant's UTC offset is read at discovery and refreshed on every poll, so a zone that observes DST is right within five minutes of the switch and wrong for those five. Storing the zone *name* instead of the offset would remove the window entirely | S |
+| 1 | ~~Daylight saving on a stored offset~~ | **Closed in 2.9.** The plant's zone name is stored where the vendor states one, and each reading is stamped with the offset in force at its own timestamp - so a day keeps the boundary it was recorded under, and a summer evening read back in winter still lands in its own day. A plant whose vendor only ever sends a number still falls back to that number | done |
 | 2 | ~~An automated test for the Worker itself~~ | **Closed in 2.7.** Every route, the auth middleware, the SQL and the cron fan-out now run in the unit suite against a real database: `tests/helpers/d1.ts` puts SQLite behind the D1 interface with the project's own migrations applied. All of `src/` measures 97% of statements, where the Worker's own files measured nothing. What a unit test still cannot reach is workerd itself - `crypto.subtle`'s MD5, the asset binding, real network - covered by `npm run probe:solis`, the end-to-end suite and the deploy's smoke test | done |
 | 3 | SolarMan alarm detail | The alert list names a fault and when it was raised, but not when it cleared or what to do about it. SolarMan's portal may carry both on an alert's own detail page; it has not been captured | S |
 
@@ -163,12 +163,18 @@ each check; `Security` in the repository carries what the scanners found.
 
 ## 5. Out of scope, by decision
 
-- **CSV export and scheduled reports.** History itself is presented — the Historical Data tab
-  gives produced, consumed, imported, exported, battery in and out, peak and sample count per
-  day, each day cut at the plant's own midnight — but there is no way to get it out of the
-  browser.
+- ~~**CSV export.**~~ **Built in 2.9**: the Historical Data tab has a Download CSV button that
+  writes the rows on screen - day, month or year - as a file, quoting properly and marking a
+  figure the vendor never reported as empty rather than zero. Built in the page from data
+  already fetched, so it costs no database read. *Scheduled reports* remain out of scope.
 - **Weather, CO₂/trees, earnings and tariffs.**
-- **Notifications** (email/push/webhook on outage or fault).
+- **Notifications, partly.** The Alerts tab has a *Tell me when something changes* switch: the
+  browser raises a notification when a new alert appears, on whichever device has the dashboard
+  open. It is a louder dashboard, not a pager - a machine that is asleep tells nobody anything.
+  **Notifications that arrive with the browser closed** need Web Push: a VAPID key pair, a
+  subscription stored per device, and the cron sending to each. That is worth doing and is not
+  done.
+- **Email and webhook alerts** remain out of scope.
 - **Battery on the on-grid system** — it has none, so the block is hidden rather than showing
   zeros. Only the hybrid renders it.
 - **Remote control** — charge/discharge schedules, grid switch, export limits, firmware updates.
