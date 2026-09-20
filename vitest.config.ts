@@ -37,16 +37,16 @@ export default defineConfig({
       // ordinary refactoring does not. Raise these when you add tests; never
       // lower one to make a red build go green.
       //
-      // Branches sits lower than the rest on purpose, and honestly. The vendor
-      // payloads are long chains of optional fields - pick(r, 'stationName',
-      // 'name') ?? r.id - and v8 counts every arm of every chain. Covering the
-      // last few points means a fixture per arm for figures already proved on
-      // the path that matters. The other three are held above 95.
+      // Branches were the last to come up, and they came up by walking the
+      // arms rather than by lowering the bar: the fallbacks in the vendor
+      // normalisers - pick(r, 'stationName', 'name') ?? r.id - each got a
+      // payload that takes them. One of those arms turned out to store the
+      // string "null" as a plant id.
       thresholds: {
-        statements: 95,
-        branches: 82,
-        functions: 95,
-        lines: 97,
+        statements: 97,
+        branches: 90,
+        functions: 97,
+        lines: 99,
       },
     },
   },

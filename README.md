@@ -510,7 +510,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**275 unit tests** and **266 end-to-end tests** (133 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**314 unit tests** and **266 end-to-end tests** (133 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -543,6 +543,9 @@ Seventeen files, one concern each. Most are pure-function tests against fixtures
 - **`poll.test.ts`** — the cron fan-out: which providers get built from which secrets, `INCLUDE_PLANTS`, a provider that throws not costing the other one, a hardware list failing without costing the reading, and the extras' hourly and daily schedules including the first run's walk back through the years.
 - **`readings.test.ts`** — turning a vendor reply into a reading: SolisCloud's inverter page with the grid sign flipped to the project's convention, and SolarMan's per-device registers layered over its station snapshot, including a register that is present but empty.
 - **`sparse.test.ts`** — what happens when a vendor sends almost nothing: nulls rather than zeros, an empty database answering every read, a device merged rather than overwritten by a thinner second view, and an id with no alias answered as `unknown` rather than echoed.
+- **`device-shapes.test.ts`** — the shapes a device record arrives in and the fallback each takes: serial, then device id, then nothing; the plant from the record when the caller did not say; every status code the portals use; per-phase AC when only the voltage or only the current is there; import and export preferred over a net wire figure; and metering decided on lifetime totals rather than on a number being present.
+- **`fallbacks.test.ts`** — the arms that only run when something is missing: a Worker deployed with no ingest token refusing every write with 503, an `Authorization` header that is not a bearer token, a curve nested inside `data`, a provider with no hardware list, an inverter that already knows its own name, and the three ways a vendor states a timezone.
+- **`series-rules.test.ts`** — the two rules the chart depends on: a live sample beats a backfilled one for the same instant, whichever arrived first, and a window with no `from` opens at the earliest of the plants' own midnights, falling back to the reader's offset only for a plant the vendor never placed.
 - **`timezone.test.ts`** — the three shapes a vendor states a timezone in, and where a plant's day begins once one is known: east and west of Greenwich, on it, and on the half hour.
 
 ### End-to-end tests — `tests/e2e/`
@@ -559,18 +562,18 @@ One retry is allowed locally (two on CI): the suite drives two real Chrome proje
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **97.1%** | **84.7%** | **97.5%** | **99.3%** |
-| &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 95% | 84% | 94% | **99.5%** |
-| &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 83% | 97% | **100%** |
-| &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 89% | 92% | **100%** |
+| **All of `src/`** — everything the Worker ships | **98.0%** | **90.5%** | **98.5%** | **99.4%** |
+| &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 98% | 90% | 97% | **100%** |
+| &nbsp;&nbsp;`db.ts` — every line of SQL | **100%** | 95% | **100%** | **100%** |
+| &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |
 | &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 92% | **100%** | **100%** |
 | &nbsp;&nbsp;`relays.ts` — a relay's report, validated | **100%** | **100%** | **100%** | **100%** |
 | &nbsp;&nbsp;`events.ts` — alarms and period totals | **100%** | 87% | **100%** | **100%** |
 | &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 94% | 92% | **100%** | **100%** |
-| &nbsp;&nbsp;`solarman.ts` | 98% | 83% | **100%** | 99% |
-| &nbsp;&nbsp;`soliscloud.ts` | 98% | 83% | **100%** | 99% |
+| &nbsp;&nbsp;`solarman.ts` | 99% | 91% | **100%** | 99% |
+| &nbsp;&nbsp;`soliscloud.ts` | 98% | 92% | **100%** | 99% |
 | &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 94% | 79% | 94% | 95% |
-| Thresholds enforced in CI | **95%** | **82%** | **95%** | **97%** |
+| Thresholds enforced in CI | **97%** | **90%** | **97%** | **99%** |
 
 **There is one figure now, and it covers the whole Worker.** Until 2.7 there
 were two: an enforced scope of pure functions at 85.9%, and a whole-`src/` row
@@ -587,11 +590,14 @@ be reached from a unit test is workerd itself — `crypto.subtle`'s MD5, the ass
 binding, real network — which `npm run probe:solis`, the end-to-end suite and
 the deploy's smoke test cover instead.
 
-Statements, functions and lines are held at **95% or above**. Branches sits at
-82, lower by design and stated honestly: the vendor payloads are long chains of
-optional fields — `pick(r, 'stationName', 'name') ?? r.id` — and v8 counts every
-arm of every chain. The last few points mean a fixture per arm for figures
-already proved on the path that matters.
+**Every measure is at or above 90%, branches included.** They got there by
+walking the arms rather than by lowering the bar: each fallback in the vendor
+normalisers — `pick(r, 'stationName', 'name') ?? r.id` — was given a payload
+that takes it. That exercise found a real one: a device record with no station
+id was stored with the plant id `"null"`, the four-character string, because
+`pick` answers `null` for a missing key and the code tested it against
+`undefined`. Nothing had ever taken that arm, because every caller passes the
+plant in.
 
 **Raise the thresholds when you add tests; never lower them to turn a red build green.**
 

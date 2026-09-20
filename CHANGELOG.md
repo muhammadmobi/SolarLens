@@ -14,6 +14,34 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [2.8.0] — 2026-09-20
+
+Coverage above 90% on every measure, branches included - and a bug found on the
+way there.
+
+### Fixed
+
+- **A device record with no station id was stored under the plant id `"null"`**,
+  the four-character string. `pick` answers `null` for a key that is missing,
+  and the code tested its result against `undefined`, so the fallback was always
+  taken. It never showed, because every caller passes the plant in - which is
+  exactly the kind of wrong that only a test walking the arm can find.
+
+### Changed
+
+- **Coverage thresholds rise to 97% statements, 90% branches, 97% functions and
+  99% lines**, from 95/82/95/97, and the suite measures 98.0 / 90.5 / 98.5 /
+  99.4 over all of `src/`. 314 unit tests, up from 275.
+
+  Branches came up by walking the arms rather than by lowering the bar: each
+  fallback in the vendor normalisers was given a payload that takes it. Four new
+  suites - `device-shapes`, `fallbacks`, `series-rules` and the earlier
+  `sparse` - cover the shapes a device record arrives in, a Worker deployed
+  without its ingest token, a curve nested inside `data`, an inverter that
+  already knows its own name, the three ways a vendor states a timezone, a live
+  sample beating a backfilled one for the same instant, and where a plant's day
+  begins when the vendor never said where the plant is.
+
 ## [2.7.0] — 2026-09-19
 
 The Worker's own routes, SQL and cron are tested for the first time, against a
@@ -981,6 +1009,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.8.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.4.1...v2.5.0
