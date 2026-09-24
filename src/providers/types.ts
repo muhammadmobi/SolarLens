@@ -3,10 +3,12 @@
  *
  * SolisCloud and SolarMan describe the same things in different words, units
  * and nesting. Each provider (soliscloud.ts, solarman.ts, solarman-web.ts)
- * turns its vendor's answers into these types, and nothing past the provider
- * ever sees a vendor's own field names. Power is watts, energy kWh, times epoch
- * seconds, and a figure the vendor did not report is null - never zero, because
- * zero is a measurement.
+ * turns its vendor's answers into these types, and everything past the provider
+ * reads these fields, not the vendor's. The one exception is deliberate:
+ * Reading.raw carries the vendor's untouched payload, stored in readings.raw
+ * for debugging and for figures not yet normalised, and never served. Power is
+ * watts, energy kWh, times epoch seconds, and a figure the vendor did not report
+ * is null - never zero, because zero is a measurement.
  */
 import type { Alarm, Period } from './events';
 

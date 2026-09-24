@@ -557,7 +557,7 @@ npm run test:e2e:ui         # playwright's inspector, for stepping through a fai
 
 ### Unit tests — `tests/unit/`
 
-Seventeen files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; five drive the Worker itself against a real database, through the two helpers in `tests/helpers/`:
+Twenty-five files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; eight drive the Worker or its database layer against a real database, through the two helpers in `tests/helpers/`:
 
 - **`helpers/d1.ts`** — SQLite behind the D1 interface, with the project's own migrations applied. D1 *is* SQLite and Node ships one, so the SQL a test exercises is the SQL that runs in production. It also refuses a bound value D1 would refuse, which is how a `undefined` reaches a test rather than a deploy.
 - **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about.
@@ -882,7 +882,7 @@ node scripts/ci/check-privacy.mjs     # the guard, over the working tree
 
 ## Data model
 
-Five tables in D1 (`migrations/`), plus a poll log:
+Eleven tables in D1, made by the files in `migrations/`, applied in order:
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
@@ -1028,6 +1028,15 @@ solar-lens/
 │   ├── unit/history.test.ts     day-curve backfill normalisation
 │   ├── unit/pii.test.ts         what is stripped from a stored payload
 │   ├── unit/logging.test.ts     query strings redacted before they reach the log
+│   ├── unit/worker-routes.test.ts  every route, against a real database
+│   ├── unit/worker-edges.test.ts   the unusual paths: odd ingest bodies, failures
+│   ├── unit/poll.test.ts        the cron fan-out: which providers and plants
+│   ├── unit/readings.test.ts    the two paths from a vendor reply to a reading
+│   ├── unit/sparse.test.ts      a vendor that sends almost nothing
+│   ├── unit/device-shapes.test.ts  each shape a device record arrives in
+│   ├── unit/fallbacks.test.ts   the fallback branches nothing else reached
+│   ├── unit/series-rules.test.ts   live beats backfilled; where "today" opens
+│   ├── unit/daylight-saving.test.ts  history that keeps its day across a clock change
 │   ├── unit/public-view.test.ts what a public response may and may not carry
 │   ├── unit/clients.test.ts     the vendor HTTP clients against a stubbed fetch
 │   ├── unit/events.test.ts      alarms and period totals from both vendors
