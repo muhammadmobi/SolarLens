@@ -14,6 +14,23 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [Unreleased]
+
+### Fixed
+
+- **The reading-offset backfill works against the real database.** Its first
+  run against production answered "undefined" for every plant: with `--file`,
+  a remote D1 database treats the statement as a bulk import and replies with
+  import statistics rather than rows, while a local one replies with rows - so
+  it passed every local test. Through the wrangler wrapper instead, a shell
+  splits the statement at every space. The script now runs wrangler's own entry
+  point with node, handing it the statement as one argument, and stops on rows
+  of an unexpected shape rather than printing "undefined" and carrying on. Found
+  on the dry run, before anything was written.
+- The config step of `scripts/wrangler.mjs` is now `scripts/wrangler-config.mjs`,
+  shared by the wrapper and the backfill, so the two cannot drift. The wrapper
+  behaves exactly as before.
+
 ## [2.9.0] — 2026-09-20
 
 Daylight saving handled properly, history as a file, a dashboard that can speak

@@ -29,35 +29,38 @@
  * this says how many it needs before it spends any of them.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { writeLocalConfig } from './wrangler-config.mjs';
 
 const APPLY = process.argv.includes('--apply');
 const LOCAL = process.argv.includes('--local');
 const NUMERIC_OK = process.argv.includes('--use-current-offset');
 const BATCH = 200;
 
-const WORK = mkdtempSync(join(tmpdir(), 'solarlens-backfill-'));
+const CONFIG = writeLocalConfig();
+const WRANGLER = join(dirname(createRequire(import.meta.url).resolve('wrangler/package.json')), 'bin', 'wrangler.js');
 
 /**
- * One `wrangler d1 execute`, through the wrapper that fills in the database id.
+ * One `wrangler d1 execute --command`, with no shell in between.
  *
- * The statement goes in a file rather than on the command line: the wrapper
- * spawns wrangler with a shell, which splits every argument again at its
- * spaces, and a SQL statement is nothing but spaces. --file is handed one path
- * and reads the rest itself.
+ * Both easier routes are wrong, and each was tried. Through `wrangler.mjs`,
+ * a shell splits the statement again at every space. Through `--file`, a
+ * remote database treats the file as a bulk import and answers with import
+ * statistics rather than rows - while a local one answers with rows, so it
+ * looks right until it meets production. Running wrangler's own entry point
+ * with node hands it the statement as one argument, and `--command` returns
+ * rows from both.
  */
 function d1(sql) {
-  const path = join(WORK, 'statement.sql');
-  writeFileSync(path, sql);
-  const args = ['scripts/wrangler.mjs', 'd1', 'execute', 'solar-lens', LOCAL ? '--local' : '--remote', '--json', '--file', path];
+  const args = [WRANGLER, 'd1', 'execute', 'solar-lens', LOCAL ? '--local' : '--remote', '--json', '--command', sql, '--config', CONFIG];
   const out = execFileSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const start = out.indexOf('[');
   const end = out.lastIndexOf(']');
   if (start === -1 || end === -1) throw new Error('no JSON in wrangler output:\n' + out.slice(0, 400));
-  const parsed = JSON.parse(out.slice(start, end + 1));
-  return parsed[0]?.results ?? [];
+  const results = JSON.parse(out.slice(start, end + 1))[0]?.results;
+  if (!Array.isArray(results)) throw new Error('wrangler answered without rows:\n' + out.slice(0, 400));
+  return results;
 }
 
 /** What a zone meant at a given moment, or null when the runtime rejects it. */
@@ -77,6 +80,11 @@ function offsetAt(zone, tsSec) {
 }
 
 const plants = d1('SELECT id, tz_name, tz_offset_sec FROM inverters');
+// Rows of the wrong shape are a stop, not something to print as "undefined"
+// and carry on from.
+if (plants.some((p) => typeof p.id !== 'string')) {
+  throw new Error('the inverter list came back in an unexpected shape: ' + JSON.stringify(plants[0]).slice(0, 200));
+}
 if (!plants.length) {
   console.log('No inverters yet: nothing to repair.');
   process.exit(0);
@@ -142,7 +150,7 @@ for (const plant of plants) {
   process.stdout.write('\n');
 }
 
-rmSync(WORK, { recursive: true, force: true });
+
 
 console.log(APPLY
   ? `\nDone: ${written} reading(s) now carry the offset they were taken under.`
