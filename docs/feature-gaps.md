@@ -97,7 +97,7 @@ live database after 2.10.0.
 | Large-screen / TV mode | ● | ○ | ● `#/tv`: no chrome, sized to the screen, keeps the display awake |
 | Native mobile app | ● | ● | ◐ installable web app — home screen, own window, offline shell; no native build |
 | Stays current after an update | ● app stores | ● app stores | ● an open dashboard offers *Reload* when a new version is out; a TV display reloads itself |
-| In-app guide to the features | ◐ help pages | ◐ help pages | ● the **?** on every page: what each tab holds, where to find things, what is new |
+| In-app guide to the features | ◐ help pages | ◐ help pages | ● the **Guide** button (an open book) on every page: what each tab holds, where to find things, what is new |
 | Fits a phone screen | ● native app | ● native app | ● every view held to the screen width by a test |
 | Remote control (charge schedules, export limit, firmware) | ● | ◐ | ○ **deliberately not** — read-only by design |
 | Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API, reads open, writes gated |

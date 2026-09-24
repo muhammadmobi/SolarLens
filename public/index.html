@@ -176,7 +176,10 @@
   }
   .tvbtn { text-decoration: none; }
   .themebtn:hover, .tvbtn:hover { border-color: var(--muted); }
-  .guidebtn { font-weight: 800; min-width: 36px; text-align: center; }
+  /* The guide button: a book, and the word Guide where there is room for it. */
+  .guidebtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700; }
+  .guidebtn .guideicon { display: block; flex: none; }
+  @media (max-width: 640px) { .guidebtn .guidelabel { display: none; } }
   .guidebtn.on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 
   /* ---------- the guide (#/guide) ---------- */
@@ -665,7 +668,7 @@
       <div class="fitem" id="wx-item" hidden><span class="flabel">Weather</span><span class="num small" id="fleet-wx">—</span></div>
     </div>
     <span class="livedot" id="updated"><i></i>loading…</span>
-    <a class="tvbtn guidebtn" id="guidebtn" href="#/guide" aria-label="Guide: what SolarLens does and where to find it" title="Guide: what SolarLens does and where to find it">?</a>
+    <a class="tvbtn guidebtn" id="guidebtn" href="#/guide" aria-label="Guide: what SolarLens does and where to find it" title="Guide: what SolarLens does and where to find it"><svg class="guideicon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 6.5C10.3 5.2 7.9 4.5 3 4.5v13c4.9 0 7.3.7 9 2 1.7-1.3 4.1-2 9-2v-13c-4.9 0-7.3.7-9 2z"/><path d="M12 6.5v13"/></svg><span class="guidelabel">Guide</span></a>
     <a class="tvbtn" id="tvbtn" href="#/tv" aria-label="TV mode" title="TV mode: full screen, for a wall display">📺</a>
     <button class="themebtn" id="theme" type="button" aria-label="Change theme">🖥️</button>
   </div>
@@ -710,7 +713,7 @@
     historical data  the Historical Data tab
     devices          the Devices tab: hardware and SolisCloud relays
     system detail    one system in full: the blocks Power and a system page share
-    the guide        the ? page
+    the guide        the Guide page, behind the book icon in the header
     routing          which view the address (#/...) asks for; TV mode
     loading data     fetching from /api, on a timer and on coming back to the tab
     theme            light, dark, or follow the device
@@ -2960,7 +2963,7 @@
   // ---------- the guide ----------
   //
   // What SolarLens is, what is on each tab, and where to find things - opened
-  // from the "?" in the header. A guide is reference, read now and then, so it
+  // from the Guide button (an open book) in the header. A guide is reference, read now and then, so it
   // sits behind an icon rather than taking a tab from the pages used every day.
   // RELEASE is kept equal to package.json's version by a unit test, so the
   // guide never describes a release other than the one it ships with.
@@ -3013,7 +3016,7 @@
           told once, and again only if it clears and comes back.</li>
         <li><strong>SolarMan faults now say when they cleared,</strong> and SolarMan's advice where it gives any. Faults
           it used to fold into one line a day are shown one by one.</li>
-        <li><strong>This guide.</strong> The <strong>?</strong> at the top of every page.</li>
+        <li><strong>This guide.</strong> The <strong>Guide</strong> button, the open book at the top of every page.</li>
       </ul>
       <p class="cardnote">In 2.9: Download CSV on Historical Data, the <em>Tell me when something changes</em> switch,
         days that stay correct when the clocks change, and every page checked for accessibility.</p>
@@ -3046,7 +3049,7 @@
         <li><strong>Producing now, Produced today, Consumed today</strong> - every system added together. A system that
           has gone quiet counts as zero and is named underneath.</li>
         <li><strong>The green dot</strong> says when the page last heard from the server. Amber means it has not for a while.</li>
-        <li><strong>?</strong> this guide · <strong>📺</strong> TV mode · <strong>🖥️</strong> light or dark.</li>
+        <li><strong>Guide</strong> (the open book) this page · <strong>📺</strong> TV mode · <strong>🖥️</strong> light or dark.</li>
       </ul></div></section>
 
       <section class="card"><h2>Good to know</h2><div class="body"><ul>

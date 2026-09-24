@@ -1,5 +1,5 @@
 /**
- * The guide, behind the "?" at the top of every page.
+ * The guide, behind the Guide button - an open book - at the top of every page.
  *
  * What is held here is what makes a guide worth having: it is one tap from
  * anywhere, it opens even when there is no data yet, it names the systems it is
@@ -26,7 +26,7 @@ async function stubApi(page: Page) {
   }
 }
 
-test('opens from the ? at the top of any page, and marks itself as the page you are on', async ({ page }) => {
+test('opens from the Guide button at the top of any page, and marks itself as the page you are on', async ({ page }) => {
   await stubApi(page);
   await page.goto('/#/power');
   await expect(page.locator('#view')).not.toBeEmpty();
@@ -41,6 +41,18 @@ test('opens from the ? at the top of any page, and marks itself as the page you 
   await expect(button).toHaveClass(/\bon\b/);
   // It is not one of the everyday tabs, so none of them is marked.
   await expect(page.locator('nav#nav a.on')).toHaveCount(0);
+});
+
+test('shows a book and the word Guide, and only the book on a phone', async ({ page }, testInfo) => {
+  await stubApi(page);
+  await page.goto('/');
+  const button = page.locator('#guidebtn');
+  await expect(button.locator('svg.guideicon')).toBeVisible();
+  // The icon is decoration; the button's name is what a screen reader says.
+  await expect(button.locator('svg.guideicon')).toHaveAttribute('aria-hidden', 'true');
+  const label = button.locator('.guidelabel');
+  if (testInfo.project.name === 'mobile') await expect(label).toBeHidden();
+  else await expect(label).toHaveText('Guide');
 });
 
 test('says which release it describes, and names the systems it is describing', async ({ page }) => {
