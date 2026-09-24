@@ -179,8 +179,12 @@ Two things worth knowing before writing SQL here:
 
 One file, `public/index.html`: markup, styles and script, no build step and no
 framework. It polls `/api/latest` and `/api/series`, pauses while the tab is
-hidden, and renders five views - Overview, Historical, Devices, Alerts and a TV
-mode for a wall display.
+hidden, and renders its views - Overview, Power, Historical Data, Alerts,
+Devices, a TV mode for a wall display, and the Guide behind the **?** in the
+header, which explains all of them to someone who has never seen the app. The
+Guide carries the release number in `RELEASE`; a unit test fails if it differs
+from package.json, so bumping the version means bumping it there too, and
+writing its "What is new" card.
 
 Two behaviours to know before changing it:
 

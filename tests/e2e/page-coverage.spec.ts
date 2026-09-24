@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 /**
  * Set below what the walk-through achieves, with room for the code to grow.
  *
- * Measured at 67.3% when this was written, of 120 kB of script. It had been
+ * Measured at 69.4% when this was written, of 136 kB of script. It had been
  * 69.6% an hour earlier, and the difference was not the machine: this change
  * added the CSV writer and the notification switch, whose branches the
  * walk-through only partly reaches, so the same suite covers a larger page.
@@ -143,7 +143,7 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
 
   // Walk the dashboard the way a person would: every view, both systems, the
   // ranges, a system's own page, its raw telemetry, and the theme switch.
-  for (const hash of ['#/power', '#/history', '#/alerts', '#/devices', '#/system/s1', '#/system/s2', '#/tv', '#/']) {
+  for (const hash of ['#/power', '#/history', '#/alerts', '#/devices', '#/system/s1', '#/system/s2', '#/tv', '#/guide', '#/']) {
     await page.goto(`/${hash}`);
     await expect(page.locator('#view')).not.toBeEmpty();
     await page.waitForTimeout(120);

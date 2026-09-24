@@ -176,6 +176,33 @@
   }
   .tvbtn { text-decoration: none; }
   .themebtn:hover, .tvbtn:hover { border-color: var(--muted); }
+  .guidebtn { font-weight: 800; min-width: 36px; text-align: center; }
+  .guidebtn.on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+
+  /* ---------- the guide (#/guide) ---------- */
+  .guide { display: grid; gap: 16px; }
+  .guide p { margin: 0 0 10px; max-width: 74ch; line-height: 1.55; }
+  .guide p:last-child { margin-bottom: 0; }
+  .guide ul + .cardnote { margin-top: 16px; }
+  .guide .lead { font-size: 15.5px; }
+  .guide ul { margin: 0; padding-left: 20px; display: grid; gap: 7px; max-width: 78ch; line-height: 1.5; }
+  .guide .ver { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2);
+    font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: none; color: var(--muted); }
+  .guide .systems { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .guide .systems span { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }
+  .guide dl.tabs { display: grid; grid-template-columns: minmax(140px, max-content) 1fr; gap: 12px 20px; margin: 0; }
+  .guide dl.tabs dt { font-weight: 700; }
+  .guide dl.tabs dt a { color: var(--ink); }
+  .guide dl.tabs dd { margin: 0; color: var(--muted); line-height: 1.5; max-width: 78ch; }
+  .guide table.find { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .guide table.find th, .guide table.find td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  .guide table.find th { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
+  .guide table.find td:last-child { color: var(--muted); }
+  .guide table.find a { color: var(--ink); font-weight: 600; }
+  @media (max-width: 640px) {
+    .guide dl.tabs { grid-template-columns: 1fr; gap: 4px; }
+    .guide dl.tabs dd { margin-bottom: 10px; }
+  }
 
   nav { display: flex; gap: 2px; padding: 10px 0 0; }
   nav a {
@@ -613,6 +640,7 @@
       <div class="fitem" id="wx-item" hidden><span class="flabel">Weather</span><span class="num small" id="fleet-wx">—</span></div>
     </div>
     <span class="livedot" id="updated"><i></i>loading…</span>
+    <a class="tvbtn guidebtn" id="guidebtn" href="#/guide" aria-label="Guide: what SolarLens does and where to find it" title="Guide: what SolarLens does and where to find it">?</a>
     <a class="tvbtn" id="tvbtn" href="#/tv" aria-label="TV mode" title="TV mode: full screen, for a wall display">📺</a>
     <button class="themebtn" id="theme" type="button" aria-label="Change theme">🖥️</button>
   </div>
@@ -2748,10 +2776,116 @@
     bindRawFilters();
   }
 
+  // ---------- the guide ----------
+  //
+  // What SolarLens is, what is on each tab, and where to find things - opened
+  // from the "?" in the header. A guide is reference, read now and then, so it
+  // sits behind an icon rather than taking a tab from the pages used every day.
+  // RELEASE is kept equal to package.json's version by a unit test, so the
+  // guide never describes a release other than the one it ships with.
+  const RELEASE = '2.10.0';
+
+  function renderGuide() {
+    const systems = (state.latest?.inverters ?? []).map((inv) => {
+      const size = inv.capacity_w ? ` · ${(inv.capacity_w / 1000).toFixed(inv.capacity_w % 1000 ? 1 : 0)} kW` : '';
+      const batt = inv.battery_soc != null ? ' · with a battery' : '';
+      return `<span><strong>${esc(inv.name)}</strong> · ${esc(providerName(inv.provider))}${size}${batt}</span>`;
+    }).join('');
+    const tab = (href, name) => `<a href="${href}">${name}</a>`;
+    const rows = [
+      ['See what each system is producing right now', tab('#/', 'Overview')],
+      ['Compare both systems on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
+      ['See one system on its own, in full', `${tab('#/', 'Overview')} - tap the system`],
+      ['Daily, monthly or yearly totals', `${tab('#/history', 'Historical Data')} - Day, Month or Year at the top`],
+      ['Take the figures into a spreadsheet', `${tab('#/history', 'Historical Data')} - Download CSV`],
+      ['Know what is wrong right now', `${tab('#/alerts', 'Alerts')} - the number on the tab counts it`],
+      ['See past faults, and how long each lasted', `${tab('#/alerts', 'Alerts')} - Fault history, under each system`],
+      ['Be told on your phone when something goes wrong', `${tab('#/alerts', 'Alerts')} - Also when this browser is closed`],
+      ['Battery charge through the day', `${tab('#/power', 'Power')}, under the hybrid system - Charge today`],
+      ['PV strings, voltages, currents, temperature', `${tab('#/power', 'Power')}, under each system`],
+      ['Inverter model, firmware, datalogger signal', tab('#/devices', 'Devices')],
+      ['Warranty and installation date', `${tab('#/power', 'Power')}, under each system, or the system on its own`],
+      ['When each laptop\'s SolisCloud login runs out', `${tab('#/devices', 'Devices')} - SolisCloud relays`],
+      ['Every raw figure the vendor sent', `${tab('#/power', 'Power')}, under each system - Raw telemetry, with a filter`],
+      ['Show it on a wall screen', `📺 at the top - ${tab('#/tv', 'TV mode')}; Esc to leave`],
+      ['Light or dark', '🖥️ at the top - follows your device, or pick one'],
+      ['Put it on a phone\'s home screen', 'Your browser\'s menu - Add to Home Screen (on an iPhone, the Share button)'],
+    ].map(([want, where]) => `<tr><td>${want}</td><td>${where}</td></tr>`).join('');
+
+    $('view').innerHTML = `<div class="guide">
+      <section class="card"><h2>Guide<span class="ver">SolarLens ${RELEASE}</span></h2><div class="body">
+        <p class="lead">SolarLens puts your solar systems on one page. Each system is watched by a different vendor's cloud,
+          SolisCloud or SolarMan; SolarLens reads both every five minutes, keeps every reading in its own database,
+          and shows them side by side - in the same units, on the same clock, in each system's own time.</p>
+        <p>Nothing here can change an inverter: SolarLens only reads. Anyone with the link can view it, and the vendors'
+          account and serial numbers are removed before anything leaves the server.</p>
+        ${systems ? `<div class="systems" aria-label="Your systems">${systems}</div>` : ''}
+      </div></section>
+
+      <section class="card"><h2>What is new in ${RELEASE}</h2><div class="body"><ul>
+        <li><strong>Notifications on your phone, even with the dashboard closed.</strong> Alerts tab - <em>Also when this
+          browser is closed</em> - Turn on for this device. You are told when a system stops reporting while it was
+          producing, a fault is recorded, a SolisCloud login is about to run out, or a vendor stops answering. Each is
+          told once, and again only if it clears and comes back.</li>
+        <li><strong>SolarMan faults now say when they cleared,</strong> and SolarMan's advice where it gives any. Faults
+          it used to fold into one line a day are shown one by one.</li>
+        <li><strong>This guide.</strong> The <strong>?</strong> at the top of every page.</li>
+      </ul>
+      <p class="cardnote">In 2.9: Download CSV on Historical Data, the <em>Tell me when something changes</em> switch,
+        days that stay correct when the clocks change, and every page checked for accessibility.</p>
+      </div></section>
+
+      <section class="card"><h2>The tabs</h2><div class="body"><dl class="tabs">
+        <dt>${tab('#/', 'Overview')}</dt>
+        <dd>Every system at a glance: what it is producing now, what it has made today, where the power is going -
+          the house, the grid, the battery - and today's curve with its peak. Tap a system to open it on its own.</dd>
+        <dt>${tab('#/power', 'Power')}</dt>
+        <dd>Both systems on one chart, plus each system in full, one below the other: energy today, this month, this
+          year and in total; grid in and out; the battery; each PV string and AC phase; and the raw telemetry.</dd>
+        <dt>${tab('#/history', 'Historical Data')}</dt>
+        <dd>The record, by day, month or year - back to installation for months and years, from each vendor's own totals.
+          Each row says whose figure it is. Download CSV takes the rows on screen.</dd>
+        <dt>${tab('#/alerts', 'Alerts')}</dt>
+        <dd>What is wrong now, system by system, and what was checked when nothing is. Below that, each system's fault
+          history with how long every fault lasted. The notification switches are here.</dd>
+        <dt>${tab('#/devices', 'Devices')}</dt>
+        <dd>The hardware: inverters and dataloggers with model, firmware and signal strength - and the
+          SolisCloud relay laptops, with when each one's login runs out.</dd>
+      </dl></div></section>
+
+      <section class="card"><h2>Where to find it</h2><div class="tablewrap" tabindex="0" role="region" aria-label="Where to find it, scrolls sideways">
+        <table class="find"><thead><tr><th scope="col">I want to</th><th scope="col">Go to</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      </div></section>
+
+      <section class="card"><h2>Along the top</h2><div class="body"><ul>
+        <li><strong>Producing now, Produced today, Consumed today</strong> - every system added together. A system that
+          has gone quiet counts as zero and is named underneath.</li>
+        <li><strong>The green dot</strong> says when the page last heard from the server. Amber means it has not for a while.</li>
+        <li><strong>?</strong> this guide · <strong>📺</strong> TV mode · <strong>🖥️</strong> light or dark.</li>
+      </ul></div></section>
+
+      <section class="card"><h2>Good to know</h2><div class="body"><ul>
+        <li><strong>An on-grid system reads offline every night.</strong> Its inverter switches off when the sun goes
+          down and SolisCloud reports it offline until morning. That is normal, and it is not announced to your phone.</li>
+        <li><strong>SolisCloud's figures come through a relay</strong> - a small program on a laptop, because SolisCloud
+          cannot be read from the server directly. If any one relay laptop is on, the figures keep coming; with two on,
+          each reading is still stored once.</li>
+        <li><strong>A SolisCloud login lasts seven days</strong> and cannot renew itself. The Alerts tab warns two days
+          ahead; renew it by double-clicking <code>renew-solis-login.cmd</code> on that laptop.</li>
+        <li><strong>Times are each system's own.</strong> A peak "at 12:40" is 12:40 where the panels are, wherever you
+          are reading from.</li>
+        <li><strong>A figure the vendor did not report is shown as a dash, not a zero,</strong> so a blank never passes
+          for "nothing happened".</li>
+      </ul></div></section>
+    </div>`;
+  }
+
   // ---------- routing ----------
   function route() {
     const hash = location.hash || '#/';
     for (const a of $('nav').children) a.classList.toggle('on', a.getAttribute('href') === hash);
+    $('guidebtn').classList.toggle('on', hash === '#/guide');
     document.body.classList.remove('ovfit');
     const tv = hash === '#/tv';
     if (document.body.classList.contains('tv') !== tv) {
@@ -2766,6 +2900,9 @@
       $('view').innerHTML = `<div class="card"><div class="empty">The server refused this request. If it persists, redeploy.</div></div>`;
       return;
     }
+    // The guide needs no data, so it does not wait for any: it is the page to
+    // read while the rest is still loading, or when the feeds are down.
+    if (hash === '#/guide') return renderGuide();
     if (!state.latest) return; // first paint waits for data
     const sys = hash.match(/^#\/system\/(.+)$/);
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
