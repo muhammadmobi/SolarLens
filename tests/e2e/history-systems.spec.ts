@@ -10,13 +10,16 @@ import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 
 const NOW = Math.floor(Date.UTC(2026, 8, 8, 9, 0, 0) / 1000);
+// One API answer: a 200 with a JSON body, for page.route to fulfil.
 const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
+// One day's row as /api/history returns it.
 const day = (inverter_id: string, d: string, yield_kwh: number) => ({
   inverter_id, day: d, yield_kwh, peak_w: 5000, load_kwh: null, import_kwh: null, export_kwh: null,
   batt_charge_kwh: null, batt_discharge_kwh: null, samples: 200, first_ts: NOW - 86_400, last_ts: NOW,
 });
 
+/** Two systems and five days of history between them; every other route answers empty. */
 async function stubApi(page: Page) {
   await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters: [
     { id: 's1', name: 'Solis Ongrid', provider: 'soliscloud', capacity_w: 12_000, ts: NOW - 60, ac_power_w: 8000, status: 'normal', source: 'soliscloud-relay', metrics: null },
@@ -31,6 +34,7 @@ async function stubApi(page: Page) {
   }
 }
 
+// The names of the system sections the tab is showing, in order.
 const sections = (page: Page) => page.locator('#view details.syssec .sname');
 
 test('shows every system by default, with a switch to see one on its own', async ({ page }) => {

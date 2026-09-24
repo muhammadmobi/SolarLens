@@ -11,6 +11,7 @@
 import { expect, test } from '@playwright/test';
 
 const NOW = Math.floor(Date.UTC(2026, 8, 8, 9, 0, 0) / 1000);
+// One API answer: a 200 with a JSON body, for page.route to fulfil.
 const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
 test('no view is wider than the screen', async ({ page }) => {

@@ -35,6 +35,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Migrations, then the deploy, then a smoke test of the live site, and the
+  # previous version put back if that test fails. When it fails, the step
+  # "Ask the live site whether it works" names each check that did; the same
+  # test runs locally against any URL: SOLARLENS_URL=<url> node scripts/ci/smoke.mjs
   deploy:
     name: Deploy to production
     if: >-

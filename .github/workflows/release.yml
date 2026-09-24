@@ -27,6 +27,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Refuses unless the version, the changelog and the tag agree. Before
+  # pressing the button, the same check runs locally:
+  # node scripts/ci/release-notes.mjs <version> --out notes.md
   release:
     name: Tag and publish
     runs-on: ubuntu-latest

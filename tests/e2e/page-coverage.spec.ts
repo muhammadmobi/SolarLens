@@ -43,6 +43,7 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   test.skip(testInfo.project.name !== 'chrome', 'measured once, on the desktop walk-through');
 
   const NOW = Math.floor(Date.UTC(2026, 8, 8, 9, 0, 0) / 1000);
+  // One API answer: a 200 with a JSON body, for page.route to fulfil.
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   const inverters = [
     {

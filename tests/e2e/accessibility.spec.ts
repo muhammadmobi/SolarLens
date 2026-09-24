@@ -34,6 +34,7 @@ async function stubApi(page: Page) {
     },
   ];
   const points = [0, 1, 2, 3].map((i) => ({ inverter_id: 's1', ts: NOW - i * 300, ac_power_w: 8000 - i * 200 }));
+  // One API answer: a 200 with a JSON body, for page.route to fulfil.
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
   await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters })));

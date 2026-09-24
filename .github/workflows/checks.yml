@@ -24,7 +24,11 @@ concurrency:
   group: checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Each job below says what it proves and how to reproduce it on your own
+# machine when it fails. Every one can be run locally without secrets.
 jobs:
+  # Proves the Worker and the tests compile. Locally: npm run typecheck
+  # (it checks src/ with tsconfig.json, then tests/ with tsconfig.tests.json).
   typecheck:
     name: Type check
     runs-on: ubuntu-latest
@@ -38,6 +42,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
 
+  # Proves the Worker's logic, routes and SQL, and that coverage stays above the
+  # floors in vitest.config.ts. Locally: npm run test:unit:coverage, then open
+  # coverage/index.html to see which lines are not reached.
   unit:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -59,6 +66,10 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # Proves the dashboard, in real Chrome, desktop and phone. Locally:
+  # npm run test:e2e (or npm run test:e2e:ui to watch it). On a failure here,
+  # download the playwright-report artifact and open a trace with
+  # npx playwright show-trace <file>: it replays the test step by step.
   e2e:
     name: End-to-end tests
     runs-on: ubuntu-latest
@@ -95,6 +106,8 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # Proves the Worker bundles for Cloudflare, without deploying it. Locally:
+  # CF_D1_DATABASE_ID=any npm run cf -- deploy --dry-run
   build:
     name: Build check
     runs-on: ubuntu-latest
@@ -113,6 +126,9 @@ jobs:
         env:
           CF_D1_DATABASE_ID: dry-run-no-real-id
 
+  # The project's own rules, each a small script in scripts/ci/ whose message
+  # says what it refused and why. Locally: node scripts/ci/check-privacy.mjs,
+  # check-attribution.mjs --range main..HEAD, check-headers.mjs, check-cmd-shape.mjs.
   guards:
     name: Privacy, attribution and headers
     runs-on: ubuntu-latest
@@ -156,6 +172,9 @@ jobs:
       - name: Batch files
         run: node scripts/ci/check-cmd-shape.mjs
 
+  # Proves the relay laptop's PowerShell scripts parse and lint on Windows
+  # PowerShell 5.1, and that the relay refuses to start without its settings.
+  # Locally, on Windows: run the same PowerShell as the steps below.
   relay-scripts:
     name: Relay scripts (Windows)
     runs-on: windows-latest

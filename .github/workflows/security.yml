@@ -28,6 +28,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # GitHub's code scanning; fails on a finding rated high or worse. Findings
+  # are listed under the repository's Security tab, with the line and the fix.
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
@@ -47,6 +49,8 @@ jobs:
         with:
           category: /language:javascript-typescript
 
+  # On a pull request: refuses a new dependency with a high or critical advisory.
+  # The job's summary names the package and the advisory.
   dependency-review:
     name: Dependency review
     runs-on: ubuntu-latest
@@ -61,6 +65,7 @@ jobs:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
 
+  # Known vulnerabilities in what ships. Locally: npm audit --omit=dev
   audit:
     name: npm audit
     runs-on: ubuntu-latest
@@ -91,6 +96,8 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # A leaked token anywhere in the history, found by gitleaks. Locally, with
+  # gitleaks installed: gitleaks detect --source . --redact
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
@@ -117,6 +124,7 @@ jobs:
       - name: Scan the history
         run: ./gitleaks detect --source . --redact --no-banner --exit-code 1
 
+  # Mistakes in these workflow files themselves. Locally, with actionlint: actionlint
   workflows:
     name: Workflow lint
     runs-on: ubuntu-latest
@@ -139,6 +147,8 @@ jobs:
       - name: Lint the workflows
         run: ./actionlint -color
 
+  # Every action pinned to a commit, not a movable tag. Locally:
+  # node scripts/ci/check-pinned-actions.mjs
   pinned-actions:
     name: Actions are pinned
     runs-on: ubuntu-latest

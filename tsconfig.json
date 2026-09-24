@@ -1,3 +1,7 @@
+// Type-checking for the Worker (src/). It is only checked, never compiled by
+// tsc: wrangler bundles src/index.ts with esbuild when it deploys. The tests
+// have their own config, tsconfig.tests.json, because they also need Node's
+// and the browser's types.
 {
   "compilerOptions": {
     "target": "es2022",

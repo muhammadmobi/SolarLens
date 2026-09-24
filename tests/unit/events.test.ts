@@ -78,6 +78,7 @@ describe('solisAlarm', () => {
 });
 
 describe('solarmanAlert', () => {
+  // A SolarMan alert-list row, in the shape the portal returns it.
   const rec = (over: Record<string, unknown> = {}) => ({
     stationName: 'Demo Hybrid', deviceType: 'INVERTER', deviceSn: 'DEMOSN000002',
     timezone: 'Etc/GMT-9', deviceName: 'Inverter', addr: 'fake', type: 0, level: 2,
@@ -124,6 +125,7 @@ describe('readableFaultName', () => {
 });
 
 describe('solisPeriods', () => {
+  // One point of a SolisCloud month or year chart.
   const point = (over: Record<string, unknown> = {}) => ({
     energy: 34.1, energyStr: 'kWh', fullHour: 2.84, dateStr: '2026-09-01', timeZone: 8,
     batteryDischargeEnergy: 0, batteryChargeEnergy: 0, gridPurchasedEnergy: 0, gridSellEnergy: 0,
@@ -169,6 +171,7 @@ describe('solisPeriods', () => {
 });
 
 describe('solarmanPeriods', () => {
+  // One SolarMan period record: a day, or a month when day is 0.
   const rec = (over: Record<string, unknown> = {}) => ({
     systemId: 60000000, year: 2026, month: 9, day: 1, generationValue: 9.3, useValue: 8.3,
     gridValue: 5.6, buyValue: 5.2, chargeValue: 0.6, dischargeValue: 0, fullPowerHoursDay: 2.66,

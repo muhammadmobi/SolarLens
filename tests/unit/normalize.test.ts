@@ -157,6 +157,7 @@ describe('SolarMan station normaliser', () => {
 });
 
 describe('plantFilter', () => {
+  // The one binding plantFilter reads.
   const env = (v?: string) => ({ INCLUDE_PLANTS: v }) as Parameters<typeof plantFilter>[0];
   it('accepts every plant when INCLUDE_PLANTS is unset or blank', () => {
     expect(plantFilter(env(undefined))('any')).toBe(true);

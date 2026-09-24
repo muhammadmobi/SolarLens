@@ -181,9 +181,11 @@ describe('what is worth waking a phone for', () => {
     expect(e.body).toBe(`Warning. Began ${clockOf(NOW - 600)}, still active.`);
   });
 
+  // The HH:MM a notification should print for a time, in UTC (the test plant's zone).
   const clockOf = (ts: number) => new Date(ts * 1000).toISOString().slice(11, 16);
 
   it('a SolisCloud login two days out, and one that has run out, named as the dashboard names them', async () => {
+    // A relay row, first seen at `first`, which fixes the order it is numbered in.
     const relay = (id: string, name: string | null, state: string, exp: number | null, first: number) =>
       h.env.DB.prepare(`INSERT INTO relays (id, provider, name, state, login_expires_at, first_seen, last_seen)
                         VALUES (?1, 'soliscloud', ?2, ?3, ?4, ?5, ?6)`).bind(id, name, state, exp, first, NOW - 60).run();
@@ -202,6 +204,7 @@ describe('what is worth waking a phone for', () => {
   });
 
   it('a vendor whose last three reads failed across a quarter of an hour, and not one hiccup', async () => {
+    // One line of the poll log at a given time.
     const log = (ts: number, provider: string, ok: number, detail: string) =>
       h.env.DB.prepare('INSERT INTO poll_log (ts, provider, ok, detail) VALUES (?1, ?2, ?3, ?4)').bind(ts, provider, ok, detail).run();
     await log(NOW - 20 * 60, 'solarman', 0, 'HTTP 401');
@@ -314,6 +317,7 @@ describe('the push routes', () => {
   beforeEach(async () => { h = createHarness({ VAPID_KEY: await makeKey() }); });
   afterEach(() => h.close());
 
+  // A POST to a push route, with the key unless auth is false.
   const post = (path: string, body: unknown, auth = true) => h.fetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(auth ? bearer(API) : {}) },
@@ -480,6 +484,7 @@ describe('told once, for as long as it lasts', () => {
                       ON CONFLICT(id) DO UPDATE SET state = excluded.state, login_expires_at = excluded.login_expires_at,
                                                     last_seen = excluded.last_seen`)
       .bind(state, exp, NOW).run();
+  // `count` failed polls, five minutes apart, starting at `from`.
   const fails = (from: number, count: number, provider = 'solarman') => Promise.all(
     Array.from({ length: count }, (_, i) => h.env.DB
       .prepare('INSERT INTO poll_log (ts, provider, ok, detail) VALUES (?1, ?2, 0, ?3)')

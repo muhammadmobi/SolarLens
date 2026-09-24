@@ -312,6 +312,10 @@ break it mid-run).
 | After any release | Nothing: an open dashboard offers *Reload* within fifteen minutes, or on coming back to the tab, and a TV display reloads itself |
 | Occasionally | Check the D1 read budget if the dashboard is left open on many screens |
 
+**Seeing what is happening**: the README's *Debugging the live system* has the
+commands - the Worker's live log, `/api/health`, a query against production,
+and running a relay in a visible window, since a hidden relay writes no log.
+
 **When something is wrong**
 
 | Symptom | Almost always | Fix |

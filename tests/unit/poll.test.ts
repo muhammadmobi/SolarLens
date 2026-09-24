@@ -227,6 +227,7 @@ describe('pollExtras', () => {
 });
 
 describe('yearsFromMonths', () => {
+  // One vendor month total for the plant.
   const month = (key: string, yieldKwh: number | null, over: Record<string, unknown> = {}) => ({
     inverterId: 'soliscloud:station:plant-1', provider: 'soliscloud', period: 'month' as const, key,
     yieldKwh, loadKwh: null, importKwh: null, exportKwh: null, chargeKwh: null, dischargeKwh: null,

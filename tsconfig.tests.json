@@ -1,3 +1,7 @@
+// Type-checking for tests/, and src/ again because the tests import it. It
+// extends the Worker's config and adds two sets of types: Node's (the SQLite
+// database behind D1, reading fixture files) and the DOM's (code the
+// end-to-end tests run inside the page). npm run typecheck checks both configs.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {

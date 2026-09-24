@@ -16,6 +16,7 @@ import type { Env } from '../../src/db';
 import type { Plant, Provider } from '../../src/providers/types';
 
 const INGEST = 'ingest-token-for-tests';
+// A POST with the relay's token, as the ingest routes expect.
 const post = (body: unknown) => ({
   method: 'POST',
   headers: { 'content-type': 'application/json', ...bearer(INGEST) },
@@ -148,6 +149,7 @@ describe('the cron fan-out, at its edges', () => {
 });
 
 describe('year totals from month totals', () => {
+  // One vendor month total for the plant.
   const month = (key: string, yieldKwh: number | null, loadKwh: number | null = null) => ({
     inverterId: 'soliscloud:station:p1', provider: 'soliscloud', period: 'month' as const, key,
     yieldKwh, loadKwh, importKwh: null, exportKwh: null, chargeKwh: null, dischargeKwh: null,
