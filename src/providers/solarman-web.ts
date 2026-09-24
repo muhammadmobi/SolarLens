@@ -1,9 +1,3 @@
-import type { Device, Inverter, Plant, Provider, Reading } from './types';
-import { CallQueue } from './queue';
-import { num, offsetOfZoneAt, pick, toWatts, tzNameOf, tzOffsetSec } from './units';
-import { STATION_PREFIX, deviceFromRecord, deviceFromV3Detail, stationInverter, stationReading, type TokenStore } from './solarman';
-import { solarmanAdvice, solarmanAlert, solarmanOccurrences, solarmanPeriods, type Alarm, type Period } from './events';
-
 /**
  * UNOFFICIAL fallback: drives the same endpoints the SOLARMAN Smart web portal
  * uses, authenticated with tokens copied from a browser login. Password login
@@ -14,6 +8,12 @@ import { solarmanAdvice, solarmanAlert, solarmanOccurrences, solarmanPeriods, ty
  * It can break whenever the portal changes; the refresh grant below is a
  * standard OAuth2 form and has not yet been exercised against the real server.
  */
+import type { Device, Inverter, Plant, Provider, Reading } from './types';
+import { CallQueue } from './queue';
+import { num, offsetOfZoneAt, pick, toWatts, tzNameOf, tzOffsetSec } from './units';
+import { STATION_PREFIX, deviceFromRecord, deviceFromV3Detail, stationInverter, stationReading, type TokenStore } from './solarman';
+import { solarmanAdvice, solarmanAlert, solarmanOccurrences, solarmanPeriods, type Alarm, type Period } from './events';
+
 export interface SolarmanWebCredentials {
   refreshToken: string;
   /** Optional seed; otherwise the first poll refreshes straight away. */
