@@ -48,6 +48,11 @@ export interface TestD1 {
   close(): void;
 }
 
+/**
+ * A fresh in-memory SQLite database behind D1's interface, with every file in
+ * migrations/ applied in order - the same schema production has. Each test
+ * makes its own, so tests never share rows.
+ */
 export function createTestD1(options: { migrationsDir?: string } = {}): TestD1 {
   const sqlite = new DatabaseSync(':memory:');
   const sql: string[] = [];
@@ -57,6 +62,8 @@ export function createTestD1(options: { migrationsDir?: string } = {}): TestD1 {
     return stmt as unknown as { all(...a: unknown[]): Row[] };
   };
 
+  // Run one statement the way D1 would: ?1-style parameters, and the result
+  // shaped as D1 shapes it - rows for all, one row for first, changes for run.
   const run = (text: string, values: unknown[], kind: 'all' | 'run' | 'get') => {
     const { sql: prepared, numbered } = toNamed(text);
     const stmt = sqlite.prepare(prepared);

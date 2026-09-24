@@ -34,6 +34,24 @@ checkout of any tag says which release it is.
   has nobody to press anything, so a wall display reloads itself. It costs one
   tiny request each time and nothing on the database.
 
+### Changed
+
+- **The code explains itself.** Every source file now opens with what it is for
+  and how it fits with the others - the Worker's routes and cron, the database
+  layer, each vendor's client, the relay agent, the scripts - and each function
+  worth explaining has a summary above it. The dashboard's script opens with a
+  map of its twenty sections, each marked so it can be found by searching. Test
+  files say what they hold the code to, and the shared test helpers - SQLite
+  behind D1, a Worker to send requests to, a stand-in push service and service
+  worker - are explained where they are defined.
+- **The documents match the code again.** Checked mechanically against it: the
+  README's data model now has all eleven tables (it was missing alarms, vendor
+  totals and relays), its end-to-end section describes all ten spec files rather
+  than one, and its coverage table has real figures and a row for push; the
+  handover used two wrong table names and missed a third, and its release steps
+  now include the guide. Both now say that an open Copilot conversation blocks a
+  merge, which one of them said it never did.
+
 ### Fixed
 
 - **The page is no wider than a phone.** The tab bar could not shrink, and on a

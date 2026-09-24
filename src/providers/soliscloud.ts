@@ -1,3 +1,16 @@
+/**
+ * SolisCloud: the official API client, and the normalisers the relay's
+ * payloads go through.
+ *
+ * The client (SolisCloudProvider, below) needs an official API key, which is
+ * applied for separately and not yet issued for this account. Until it is, the
+ * functions that turn a SolisCloud payload into a Reading or a Device -
+ * stationReading, deviceFromInverter and the rest - are what matter: the relay
+ * sends the portal's raw answers, and /api/ingest/* runs them through these.
+ *
+ * Every call is signed: an MD5 of the body and an HMAC-SHA1 over the method,
+ * the body hash, the content type, the date and the path, keyed by the secret.
+ */
 import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
@@ -17,6 +30,7 @@ export const queue = new CallQueue(2000);
 
 const enc = new TextEncoder();
 
+/** Bytes as standard base64, as the signature header wants them. */
 function b64(buf: ArrayBuffer): string {
   let s = '';
   for (const byte of new Uint8Array(buf)) s += String.fromCharCode(byte);
@@ -30,6 +44,7 @@ async function contentMd5(body: string): Promise<string> {
   return b64(await crypto.subtle.digest('MD5', enc.encode(body)));
 }
 
+/** HMAC-SHA1 of a message under the API secret, base64: the signature itself. */
 async function hmacSha1(secret: string, message: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
@@ -73,6 +88,11 @@ interface SolisPage<T> {
   page?: { records?: T[]; total?: number };
 }
 
+/**
+ * One signed POST to the SolisCloud API, spaced by the call queue so the
+ * documented rate limit is never hit. Throws on an HTTP error or on an answer
+ * whose own success flag says it failed.
+ */
 async function call<T>(creds: SolisCredentials, path: string, payload: unknown): Promise<T> {
   const body = JSON.stringify(payload);
   const headers = await signedHeaders(creds, path, body);
@@ -145,6 +165,7 @@ export function hasGridMetering(d: Rec): boolean {
   return imported > 0 || exported > 0;
 }
 
+/** The extended figures - month, year and lifetime energy, grid, battery - from a station snapshot. */
 function stationMetrics(d: Rec): Metrics {
   const m = emptyMetrics();
   m.genMonthKwh = kwhPair(d, 'monthEnergy');
@@ -182,6 +203,11 @@ function stationMetrics(d: Rec): Metrics {
   return m;
 }
 
+/**
+ * A plant snapshot (stationDetail, or the portal's equivalent the relay sends)
+ * as a Reading. Used for a plant whose inverter list comes back empty, where the
+ * plant itself is the unit being watched.
+ */
 export function stationReading(inv: Inverter, d: Rec, source = 'soliscloud'): Reading {
   const psum = toWatts(pick(d, 'psum'), pick(d, 'psumStr'));
   const battery = plantHasBattery(d);
@@ -427,6 +453,7 @@ export class SolisCloudProvider implements Provider {
     });
   }
 
+  /** The inverters under one plant, or the plant itself when it lists none (see below). */
   async listInverters(plantId: string): Promise<Inverter[]> {
     const data = await call<SolisPage<Rec>>(this.creds, '/v1/api/inverterList', {
       pageNo: 1,
@@ -473,6 +500,7 @@ export class SolisCloudProvider implements Provider {
     ];
   }
 
+  /** The newest sample for one unit: the plant's snapshot, or the inverter's own detail. */
   async getReading(inv: Inverter): Promise<Reading | null> {
     if (inv.id.startsWith(STATION_PREFIX)) {
       const d = await call<Rec>(this.creds, '/v1/api/stationDetail', { id: inv.vendorId });

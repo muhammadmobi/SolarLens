@@ -57,6 +57,10 @@ function omit<T extends object>(row: T, keys: readonly string[]): Record<string,
   return out;
 }
 
+/**
+ * Inverter rows for a public response: the vendor and plant ids and the raw
+ * payload dropped, the id replaced by its alias, the serial masked to four.
+ */
 export function publicInverters<T extends { id: string; serial?: string | null }>(
   rows: T[],
   alias: Alias,
@@ -68,6 +72,7 @@ export function publicInverters<T extends { id: string; serial?: string | null }
   }));
 }
 
+/** Device rows for a public response, stripped and aliased the same way. */
 export function publicDevices<T extends { id: string; sn?: string | null; plant_id?: string | null }>(
   rows: T[],
   alias: Alias,

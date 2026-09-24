@@ -15,6 +15,12 @@ const ENDPOINT = 'https://fcm.googleapis.com/fcm/send/device-one';
 
 type Listener = (event: unknown) => void;
 
+/**
+ * Run public/sw.js in a stand-in for a service worker's global scope.
+ * `answers` are what /api/push/recent returns, in order, one per push -
+ * or 'offline' for a fetch that fails. Returns what the worker showed, what it
+ * asked for, and push() and click() to drive it.
+ */
 function loadWorker(answers: Array<{ ok: boolean; messages?: unknown[]; more?: boolean } | 'offline'>, opts: { subscribed?: boolean } = {}) {
   const listeners = new Map<string, Listener>();
   const shown: Array<{ title: string; options: Record<string, unknown> }> = [];
@@ -74,6 +80,7 @@ function loadWorker(answers: Array<{ ok: boolean; messages?: unknown[]; more?: b
   return { shown, asked, windows, opened, push, click };
 }
 
+// One message as /api/push/recent returns it.
 const msg = (id: string, ts = 1_790_000_000) => ({ id, ts, title: `Title ${id}`, body: `Body ${id}` });
 
 describe('a push, as the service worker handles it', () => {

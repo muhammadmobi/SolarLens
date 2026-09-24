@@ -22,6 +22,7 @@ const postBody = (res) => {
   try { return JSON.parse(res.request().postData() ?? '{}'); } catch { return {}; }
 };
 
+// The next portal POST to `path` whose request body passes `match`.
 const waitFor = (page, path, match = () => true, timeout = 30_000) =>
   page.waitForResponse((r) => r.url().includes(path) && r.request().method() === 'POST' && match(postBody(r)), { timeout });
 

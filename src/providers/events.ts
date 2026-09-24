@@ -50,6 +50,8 @@ export interface Period {
 
 type Rec = Record<string, unknown>;
 
+// The inverter id a plant-level unit is stored under, and a vendor string
+// trimmed to null when it is empty.
 const stationId = (provider: ProviderId, plantId: string) => `${provider}:station:${plantId}`;
 const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
@@ -251,6 +253,7 @@ export function solisPeriods(plantId: string, which: 'month' | 'year' | 'all', p
   return out;
 }
 
+/** A month or day as two digits, for period keys like 2026-09. */
 const pad = (n: unknown) => String(n).padStart(2, '0');
 
 /**

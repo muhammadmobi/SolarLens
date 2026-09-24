@@ -80,6 +80,7 @@ async function audience() {
   return btoa(String.fromCharCode(...digest)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 16);
 }
 
+/** The ids of the messages this device has already shown, kept in the service worker's cache. */
 async function seenIds() {
   try {
     const hit = await (await caches.open(SEEN)).match('/__push-seen');
@@ -89,11 +90,16 @@ async function seenIds() {
   }
 }
 
+/** Save the shown ids, keeping the newest hundred. */
 async function remember(ids) {
   const keep = ids.slice(-100);
   await (await caches.open(SEEN)).put('/__push-seen', new Response(JSON.stringify(keep)));
 }
 
+/**
+ * What a push does: ask the server for this device's recent messages, and show
+ * the ones not shown before, oldest first.
+ */
 async function showWhatIsNew() {
   let messages = [];
   let more = false;

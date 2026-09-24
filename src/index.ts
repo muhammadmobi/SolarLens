@@ -1,3 +1,24 @@
+/**
+ * The Worker's entry point: every HTTP route, and the five-minute cron.
+ *
+ * Requests arrive here from three kinds of caller:
+ *
+ * - The dashboard (public/index.html), which reads the GET /api/* routes. Those
+ *   are open to anyone, and every answer goes through ./public-view first so
+ *   no vendor identifier leaves the Worker.
+ * - The relay laptops, which push what SolisCloud's portal shows them to
+ *   POST /api/ingest/*, each request carrying INGEST_TOKEN.
+ * - Anyone else writing: signing a phone up for notifications, or forcing a
+ *   poll. Those need API_TOKEN, as a header or as the cookie /auth leaves -
+ *   except turning a phone's notifications off, which needs only that phone's
+ *   own push address (see the middleware below).
+ *
+ * Anything that is not an /api route is the dashboard itself, served from
+ * public/ by the static-assets binding at the bottom of this file.
+ *
+ * The cron (scheduled, at the very end) polls every vendor the secrets allow,
+ * then decides whether anything is worth a phone notification.
+ */
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
@@ -69,6 +90,10 @@ app.use('*', async (c, next) => {
   c.res = res;
 });
 
+/**
+ * Compare two tokens without leaking, through how long the comparison took, how
+ * many leading characters were right.
+ */
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -76,6 +101,7 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** The token from an "Authorization: Bearer <token>" header, or null. */
 function bearer(header: string | undefined): string | null {
   if (!header) return null;
   const m = /^Bearer\s+(.+)$/i.exec(header);
@@ -583,6 +609,7 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch,
+  /** The five-minute cron (wrangler.jsonc triggers): poll every vendor, then judge notifications. */
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     // Notifications are judged after the poll, against what it just stored. A
     // failure there is logged and dropped: it must never cost a reading.

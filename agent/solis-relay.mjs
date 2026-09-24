@@ -77,6 +77,7 @@ function loadDevVars() {
 }
 loadDevVars();
 
+// A setting the relay cannot run without: stop with a message naming it.
 const need = (k) => {
   const v = process.env[k];
   if (!v) {
@@ -95,6 +96,7 @@ const CDP = process.env.RELAY_CDP ?? '';
 let attached = null;
 const PORTAL = 'https://www.soliscloud.com';
 
+// Log lines carry the time of day, so a long-running relay's log can be followed.
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -180,6 +182,11 @@ async function killStaleProfileHolders() {
   return pids.length;
 }
 
+/**
+ * Open the browser the relay works in: attached to a Chrome already running
+ * (-UseMyChrome), or a Chrome of its own with a persistent profile folder,
+ * which is where the SolisCloud login is kept between runs.
+ */
 async function launchContext() {
   // Attach to a browser that is already running, rather than starting one.
   // Its profile - and so its logins - are whatever that browser already has.
@@ -216,6 +223,7 @@ async function clearStaleSingletonFiles() {
   return cleared;
 }
 
+/** Make sure there is an open page to work in, relaunching the browser if it was closed. */
 async function ensureBrowser() {
   if (page && !page.isClosed()) return;
   if (ctx) { await ctx.close().catch(() => {}); log('browser was closed - relaunching'); }
@@ -269,6 +277,10 @@ async function ensureBrowser() {
   page.on('response', onResponse);
 }
 
+/**
+ * Send one plant snapshot to the Worker (POST /api/ingest/station). The Worker
+ * normalises it; the relay passes on exactly what the portal returned.
+ */
 async function push(plantId, raw) {
   const meta = known.get(plantId) ?? {};
   const body = { provider: 'soliscloud', plantId, name: meta.name ?? raw.stationName ?? '', capacityW: meta.capacityW ?? null, source: 'soliscloud-relay', raw };
@@ -305,6 +317,13 @@ async function onLoginPage() {
   return (await page.locator('input[type=password]').count().catch(() => 0)) > 0;
 }
 
+/**
+ * Check the SolisCloud login still works. If the portal asks for a login, a
+ * visible window waits up to fifteen minutes for a person to log in, and a
+ * hidden one stops with an error: a login needs a person, because the login
+ * page carries a captcha (see renew-solis-login.cmd). The relay's report on
+ * itself is what tells the dashboard the login has run out.
+ */
 async function ensureLoggedIn() {
   // The portal decides whether a login is needed only once its own scripts
   // have run. Measured with no login at all: the page sat on
@@ -336,6 +355,12 @@ async function ensureLoggedIn() {
   throw new Error('gave up waiting for login');
 }
 
+/**
+ * Read one plant the way a person would: open its page, and keep the answers
+ * the portal's own scripts fetch - the plant detail and today's curve. The
+ * portal signs those requests itself, which is the whole reason this relay
+ * drives a real browser.
+ */
 async function snapshot(plantId) {
   // Navigating to the plant page makes the portal fetch detailMix with a
   // correctly signed request; we simply wait for that response.
@@ -383,6 +408,7 @@ async function devices(plantId) {
       .then((j) => j?.data ?? null)
       .catch(() => null);
 
+  // The records of the next portal response whose address ends with `suffix`, or none.
   const grab = (suffix) =>
     page
       .waitForResponse((r) => r.url().endsWith(suffix) && r.request().method() === 'POST', { timeout: 30_000 })
@@ -422,6 +448,7 @@ async function devices(plantId) {
   return { inverters: inv, collectors, details };
 }
 
+/** Send the plant's hardware - inverters and dataloggers - to POST /api/ingest/devices. */
 async function pushDevices(plantId, { inverters, collectors, details }) {
   if (!inverters.length && !collectors.length) return;
   const res = await fetch(`${SOLARLENS_URL}/api/ingest/devices`, {
@@ -448,6 +475,7 @@ const EXTRAS = { alarmsEveryMs: 60 * 60_000, periodsEveryMs: 24 * 60 * 60_000 };
 const lastAlarms = new Map();
 const lastPeriods = new Map();
 
+/** POST one body to an /api/ingest route with the relay's token, and return the answer. */
 async function ingest(path, body) {
   const res = await fetch(`${SOLARLENS_URL}${path}`, {
     method: 'POST',
@@ -459,6 +487,7 @@ async function ingest(path, body) {
   return j;
 }
 
+/** The slower reads, when they are due: fault history hourly, the vendor's period totals daily. */
 async function extras(plantId) {
   const now = Date.now();
   if (now - (lastAlarms.get(plantId) ?? 0) >= EXTRAS.alarmsEveryMs) {
@@ -489,6 +518,12 @@ async function discoverPlants() {
   await sleep(1000); // let the response listener finish parsing
 }
 
+/**
+ * One pass: browser up, login checked, plants found, then for each plant its
+ * snapshot and today's curve, its hardware, and the slower extras when due.
+ * Throws if no plant's reading could be sent. Repeated every
+ * RELAY_INTERVAL_MIN minutes, or run once with RELAY_ONCE=1.
+ */
 async function cycle() {
   await ensureBrowser();
   await ensureLoggedIn();
@@ -532,6 +567,7 @@ async function cycle() {
   if (!sent) throw new Error(`no reading sent: ${lastError?.message ?? 'no plant answered'}`);
 }
 
+/** Close what this relay opened - never a browser it merely attached to - and exit. */
 async function shutdown(code) {
   // A browser we attached to belongs to whoever opened it; close only our tab.
   if (attached) await page?.close().catch(() => {});

@@ -58,6 +58,7 @@ function Invoke-Native {
   } finally { $ErrorActionPreference = $prev }
 }
 
+# Output helpers: a numbered step, a success, a warning, and a stop with a reason.
 function Step($n, $t) { Write-Host "`n[$n] $t" -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "    OK  $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "    !!  $t" -ForegroundColor Yellow }

@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs';
 const BASE_URL = 'https://www.soliscloud.com:13333';
 const CONTENT_TYPE = 'application/json';
 
+/** Read KEY=value lines from .dev.vars into the environment, without overriding what is set. */
 function loadDevVars() {
   try {
     for (const line of readFileSync('.dev.vars', 'utf8').split('\n')) {
@@ -41,6 +42,7 @@ if (!keyId || !keySecret) {
   process.exit(1);
 }
 
+/** The signed headers for one call, built the way src/providers/soliscloud.ts builds them. */
 function headersFor(path, body) {
   const md5 = createHash('md5').update(body).digest('base64');
   const date = new Date().toUTCString();
@@ -60,6 +62,7 @@ const PII_KEY = new RegExp([
 ].join('|'));
 
 const raw = process.argv.includes('--raw');
+/** Leave out every field whose name marks it as personal (see PII_KEY), unless --raw was given. */
 function strip(v) {
   if (raw) return v;
   if (Array.isArray(v)) return v.map(strip);
@@ -76,6 +79,7 @@ function strip(v) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** One signed POST to the SolisCloud API; prints the status and returns the parsed answer. */
 async function call(path, payload) {
   const body = JSON.stringify(payload);
   const res = await fetch(BASE_URL + path, { method: 'POST', headers: headersFor(path, body), body });

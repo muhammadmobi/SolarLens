@@ -1,3 +1,15 @@
+/**
+ * SolarMan's official Business API client, and the SolarMan normalisers shared
+ * with the web-session fallback (solarman-web.ts).
+ *
+ * The official API needs an app id and secret that SolarMan issues on request;
+ * until they arrive, solarman-web.ts reads the same data through the portal's
+ * own endpoints. Both end up in the same Reading and Device shapes, through the
+ * functions here - stationReading, deviceFromRecord, deviceFromV3Detail.
+ *
+ * SolarMan's device data is a list of registers - key, value, unit - rather
+ * than named fields, so most of the reading here is looking registers up by key.
+ */
 import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
@@ -186,6 +198,7 @@ export function deviceFromV3Detail(d: Rec, plantId: string | null = null): Devic
       if (key) p.set(key, { value: pick(fl, 'value'), unit: (pick(fl, 'unit') as string | null) ?? null });
     }
   }
+  // A register's value as a number, or as text; null when the device did not send it.
   const val = (k: string) => (p.has(k) ? num(p.get(k)!.value) : null);
   const str = (k: string) => (p.has(k) ? ((p.get(k)!.value as string | null) ?? null) : null);
 
@@ -351,6 +364,7 @@ export class SolarmanProvider implements Provider {
 
   private plants = new Map<string, Plant>();
 
+  /** Every plant the account can see, remembered so a device can be given its plant's zone. */
   async listPlants(): Promise<Plant[]> {
     const json = await this.call<Envelope & { stationList?: Rec[] }>('/station/v1.0/list', {
       page: 1,
@@ -368,6 +382,7 @@ export class SolarmanProvider implements Provider {
     return plants;
   }
 
+  /** The inverters under one plant, each given the plant's zone; the plant itself when it lists none. */
   async listInverters(plantId: string): Promise<Inverter[]> {
     const json = await this.call<Envelope & { deviceListItems?: Rec[] }>('/station/v1.0/device', {
       stationId: Number(plantId),
@@ -401,6 +416,11 @@ export class SolarmanProvider implements Provider {
     return [stationInverter(plant)];
   }
 
+  /**
+   * The newest sample for one unit. Always starts from the plant's real-time
+   * snapshot, which has the grid and battery figures; for a unit with a serial,
+   * the inverter's own registers are then read and added on top.
+   */
   async getReading(inv: Inverter): Promise<Reading | null> {
     const station = await this.call<Envelope>('/station/v1.0/realTime', { stationId: Number(inv.plantId) });
     if (inv.id.startsWith(STATION_PREFIX) || !inv.serial) return stationReading(inv, station);
@@ -413,6 +433,8 @@ export class SolarmanProvider implements Provider {
     );
     const reg = new Map<string, Rec>();
     for (const item of device.dataList ?? []) reg.set(String(item.key), item);
+    // The first of several register names that carries a value - vendors name
+    // the same figure differently across inverter models - with its unit.
     const regVal = (...keys: string[]) => {
       for (const k of keys) {
         const item = reg.get(k);

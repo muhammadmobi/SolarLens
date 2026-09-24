@@ -1,3 +1,13 @@
+/**
+ * The normalisers: a vendor's payload in, SolarLens's Reading or Device out.
+ *
+ * Each case feeds a captured payload (tests/fixtures, scrubbed of identifiers)
+ * or a small hand-made one through the function the Worker uses, and checks the
+ * figures that come out - units scaled, signs the right way round, and a figure
+ * the vendor did not report left null rather than made zero. Battery presence
+ * gets its own group, because an on-grid plant reports battery fields as zero
+ * and reading those as a battery once put an empty battery on the page.
+ */
 import { describe, expect, it } from 'vitest';
 import solisFixture from '../fixtures/solis-station.json';
 import solarmanFixture from '../fixtures/solarman-station.json';

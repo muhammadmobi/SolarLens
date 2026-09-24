@@ -24,6 +24,7 @@ function installMd5Shim() {
   );
 }
 
+/** Replace fetch with one that answers from a table of URL fragments, and records each call. */
 function stubFetch(routes: Array<[string, unknown]>) {
   const calls: Array<{ url: string; body: unknown }> = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -36,6 +37,7 @@ function stubFetch(routes: Array<[string, unknown]>) {
   return calls;
 }
 
+/** A token store in memory, already holding a valid SolarMan token. */
 function memoryTokens(): TokenStore {
   const shelf = new Map<string, { accessToken: string; expiresAt: number }>([
     ['solarman', { accessToken: 'access', expiresAt: Math.floor(Date.now() / 1000) + 3600 }],

@@ -25,6 +25,8 @@ import { writeLocalConfig } from './wrangler-config.mjs';
 const REPLACE = process.argv.includes('--replace');
 const CONFIG = writeLocalConfig();
 const WRANGLER = join(dirname(createRequire(import.meta.url).resolve('wrangler/package.json')), 'bin', 'wrangler.js');
+// Run wrangler without a shell, so an argument is never split at its spaces;
+// `input` is written to its standard input, which is how the secret travels.
 const wrangler = (args, input) =>
   execFileSync(process.execPath, [WRANGLER, ...args, '--config', CONFIG], {
     encoding: 'utf8',

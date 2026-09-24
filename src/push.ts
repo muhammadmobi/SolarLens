@@ -67,6 +67,7 @@ export function isPushEndpoint(value: unknown): value is string {
 
 // ---------------------------------------------------------------- keys
 
+// base64url, the unpadded URL-safe base64 that JWTs and push keys are written in.
 const b64url = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const fromB64url = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
@@ -177,6 +178,7 @@ export async function needsPriming(db: D1Database): Promise<boolean> {
 
 export interface PushEvent { key: string; title: string; body: string }
 
+/** A vendor's name as people write it, for the text of a notification. */
 const PROVIDER_NAMES: Record<string, string> = { soliscloud: 'SolisCloud', solarman: 'SolarMan' };
 const providerName = (p: string) => PROVIDER_NAMES[p] ?? p;
 
@@ -186,6 +188,7 @@ function clock(ts: number, offsetSec: number | null): string {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 }
 
+/** Watts for a sentence: "2.4 kW", or "600 W" below a kilowatt. */
 const kw = (w: number) => (w >= 1000 ? `${(w / 1000).toFixed(1)} kW` : `${Math.round(w)} W`);
 
 /**
@@ -386,6 +389,7 @@ export async function tellOne(env: Env, endpoint: string, title: string, body: s
   return wake(env, sub, now);
 }
 
+/** Wake every signed-up device, one after another. */
 async function wakeAll(env: Env, now: number): Promise<void> {
   const { results } = await env.DB
     .prepare('SELECT endpoint, origin, audience FROM push_subscriptions LIMIT ?1')

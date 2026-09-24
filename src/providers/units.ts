@@ -23,10 +23,12 @@ const ENERGY_FACTORS: Record<string, number> = {
   gwh: 1_000_000,
 };
 
+/** A unit label trimmed and lower-cased, so "kWh", " KWH" and "kwh" compare equal. */
 function clean(unit: unknown): string {
   return String(unit ?? '').trim().toLowerCase();
 }
 
+/** A vendor value as a number - vendors send "12.5" as often as 12.5 - or null if it is not one. */
 export function num(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const n = typeof value === 'number' ? value : Number(value);
