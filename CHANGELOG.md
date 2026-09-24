@@ -47,7 +47,7 @@ up, and accessibility checked rather than assumed.
 
 - **The dashboard's own script is measured.** V8 coverage during an end-to-end
   walk-through, written to `coverage/page-coverage.json` and attached to the
-  run: **67.3%**, with a floor of 65% that fails the run if it drops. The figure
+  run: **67.5%**, with a floor of 65% that fails the run if it drops. The figure
   moves as the page grows - it was 69.6% before this release added the export and
   notification code - so the floor is set below it rather than at it. Until now
   only the Worker's half of the project had a number.
@@ -64,7 +64,18 @@ up, and accessibility checked rather than assumed.
   reading carries the offset that was in force at its own timestamp - so a day
   keeps the boundary it was recorded under, whatever the clocks do afterwards. A
   plant whose vendor only ever sends a number still falls back to that number,
-  which is the best that can be said for it. Migration 0012 adds both columns.
+  which is the best that can be said for it. Migration 0012 adds both columns,
+  and `scripts/backfill-reading-offsets.mjs` gives the readings already stored
+  the offset they were taken under - a dry run first, which says how many rows
+  it would touch before it touches any.
+
+  Today's chart follows the same rule. It used to open at midnight computed
+  from the offset in force *now*, so on the one morning a year the clocks go
+  back there, the first hour of the day sat outside the window and off the
+  picture, and a time printed beside a sample was an hour out. The day is now
+  drawn between the instants it actually ran between - twenty-three or
+  twenty-five hours where that is what it was - and every time beside a reading
+  is the time that reading was taken.
 
 - **Four accessibility faults, found by the new checks on their first run**:
   muted text at 2.93:1 against the page's own ground where 4.5 is the bar; the
