@@ -1055,6 +1055,8 @@ solar-lens/
 │   ├── e2e/phone-width.spec.ts  no view wider than a phone
 │   ├── e2e/export-and-notify.spec.ts  Download CSV, and while-open notifications
 │   ├── e2e/daylight-saving.spec.ts  the morning the clocks go back
+│   ├── e2e/accessibility.spec.ts  axe WCAG A/AA and a keyboard lap on every view
+│   ├── e2e/page-coverage.spec.ts  how much of the dashboard script the walk-through runs
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first
 ├── docs/handoff.md           running, repairing and handing over the system
