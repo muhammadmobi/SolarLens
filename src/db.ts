@@ -1,9 +1,13 @@
 /**
  * Everything that reads or writes the D1 database, and the Worker's bindings.
  *
- * Every SQL statement in the project lives here, so this is the file to read
- * before changing a table or a query. The tables themselves are made by the
- * files in migrations/, applied in order; nothing here creates one.
+ * Almost all of the Worker's SQL lives here, so this is the file to read before
+ * changing a table or a query. The exceptions: src/push.ts owns the two push
+ * tables and the told-state it keeps in kv; two ingest routes in src/index.ts
+ * look up a plant's capacity to reject impossible figures; and the maintenance
+ * scripts (scripts/*.mjs) run their own statements through wrangler. The tables
+ * themselves are made by the files in migrations/, applied in order; nothing
+ * here creates one.
  *
  * Two constraints shape almost every query:
  *
