@@ -220,9 +220,11 @@ each check; `Security` in the repository carries what the scanners found.
   station search sends an IANA name (`regionTimezone: "Asia/Tokyo"`). All three are read, and
   seconds win over hours where a plant sends both, because a half-hour zone cannot be said in
   whole hours at all.
-- **SolisCloud never states a zone by name, only by number.** Checked in production after 2.9:
-  the SolarMan plant arrived with its zone's name and the SolisCloud plant with an offset alone.
-  A number cannot say whether a place observes daylight saving, so a SolisCloud plant's history is
-  cut on its current offset - exact where the zone has no daylight saving, which is true of the
-  plant observed here. Its stored readings were stamped with `--use-current-offset` for that
-  reason.
+- **The SolisCloud plant observed here states its zone only by number.** SolisCloud can name a
+  zone - `timeZoneStandardId`, which SolarLens reads wherever it appears - but checked in
+  production after 2.9, this plant's snapshot, as the relay forwards it, carried an offset alone,
+  while the SolarMan plant arrived with its zone's name. A number cannot say whether a place
+  observes daylight saving, so a plant in that position has its history cut on its current
+  offset - exact where the zone has no daylight saving, which is true of this one. Its stored
+  readings were stamped with `--use-current-offset` for that reason. Another SolisCloud plant may
+  well arrive with a name.

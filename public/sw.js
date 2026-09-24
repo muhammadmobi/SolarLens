@@ -96,17 +96,32 @@ async function remember(ids) {
 
 async function showWhatIsNew() {
   let messages = [];
+  let more = false;
   try {
     const res = await fetch(`/api/push/recent?for=${encodeURIComponent(await audience())}`, { cache: 'no-store' });
-    if (res.ok) messages = (await res.json()).messages ?? [];
+    if (res.ok) {
+      const body = await res.json();
+      messages = body.messages ?? [];
+      more = !!body.more;
+    }
   } catch {
     // Offline in the instant it was woken: say so rather than nothing, because
     // a browser that is woken and shows nothing warns the user about the site.
   }
   const seen = await seenIds();
   const fresh = messages.filter((m) => !seen.includes(m.id)).reverse();
+  // More happened than one wake-up shows: say so, rather than let the rest go
+  // unmentioned.
+  if (more) {
+    await self.registration.showNotification('SolarLens: more than this', {
+      body: 'Several things changed at once. Open the Alerts tab for the rest.',
+      tag: 'solarlens-more',
+      icon: '/icon-192.png',
+      data: { url: '/#/alerts' },
+    });
+  }
   if (!fresh.length) {
-    if (!messages.length) {
+    if (!messages.length && !more) {
       await self.registration.showNotification('SolarLens', {
         body: 'Something changed. Open the dashboard to see what.',
         tag: 'solarlens-generic',

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bearer, createHarness, testInverter, testReading, type Harness } from '../helpers/worker';
 import { insertReading, upsertAlarms, upsertInverter } from '../../src/db';
 import {
-  MAX_SUBSCRIPTIONS, announce, audienceOf, forgetOldMessages, isPushEndpoint, pushEvents, recentMessages,
+  MAX_SHOWN, MAX_SUBSCRIPTIONS, announce, audienceOf, forgetOldMessages, isPushEndpoint, pushEvents, recentMessages,
   subscribe, vapidHeader, vapidKey, vapidPublicKey, wake,
 } from '../../src/push';
 
@@ -114,7 +114,7 @@ describe('what is worth waking a phone for', () => {
     await plant();
     await read(NOW - 40 * 60, 2400);
     const [e] = await pushEvents(h.env.DB, NOW);
-    expect(e).toMatchObject({ key: `quiet:solarman:station:s-test:${NOW - 40 * 60}`, title: 'Test Plant: stopped reporting' });
+    expect(e).toMatchObject({ key: 'quiet:solarman:station:s-test', title: 'Test Plant: stopped reporting' });
     expect(e.body).toMatch(/when it was producing 2\.4 kW/);
   });
 
@@ -194,7 +194,7 @@ describe('what is worth waking a phone for', () => {
       'SolisCloud login expired on Office laptop',
     ]);
     // The relay's own id stays in the key, which is never served.
-    expect(events[1].key).toBe(`relay-expired:r-b:${NOW - 3600}`);
+    expect(events[1].key).toBe('relay-expired:r-b');
     expect(events.map((e) => e.title + e.body).join(' ')).not.toMatch(/r-[abc]/);
   });
 
@@ -209,7 +209,8 @@ describe('what is worth waking a phone for', () => {
 
     const events = await pushEvents(h.env.DB, NOW);
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ key: `poll:solarman:${NOW - 20 * 60}`, title: 'SolarMan is not answering' });
+    expect(events[0]).toMatchObject({ key: 'poll:solarman', title: 'SolarMan is not answering' });
+    expect(events[0].body).toMatch(/^Every read for 20 min has failed: /);
     expect(events[0].body).toMatch(/refresh refused/);
   });
 });
@@ -244,8 +245,8 @@ describe('announcing', () => {
     expect(sent[0].headers.authorization).toMatch(/^vapid t=.+, k=.+$/);
     expect(sent[0].headers.ttl).toBe(String(24 * 3600));
 
-    const messages = await recentMessages(h.env.DB, '', NOW);
-    expect(messages).toEqual([expect.objectContaining({ title: 'Test Plant: stopped reporting' })]);
+    const found = await recentMessages(h.env.DB, await audienceOf(FCM), NOW);
+    expect(found).toEqual({ messages: [expect.objectContaining({ title: 'Test Plant: stopped reporting' })], more: false });
 
     expect(await announce(h.env, NOW + 300)).toBe(0);
     expect(sent).toHaveLength(2);
@@ -340,8 +341,9 @@ describe('the push routes', () => {
     // The first message is for that device alone.
     const mine = await (await h.fetch(`/api/push/recent?for=${await audienceOf(FCM)}`)).json() as { messages: Array<{ title: string }> };
     expect(mine.messages.map((m) => m.title)).toEqual(['Notifications are on']);
-    const others = await (await h.fetch('/api/push/recent?for=someone-else')).json() as { messages: unknown[] };
-    expect(others.messages).toEqual([]);
+    // A device that is not signed up is told nothing at all.
+    expect((await h.fetch('/api/push/recent?for=someone-else')).status).toBe(404);
+    expect((await h.fetch('/api/push/recent')).status).toBe(404);
 
     expect(await (await post('/api/push/subscribe', { endpoint: FCM })).json()).toEqual({ ok: true, state: 'known' });
   });
@@ -417,7 +419,7 @@ describe('the edges of each rule', () => {
     await relay('r-a', 'login-expired', null, NOW - 9 * 86400);
     await relay('r-b', 'ok', NOW + 2 * 86400, NOW - 8 * 86400);
     const events = await pushEvents(h.env.DB, NOW);
-    expect(events.map((e) => e.key)).toEqual(['relay-expired:r-a:unknown', `relay-expiring:r-b:${NOW + 2 * 86400}`]);
+    expect(events.map((e) => e.key)).toEqual(['relay-expired:r-a', 'relay-expiring:r-b']);
     expect(events[1].title).toBe('SolisCloud login on Relay 2 runs out in 2 days');
   });
 
@@ -435,7 +437,7 @@ describe('the edges of each rule', () => {
     await log(NOW - 30 * 60, 'none', 'no provider credentials configured');
     const [e] = await pushEvents(h.env.DB, NOW);
     expect(e.title).toBe('other-cloud is not answering');
-    expect(e.body).toBe('The last three reads failed: no detail given');
+    expect(e.body).toBe('Every read for 30 min has failed: no detail given');
   });
 
   it('sends nothing without a key to sign with', async () => {
@@ -460,3 +462,180 @@ describe('the edges of each rule', () => {
     withKey.close();
   });
 });
+
+// ------------------------------------------------------------------ the review's cases
+
+describe('told once, for as long as it lasts', () => {
+  let h: Harness;
+  beforeEach(async () => { h = createHarness({ VAPID_KEY: await makeKey() }); });
+  afterEach(() => h.close());
+
+  const relay = (state: string, exp: number | null) =>
+    h.env.DB.prepare(`INSERT INTO relays (id, provider, name, state, login_expires_at, first_seen, last_seen)
+                      VALUES ('r-a', 'soliscloud', NULL, ?1, ?2, ?3, ?3)
+                      ON CONFLICT(id) DO UPDATE SET state = excluded.state, login_expires_at = excluded.login_expires_at,
+                                                    last_seen = excluded.last_seen`)
+      .bind(state, exp, NOW).run();
+  const fails = (from: number, count: number, provider = 'solarman') => Promise.all(
+    Array.from({ length: count }, (_, i) => h.env.DB
+      .prepare('INSERT INTO poll_log (ts, provider, ok, detail) VALUES (?1, ?2, 0, ?3)')
+      .bind(from + i * 300, provider, 'HTTP 401').run()),
+  );
+
+  it('does not tell a vendor outage again as the window of failures moves along', async () => {
+    await subscribe(h.env.DB, FCM, 'https://dashboard.test', NOW);
+    const sent = stubPushServices();
+    await fails(NOW - 20 * 60, 5);
+    expect(await announce(h.env, NOW)).toBe(1);
+    // Five, ten, fifteen minutes later, still failing: the same outage.
+    for (const later of [300, 600, 900]) {
+      await fails(NOW + later - 60, 1);
+      expect(await announce(h.env, NOW + later)).toBe(0);
+    }
+    expect(sent).toHaveLength(1);
+  });
+
+  it('tells it again once it has cleared and come back', async () => {
+    await subscribe(h.env.DB, FCM, 'https://dashboard.test', NOW);
+    stubPushServices();
+    await fails(NOW - 20 * 60, 5);
+    expect(await announce(h.env, NOW)).toBe(1);
+
+    await h.env.DB.prepare("INSERT INTO poll_log (ts, provider, ok, detail) VALUES (?1, 'solarman', 1, 'ok')").bind(NOW + 60).run();
+    expect(await announce(h.env, NOW + 120)).toBe(0);
+    expect(await h.env.DB.prepare("SELECT COUNT(*) AS n FROM kv WHERE k LIKE 'push:told:%'").first()).toEqual({ n: 0 });
+
+    await fails(NOW + 300, 5);
+    expect(await announce(h.env, NOW + 300 + 25 * 60)).toBe(1);
+  });
+
+  it('does not tell a condition again after a month just because it is still true', async () => {
+    await subscribe(h.env.DB, FCM, 'https://dashboard.test', NOW);
+    const sent = stubPushServices();
+    await relay('login-expired', NOW - 3600);
+    expect(await announce(h.env, NOW)).toBe(1);
+    await relay('login-expired', NOW - 3600);
+    expect(await announce(h.env, NOW + 40 * 86400)).toBe(0);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('keeps each return of the same trouble as its own message', async () => {
+    await subscribe(h.env.DB, FCM, 'https://dashboard.test', NOW);
+    stubPushServices();
+    await relay('login-expired', NOW - 3600);
+    await announce(h.env, NOW);
+    await relay('ok', NOW + 7 * 86400);
+    await announce(h.env, NOW + 600);
+    await relay('login-expired', NOW + 900);
+    expect(await announce(h.env, NOW + 1200)).toBe(1);
+    const { results } = await h.env.DB.prepare('SELECT id FROM push_messages').all<{ id: string }>();
+    expect(new Set(results.map((r) => r.id)).size).toBe(2);
+  });
+});
+
+describe('a second device signing up', () => {
+  let h: Harness;
+  beforeEach(async () => { h = createHarness({ VAPID_KEY: await makeKey() }); });
+  afterEach(() => h.close());
+
+  it('does not swallow news the first device has not heard yet', async () => {
+    const sent = stubPushServices();
+    const post = (endpoint: string) => h.fetch('/api/push/subscribe', {
+      method: 'POST', headers: { 'content-type': 'application/json', ...bearer(API) }, body: JSON.stringify({ endpoint }),
+    });
+    expect(await (await post(FCM)).json()).toEqual({ ok: true, state: 'added' });
+
+    // Trouble begins between two cron runs, and a second device signs up then.
+    await upsertInverter(h.env.DB, testInverter() as never);
+    await insertReading(h.env.DB, testReading({ ts: Math.floor(Date.now() / 1000) - 40 * 60, acPowerW: 2400 }) as never);
+    const second = 'https://updates.push.services.mozilla.com/wpush/v2/two';
+    expect(await (await post(second)).json()).toEqual({ ok: true, state: 'added' });
+
+    sent.length = 0;
+    expect(await announce(h.env)).toBe(1);
+    expect(sent.map((s) => s.url)).toEqual([FCM, second]);
+  });
+
+  it('cannot take the list past its limit, however the sign-ups arrive', async () => {
+    stubPushServices();
+    const outcomes = await Promise.all(Array.from({ length: MAX_SUBSCRIPTIONS + 3 }, (_, i) =>
+      subscribe(h.env.DB, `${FCM}-${i}`, 'https://dashboard.test', NOW)));
+    expect(outcomes.filter((o) => o === 'full')).toHaveLength(3);
+    expect(outcomes.filter((o) => o === 'added')).toHaveLength(MAX_SUBSCRIPTIONS);
+    expect(await h.env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first()).toEqual({ n: MAX_SUBSCRIPTIONS });
+    expect(await subscribe(h.env.DB, `${FCM}-0`, 'https://dashboard.test', NOW)).toBe('known');
+  });
+});
+
+describe('what a woken device can read', () => {
+  let h: Harness;
+  beforeEach(async () => { h = createHarness({ VAPID_KEY: await makeKey() }); });
+  afterEach(() => h.close());
+
+  it('reaches back as far as a push service would still deliver the wake-up', async () => {
+    await subscribe(h.env.DB, FCM, 'https://dashboard.test', NOW);
+    await h.env.DB.prepare("INSERT INTO push_messages (id, ts, title, body) VALUES ('late', ?1, 'Late', 'b'), ('gone', ?2, 'Gone', 'b')")
+      .bind(NOW - 20 * 3600, NOW - 25 * 3600).run();
+    const found = await recentMessages(h.env.DB, await audienceOf(FCM), NOW);
+    expect(found!.messages.map((m) => m.id)).toEqual(['late']);
+  });
+
+  it('says when there was more than one wake-up shows, rather than dropping it', async () => {
+    await subscribe(h.env.DB, FCM, 'https://dashboard.test', NOW);
+    for (let i = 0; i < MAX_SHOWN + 5; i++) {
+      await h.env.DB.prepare("INSERT INTO push_messages (id, ts, title, body) VALUES (?1, ?2, 't', 'b')").bind(`m${i}`, NOW - i).run();
+    }
+    const found = await recentMessages(h.env.DB, await audienceOf(FCM), NOW);
+    expect(found!.messages).toHaveLength(MAX_SHOWN);
+    expect(found!.more).toBe(true);
+    expect(found!.messages[0].id).toBe('m0');
+  });
+});
+
+describe('a fault seen late', () => {
+  let h: Harness;
+  beforeEach(() => { h = createHarness(); });
+  afterEach(() => h.close());
+
+  it('is news if it was seen within six hours of beginning, however long ago it began', async () => {
+    await upsertInverter(h.env.DB, testInverter() as never);
+    await upsertAlarms(h.env.DB, [{
+      id: 'solarman:s-test:7:late', inverterId: 'solarman:station:s-test', provider: 'solarman', code: '7',
+      message: 'DC volt low fault', severity: 'fault', vendorLevel: 2, advice: null,
+      beginTs: NOW - 7 * 3600, endTs: NOW - 6 * 3600, state: 'recovered',
+    }], NOW - 5 * 3600);
+    const [e] = await pushEvents(h.env.DB, NOW);
+    expect(e.key).toBe('alarm:solarman:s-test:7:late');
+  });
+});
+
+describe('a failed delivery', () => {
+  let h: Harness;
+  beforeEach(async () => { h = createHarness({ VAPID_KEY: await makeKey() }); });
+  afterEach(() => h.close());
+
+  it('is logged with the push service and the status, and never the endpoint', async () => {
+    await subscribe(h.env.DB, FCM, 'https://dashboard.test', NOW);
+    const sub = { endpoint: FCM, origin: 'https://dashboard.test', audience: await audienceOf(FCM) };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    stubPushServices(503);
+    await wake(h.env, sub, NOW);
+    expect(JSON.parse(warn.mock.calls[0][0] as string)).toEqual({ push: 'failed', host: 'fcm.googleapis.com', status: 503 });
+
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
+    await wake(h.env, sub, NOW);
+    expect(JSON.parse(warn.mock.calls[1][0] as string)).toMatchObject({ push: 'failed', host: 'fcm.googleapis.com', status: 0, error: 'Error: network down' });
+
+    stubPushServices(410);
+    await wake(h.env, sub, NOW);
+    expect(JSON.parse(log.mock.calls[0][0] as string)).toEqual({ push: 'dropped', host: 'fcm.googleapis.com', status: 410 });
+
+    const everything = [...warn.mock.calls, ...log.mock.calls].flat().join(' ');
+    expect(everything).not.toContain('device-one');
+    warn.mockRestore();
+    log.mockRestore();
+  });
+});
+

@@ -7,7 +7,7 @@ import { tzNameOf, tzOffsetSec } from './providers/units';
 import { aliasFor, publicAlarms, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
 import { parseRelayStatus } from './relays';
 import { plantFilter, pollAll } from './poll';
-import { announce, forgetOldMessages, isPushEndpoint, recentMessages, subscribe, tellOne, unsubscribe, vapidKey, vapidPublicKey } from './push';
+import { announce, forgetOldMessages, isPushEndpoint, needsPriming, recentMessages, subscribe, tellOne, unsubscribe, vapidKey, vapidPublicKey } from './push';
 import type { Inverter, Reading } from './providers/types';
 import {
   deviceFromCollector,
@@ -196,7 +196,10 @@ app.post('/api/push/subscribe', async (c) => {
   if (!isPushEndpoint(body.endpoint)) return c.json({ error: 'not a browser push endpoint' }, 400);
   const outcome = await subscribe(c.env.DB, body.endpoint, new URL(c.req.url).origin);
   if (outcome === 'full') return c.json({ error: 'the most devices this server will notify are already signed up' }, 409);
-  if (outcome === 'added') await announce(c.env, nowSec(), true);
+  // Only the first device primes. Priming for a later one would mark as told an
+  // event the devices already signed up have not heard yet; a later device
+  // simply joins, and hears whatever is new from the next run on.
+  if (outcome === 'added' && (await needsPriming(c.env.DB))) await announce(c.env, nowSec(), true);
   await tellOne(c.env, body.endpoint, 'Notifications are on',
     'This device will be told when a system stops mid-day, a fault is recorded, or a SolisCloud login needs renewing.');
   return c.json({ ok: true, state: outcome });
@@ -218,13 +221,17 @@ app.post('/api/push/test', async (c) => {
 
 /**
  * What a woken device shows. Never cached: the device is asking because
- * something has just been written. `for` is the device's own hash, for a
- * message meant only for it; it is not the endpoint, which never leaves.
+ * something has just been written. `for` is the device's own hash - a hash of
+ * its push endpoint, which never leaves - and only a device that is signed up
+ * gets an answer. The messages name systems and faults, and the dashboard's
+ * reads being public is no reason for this to be.
  */
 app.get('/api/push/recent', async (c) => {
   const audience = (c.req.query('for') ?? '').slice(0, 32);
   c.header('Cache-Control', 'no-store');
-  return c.json({ now: nowSec(), messages: await recentMessages(c.env.DB, audience) });
+  const found = await recentMessages(c.env.DB, audience);
+  if (!found) return c.json({ error: 'not a device signed up for notifications' }, 404);
+  return c.json({ now: nowSec(), ...found });
 });
 
 app.get('/api/health', async (c) => {
