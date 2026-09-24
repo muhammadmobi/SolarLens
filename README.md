@@ -510,7 +510,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**323 unit tests** and **296 end-to-end tests** (148 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**323 unit tests** and **310 end-to-end tests** (155 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -564,7 +564,7 @@ dashboard in one inline script. `tests/e2e/page-coverage.spec.ts` records what
 that walk-through actually executes, using V8's own coverage, and writes the
 figure to `coverage/page-coverage.json` — attached to every run.
 
-**67.3% of the dashboard script**, against a floor of 65% that fails the run if
+**67.5% of the dashboard script**, against a floor of 65% that fails the run if
 it drops. The figure moves as the page grows: it was 69.6% before this release
 added the CSV writer and the notification switch, which the walk-through only
 partly reaches. The floor is set below the reading, not flush against it, so an
@@ -578,7 +578,8 @@ figures neither system reports.
 every view, on desktop and mobile, with real data on screen, and fails the run
 on anything rated **serious or critical**. It also checks that the page can be
 worked through with a keyboard alone, and that every control shows when it has
-focus.
+focus - tabbed to, one full lap of each view, because `:focus-visible` is what
+draws the ring and it deliberately ignores a focus set by script.
 
 It found real faults on its first run, all since fixed: muted text at 2.93:1
 where 4.5 is the bar, the brand orange used for 16px type at 3.42:1, status
@@ -592,7 +593,7 @@ while charts keep the brighter ones.
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **98.0%** | **90.4%** | **98.5%** | **99.4%** |
+| **All of `src/`** — everything the Worker ships | **98.0%** | **90.2%** | **98.5%** | **99.4%** |
 | &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 98% | 90% | 97% | **100%** |
 | &nbsp;&nbsp;`db.ts` — every line of SQL | **100%** | 95% | **100%** | **100%** |
 | &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |

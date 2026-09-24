@@ -111,35 +111,57 @@ test('the page can be worked through with a keyboard alone', async ({ page }) =>
   await expect(page).toHaveURL(/#\/alerts$/);
 });
 
-test('every control that can be focused shows that it is', async ({ page }) => {
-  await stubApi(page);
-  await page.goto('/');
-  await expect(page.locator('#view')).not.toBeEmpty();
+/**
+ * What the control under focus looks like, asked of the page after each Tab.
+ *
+ * Tabbed to, not focused by script: `:focus-visible` is what draws the ring,
+ * and it deliberately does not apply to a programmatic focus() - which is why
+ * an earlier version of this test proved nothing. It marks each control as it
+ * passes, so the caller can tell a full lap from a loop.
+ */
+async function focusedControl(page: Page) {
+  return page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || el === document.body || el === document.documentElement) return null;
+    const s = getComputedStyle(el);
+    const already = el.dataset.a11yWalked === '1';
+    el.dataset.a11yWalked = '1';
+    return {
+      already,
+      what: el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + String(el.className).split(' ')[0] : ''),
+      shows: (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0)
+        || s.boxShadow !== 'none'
+        || s.textDecorationLine !== 'none',
+    };
+  });
+}
 
-  // Tabbed to, not focused by script: `:focus-visible` is what draws the ring,
-  // and it deliberately does not apply to a programmatic focus() - which is why
-  // an earlier version of this test proved nothing.
-  const seen: string[] = [];
-  const invisible: string[] = [];
-  for (let i = 0; i < 20; i++) {
-    await page.keyboard.press('Tab');
-    const at = await page.evaluate(() => {
-      const el = document.activeElement as HTMLElement | null;
-      if (!el || el === document.body) return null;
-      const s = getComputedStyle(el);
-      return {
-        what: el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + String(el.className).split(' ')[0] : ''),
-        focusVisible: el.matches(':focus-visible'),
-        outline: s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0,
-        shadow: s.boxShadow !== 'none',
-        underline: s.textDecorationLine !== 'none',
-      };
-    });
-    if (!at) continue;
-    seen.push(at.what);
-    if (!at.outline && !at.shadow && !at.underline) invisible.push(at.what);
-  }
+for (const [name, hash] of views) {
+  test(`every control on ${name} shows when it has the keyboard`, async ({ page }) => {
+    await stubApi(page);
+    await page.goto(`/${hash}`);
+    await expect(page.locator('#view')).not.toBeEmpty();
 
-  expect(seen.length, 'nothing took keyboard focus, so nothing was checked').toBeGreaterThan(5);
-  expect(invisible, 'these controls show nothing when focused with a keyboard').toEqual([]);
-});
+    // A full lap, not a fixed prefix: tab until the order comes back round to a
+    // control it has already passed, so a control added at the end of a view is
+    // checked rather than silently falling off the end of a count.
+    const seen: string[] = [];
+    const invisible: string[] = [];
+    let laps = 0;
+    for (let i = 0; i < 300; i++) {
+      await page.keyboard.press('Tab');
+      const at = await focusedControl(page);
+      if (!at) continue;                    // browser chrome, between laps
+      if (at.already) { laps++; break; }
+      seen.push(at.what);
+      if (!at.shows) invisible.push(at.what);
+    }
+
+    expect(laps, `the focus order never came back round on ${name}`).toBe(1);
+    // TV mode is a wall display with the chrome taken away: one way back out
+    // is the whole of its focus order, and that is the point of it.
+    const least = name === 'TV mode' ? 1 : 4;
+    expect(seen.length, 'nothing took keyboard focus, so nothing was checked').toBeGreaterThanOrEqual(least);
+    expect(invisible, 'these controls show nothing when focused with a keyboard').toEqual([]);
+  });
+}

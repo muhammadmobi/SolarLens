@@ -835,7 +835,7 @@
         body.push(group === 'day'
           ? [r.day, nameOf(invId), r.yield_kwh, r.peak_w, r.load_kwh, r.import_kwh, r.export_kwh,
             r.batt_charge_kwh, r.batt_discharge_kwh, r.samples, iso(r.first_ts), iso(r.last_ts)]
-          : [r.day, nameOf(invId), r.yield_kwh, r.recorded_kwh ?? r.yield_kwh, r.peak_w, r.load_kwh,
+          : [r.day, nameOf(invId), r.yield_kwh, r.recorded_kwh, r.peak_w, r.load_kwh,
             r.import_kwh, r.export_kwh, r.batt_charge_kwh, r.batt_discharge_kwh, r.days, r.samples,
             r.source === 'vendor' ? 'vendor total' : 'recorded here']);
       }
@@ -882,14 +882,48 @@
   const plantHour = (ts, offsetSec) => offsetSec == null
     ? new Date(ts * 1000).getHours()
     : Math.floor(((ts + offsetSec) % 86400) / 3600);
+  // Which day a reading fell on where the plant stands, under the offset it
+  // was taken at rather than the one in force now. On the day the clocks change
+  // there the two differ, and the morning would otherwise be filed under
+  // yesterday - or the last hour of today under tomorrow.
+  const plantDay = (ts, offsetSec) => {
+    if (offsetSec == null) {
+      const d = new Date(ts * 1000);
+      return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 1000 / 86400);
+    }
+    return Math.floor((ts + offsetSec) / 86400);
+  };
+  // The offset in force around an instant, read off the nearest sample rather
+  // than assumed: every reading carries the offset it was taken under.
+  const offsetNear = (pts, ts, fallback) => {
+    let off = fallback;
+    for (const p of pts || []) {
+      if (p.ts > ts) break;
+      if (p.tz_offset_sec != null) off = p.tz_offset_sec;
+    }
+    return off;
+  };
+  // The two instants a plant's day runs between. Normally 24 hours; on the day
+  // the clocks change there, 23 or 25 - the morning was read under one offset
+  // and the evening under another, so each end is built from the offset that
+  // end was actually read at.
+  const dayWindow = (inv, pts) => {
+    const off = inv && inv.tz_offset_sec;
+    const midnightNow = dayStart(off);
+    if (off == null) return [midnightNow, midnightNow + 86400];
+    const first = (pts || [])[0];
+    const morning = first && first.tz_offset_sec != null ? first.tz_offset_sec : off;
+    return [midnightNow + (off - morning), midnightNow + 86400];
+  };
   const parse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
   // One fetch covers every system, and it opens at the earliest plant's
   // midnight - so a system further east is handed samples from its own
   // yesterday evening. Cut each system's list back to its own day before any
   // of it is drawn or reduced to a peak.
   const todayOf = (inv, pts) => {
-    const t0 = dayStart(inv && inv.tz_offset_sec);
-    return (pts || []).filter((p) => p.ts >= t0 && p.ts < t0 + 86400);
+    const off = inv && inv.tz_offset_sec;
+    const today = plantDay(Math.floor(Date.now() / 1000), off);
+    return (pts || []).filter((p) => plantDay(p.ts, p.tz_offset_sec ?? off) === today);
   };
 
   async function api(path) {
@@ -1155,7 +1189,7 @@
     // being scaled with the picture.
     const bare = !!(opts && opts.bare);
     const W = 1000, H = viewH, L = 62, R = 16, T = bare ? 12 : 26, B = 30;
-    const t0 = dayStart(inv.tz_offset_sec), t1 = t0 + 86400;
+    const [t0, t1] = dayWindow(inv, pts);
     const c = colorFor(inv.provider);
     if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
       pts.length === 1 ? 'One sample so far today - a curve needs two' : 'No samples yet today'}</text></svg>`;
@@ -1171,9 +1205,12 @@
       out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" vector-effect="non-scaling-stroke"/>`;
       out += `<text class="axis" x="${L - 8}" y="${yy + 4}" text-anchor="end">${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.round(v)}</text>`;
     }
-    for (let h = 0; h <= 24; h += 3) {
-      const xx = x(t0 + h * 3600);
-      out += `<text class="axis" x="${xx}" y="${H - 8}" text-anchor="${h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}">${String(h).padStart(2, '0')}</text>`;
+    // Ticks read off the clock at each one, so a day with a switch inside it is
+    // labelled by what the clock there said, not by hours counted from midnight.
+    for (let t = t0; t <= t1; t += 3 * 3600) {
+      const end = t + 3 * 3600 > t1;
+      const label = end ? '24' : String(plantHour(t, offsetNear(pts, t, inv.tz_offset_sec))).padStart(2, '0');
+      out += `<text class="axis" x="${x(end ? t1 : t)}" y="${H - 8}" text-anchor="${t === t0 ? 'start' : end ? 'end' : 'middle'}">${label}</text>`;
     }
     out += `<path d="${d} L${x(last.ts).toFixed(1)},${y(0)} L${x(pts[0].ts).toFixed(1)},${y(0)} Z" fill="url(#${id})"/>`;
     out += `<path d="${d}" fill="none" stroke="${c}" stroke-width="2.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
@@ -1205,7 +1242,7 @@
     // after it. No sunrise, no claim.
     const sunUp = sunriseTs(inv, t0);
     if (sunUp !== null && pts[0].ts - sunUp > 3600) {
-      out += `<text class="axis gap" x="${W - R}" y="${T - 10}" text-anchor="end">recorded from ${esc(hhmm(pts[0].ts, inv.tz_offset_sec))}</text>`;
+      out += `<text class="axis gap" x="${W - R}" y="${T - 10}" text-anchor="end">recorded from ${esc(hhmm(pts[0].ts, pts[0].tz_offset_sec ?? inv.tz_offset_sec))}</text>`;
       // Shade the stretch nobody has a reading for, so the empty part of the
       // axis reads as "no data" rather than as a flat zero it really produced.
       out += `<rect class="nodata" x="${L}" y="${T}" width="${(x(pts[0].ts) - L).toFixed(1)}" height="${H - T - B}"/>`;
@@ -1265,8 +1302,8 @@
     // Systems in different zones do not share a midnight. Opening at the
     // earliest of them keeps the earlier system's morning on the axis instead
     // of clipping it off the left edge.
-    const t0 = Math.min(...invs.map((i) => dayStart(i.tz_offset_sec)), startOfToday());
-    const t1 = t0 + 86400;
+    const t0 = Math.min(...invs.map((i) => dayWindow(i, todayOf(i, byInv[i.id]))[0]), startOfToday());
+    const t1 = Math.max(...invs.map((i) => dayWindow(i, todayOf(i, byInv[i.id]))[1]), t0 + 86400);
     // Every system gets a switch, including one with nothing to draw today -
     // otherwise it silently disappears from the page rather than reading as
     // "this system has no samples". So does the fleet sum, always, or turning
@@ -1546,7 +1583,7 @@
         <a class="ovchart" href="#/power" title="Open the Power tab">
           <div class="ovchart-head">
             <span class="t">Today · watts</span>
-            ${peak ? `<span class="p">peak ${fmtWs(peak.ac_power_w)} at ${esc(hhmm(peak.ts, inv.tz_offset_sec))}</span>` : ''}
+            ${peak ? `<span class="p">peak ${fmtWs(peak.ac_power_w)} at ${esc(hhmm(peak.ts, peak.tz_offset_sec ?? inv.tz_offset_sec))}</span>` : ''}
           </div>
           ${systemChart(inv, pts, 'ov' + i, 300, { bare: true })}
         </a>
@@ -2304,7 +2341,7 @@
     // panel: a 1000-unit drawing squeezed into a 300px card set its labels at
     // about five pixels, under a band of empty space the fixed height left.
     const W = 360, H = 130, L = 36, R = 8, T = 8, B = 22;
-    const t0 = dayStart(inv.tz_offset_sec), t1 = t0 + 86400;
+    const [t0, t1] = dayWindow(inv, soc);
     const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
     const y = (v) => T + (1 - Math.max(0, Math.min(100, v)) / 100) * (H - T - B);
     let out = '';
@@ -2325,7 +2362,7 @@
     const hi = soc.reduce((a, p) => (p.battery_soc > a.battery_soc ? p : a));
     return `<div class="soc">
       <div class="ovchart-head"><span class="t">Charge today</span>
-        <span class="p">low ${Math.round(lo.battery_soc)}% at ${esc(hhmm(lo.ts, inv.tz_offset_sec))} · high ${Math.round(hi.battery_soc)}%</span></div>
+        <span class="p">low ${Math.round(lo.battery_soc)}% at ${esc(hhmm(lo.ts, lo.tz_offset_sec ?? inv.tz_offset_sec))} · high ${Math.round(hi.battery_soc)}%</span></div>
       <svg class="soc-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Battery charge through today">${out}</svg>
     </div>`;
   }

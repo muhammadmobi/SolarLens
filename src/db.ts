@@ -282,6 +282,10 @@ export interface SeriesRow {
   today_kwh: number | null;
   battery_soc: number | null;
   grid_power_w: number | null;
+  // What the clock said where the plant stands, at the moment this was read -
+  // not what it says there now. On the day the clocks change, the two differ,
+  // and the chart is drawn against the first one.
+  tz_offset_sec: number | null;
 }
 
 /**
@@ -297,7 +301,7 @@ export interface SeriesRow {
 export async function series(db: D1Database, fromTs: number, toTs: number): Promise<SeriesRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT inverter_id, ts, ac_power_w, today_kwh, battery_soc, grid_power_w, source
+      `SELECT inverter_id, ts, ac_power_w, today_kwh, battery_soc, grid_power_w, tz_offset_sec, source
        FROM readings
        WHERE ts BETWEEN ?1 AND ?2
        ORDER BY ts ASC`,

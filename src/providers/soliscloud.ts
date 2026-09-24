@@ -445,8 +445,10 @@ export class SolisCloudProvider implements Provider {
         plantId,
         plantName: String(pick(r, 'stationName') ?? ''),
         capacityW: toWatts(pick(r, 'power'), pick(r, 'powerStr')),
-        tzOffsetSec: tzOffsetSec(r),
-      tzName: tzNameOf(r),
+        // An inverter record usually says nothing about where it stands - the
+        // plant list did, and that is what was cached on the way past.
+        tzOffsetSec: tzOffsetSec(r) ?? this.zones.get(plantId)?.tzOffsetSec ?? null,
+        tzName: tzNameOf(r) ?? this.zones.get(plantId)?.tzName ?? null,
       };
     });
     if (invs.length > 0) return invs;
