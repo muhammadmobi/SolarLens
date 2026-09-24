@@ -13,7 +13,8 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's live output is set against its rated size.
 - **Open it and it is there.** No login, no token to copy onto each device — the readings are public by design, with vendor identifiers stripped from every response before it leaves the Worker.
 - **Each system's day ends where its own sun sets.** Every plant's timezone is stored, and every figure, curve and daily row is cut at that plant's midnight rather than at the reader's — so two systems in different countries are each shown their own day, on the same screen.
-- **Fault history, with what the vendor advises.** Every alarm each vendor has on record, back to installation: when, how severe, the fault code, how long it lasted, and SolisCloud's own advice. SolarMan never records when a fault cleared, and the page says so rather than guessing.
+- **Fault history, with what the vendor advises.** Every alarm each vendor has on record, back to installation: when, how severe, the fault code, how long it lasted, and the vendor's own advice where it gives any. SolarMan's alert list says only when a fault was raised; its timeline, read for the newest alerts each hour, supplies when each one cleared, and the occurrences the list folds into one entry per day.
+- **Tells your phone, even with the dashboard closed.** Turn it on once per device on the Alerts tab, and that device is notified when a system stops reporting while it was producing, when a fault is recorded, when a SolisCloud login is about to run out, or when a vendor stops answering. A system going quiet at dusk is not news, so it is not announced. While a tab is open, a second switch announces every change the Alerts tab shows.
 - **Made for a wall, too.** TV mode at `#/tv` drops the header and tabs, sizes everything to the screen, keeps the display awake, and shows a clock so a frozen page is obvious from across a room.
 - **History that goes back to the start.** Days, months or years. Months and years use each vendor's own totals, which reach back to the day the plant was installed, and every row says whether its figure is the vendor's or SolarLens's own and how many of its days SolarLens saw.
 - **Installable.** Add it to a phone's home screen and it opens in its own window. The worker behind that goes to the network first and falls back to a cache only when there is none, so an installed copy can never show a stale reading as a live one.
@@ -30,16 +31,17 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 3. [Quick start (≈10 minutes)](#quick-start-10-minutes)
 4. [Getting credentials](#getting-credentials) — [SolisCloud](#soliscloud-official-api-key) · [SolarMan](#solarman-official-business-api) · [SolarMan fallback](#solarman-browser-session-fallback)
 5. [SolisCloud relay agent](#soliscloud-relay-agent) — [one command on Windows](#one-command-on-windows) · [more than one machine](#running-it-on-more-than-one-machine) · [replacing a token](#replacing-a-token)
-6. [Configuration reference](#configuration-reference)
-7. [Local development](#local-development)
-8. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request) · [where the reports are](#where-the-reports-are)
-9. [Data model](#data-model)
-10. [HTTP API](#http-api)
-11. [Project layout](#project-layout)
-12. [Troubleshooting](#troubleshooting)
-13. [Security and privacy](#security-and-privacy)
-14. [Changelog](CHANGELOG.md) · [Handover](docs/handoff.md)
-15. [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license)
+6. [Notifications on your phone](#notifications-on-your-phone)
+7. [Configuration reference](#configuration-reference)
+8. [Local development](#local-development)
+9. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request) · [where the reports are](#where-the-reports-are)
+10. [Data model](#data-model)
+11. [HTTP API](#http-api)
+12. [Project layout](#project-layout)
+13. [Troubleshooting](#troubleshooting)
+14. [Security and privacy](#security-and-privacy)
+15. [Changelog](CHANGELOG.md) · [Handover](docs/handoff.md)
+16. [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license)
 
 ---
 
@@ -432,6 +434,33 @@ working everywhere rather than half-changed.
 Elsewhere, do the same three steps by hand: `npm run cf -- secret put <NAME>`,
 update `.dev.vars`, restart the relay.
 
+## Notifications on your phone
+
+The Alerts tab has two switches. **Tell me when something changes** works while the dashboard is open in that browser. **Also when this browser is closed** reaches a phone in a pocket, through the browser's own push service, and needs setting up once:
+
+1. **Give the Worker its signing key** — once, from the project folder on a computer with a signed-in wrangler:
+
+   ```bash
+   node scripts/make-vapid-key.mjs
+   ```
+
+   It makes the key and stores it as the Worker secret `VAPID_KEY` straight away; the private half is never printed or saved to a file. Run it again and it changes nothing; `--replace` makes a new key, after which every device has to turn notifications on again.
+
+2. **On each phone or computer**, open the dashboard, go to the Alerts tab and press **Turn on for this device**. Signing a device up is a write, so it needs the key: a device you have opened the `/auth?t=<API_TOKEN>` link on is already signed in, and any other asks for it once and does not keep it. On an iPhone or iPad, add the dashboard to the home screen first and turn this on from there; Safari allows web notifications only there.
+
+A device that turns this on gets one message at once, so you can see the whole path work, and a **Send a test** button afterwards. Turning it off needs no key.
+
+**What is announced.** Each rule is written for a phone, not a screen:
+
+| Announced | When | Why it is shaped so |
+|---|---|---|
+| A system stopped reporting | nothing for 30 minutes after a reading that showed it producing | the on-grid system goes quiet every night because its inverter sleeps; silence only matters mid-generation |
+| A fault | a vendor alarm first seen within six hours of when it began | says whether it has already cleared, and the vendor's advice unless the advice is to do nothing |
+| A SolisCloud login | two days before it runs out, and when it has | names the relay as the Devices tab names it, never by its id |
+| A vendor not answering | its last three polls failed, across at least fifteen minutes | one failure is weather; three in a row is usually a token |
+
+Each is told once, and again only if it clears and returns. The push carries no text: it only wakes the device, which then asks `/api/push/recent` what to show, so what a notification says never passes through Google, Apple, Mozilla or Microsoft.
+
 ## Configuration reference
 
 Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars` (local, gitignored — copy from `.dev.vars.example`).
@@ -442,6 +471,7 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 |---|---|---|
 | `API_TOKEN` | for `POST /api/poll` | Gates the routes that write or spend vendor quota. Reads are public by design. |
 | `INGEST_TOKEN` | for agents | Gates `/api/ingest`, `/api/ingest/station` and `/api/ingest/history`. |
+| `VAPID_KEY` | for notifications to a closed browser | The Web Push signing key, a private P-256 JWK. Made and stored by `node scripts/make-vapid-key.mjs`; never typed by hand. Unset, the Alerts tab says notifications to a closed browser are not set up. |
 | `SOLIS_KEY_ID`, `SOLIS_KEY_SECRET` | Solis official | From SolisCloud API Management. Present = the Worker polls Solis directly and the relay becomes optional. |
 | `SOLARMAN_APP_ID`, `SOLARMAN_APP_SECRET`, `SOLARMAN_EMAIL`, `SOLARMAN_PASSWORD_SHA256` | SolarMan official | From SolarMan support + your login. |
 | `SOLARMAN_WEB_REFRESH_TOKEN`, `SOLARMAN_WEB_ACCESS_TOKEN` | SolarMan fallback | Used only when the official keys are absent. |
@@ -510,7 +540,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**327 unit tests** and **310 end-to-end tests** (155 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**388 unit tests** and **324 end-to-end tests** (162 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -536,6 +566,9 @@ Seventeen files, one concern each. Most are pure-function tests against fixtures
 - **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
+- **`solarman-alarm-detail.test.ts`** — SolarMan's advice and timeline read the way its own detail panel reads them: each run of five-minute samples one occurrence with an end, a recent run left active, a run into midnight left unknown, the plant's own day asked for, and only the newest few alerts detailed each hour.
+- **`push.test.ts`** — a real ES256 signature verified with the public key the browser is given; what is worth waking a phone for, including that a system going quiet at dusk is not; each event told once; a device the browser dropped forgotten; and the routes keeping sign-up behind the key while anyone can turn their own device off.
+- **`service-worker.test.ts`** — `public/sw.js` run in a stand-in worker scope: a push shows what is new and never brings back a notification already shown, and a tap opens the Alerts tab.
 - **`extras.test.ts`** — the hourly and daily schedule for those reads: what the first run walks back through, what later runs skip, and that an empty current year in January does not stop the walk.
 - **`relays.test.ts`** — a relay's report on itself: what the Worker refuses, including a computer name offered as an id; the login expiry read from the portal's cookie; the random id a relay keeps; relays named by nickname or order, never by id; and the exit code that tells the renewal script to open a window for a login.
 - **`worker-routes.test.ts`** — the Worker itself, against a real database: the security headers on both an API response and the page; reads open and writes refused; `/auth`'s cookie; every ingest route's contract, including what each refuses; identifiers proved absent from what is served; and the cron entry point.
@@ -566,7 +599,7 @@ figure to `coverage/page-coverage.json` — uploaded on every run. Measured on
 the desktop walk-through only: both projects are Chromium and both would write
 the same file, so the figure kept would otherwise be whichever finished last.
 
-**67.3% of the dashboard script**, against a floor of 65% that fails the run if
+**67.4% of the dashboard script**, against a floor of 65% that fails the run if
 it drops. The figure moves as the page grows: it was 69.6% before this release
 added the CSV writer and the notification switch, which the walk-through only
 partly reaches. The floor is set below the reading, not flush against it, so an
@@ -595,7 +628,7 @@ while charts keep the brighter ones.
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **98.0%** | **90.2%** | **98.5%** | **99.4%** |
+| **All of `src/`** — everything the Worker ships | **98.1%** | **91.5%** | **97.5%** | **99.5%** |
 | &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 98% | 90% | 97% | **100%** |
 | &nbsp;&nbsp;`db.ts` — every line of SQL | **100%** | 95% | **100%** | **100%** |
 | &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |
@@ -827,7 +860,8 @@ Five tables in D1 (`migrations/`), plus a poll log:
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
 - **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. Filled by the relay agent; the vendor payload is stripped of address, coordinates and account identifiers before storage.
-- **`kv`** — a small expiring key/value shelf (`k`, `v`, `expires_at`), used by the weather cache.
+- **`kv`** — a small expiring key/value shelf (`k`, `v`, `expires_at`), used by the weather cache, the hourly and daily schedules, and to remember which notification events have already been told.
+- **`push_subscriptions`** — each device signed up for notifications: its push `endpoint` (never served), the dashboard `origin` it subscribed from, a short `audience` hash, and its delivery record. At most ten. **`push_messages`** — what a woken device shows (`title`, `body`), for every device or for one; kept a week.
 - **`tokens`** — cached bearer/refresh tokens per provider. **`poll_log`** — one line per poll with success and detail, surfaced in the dashboard footer.
 
 ### Upgrading from before 2.9: stamping the readings you already have
@@ -864,6 +898,11 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `POST /api/ingest/relay` | INGEST_TOKEN | a relay's report on itself (`{provider, id, name?, state: ok\|login-expired\|error, loginExpiresAt?}`), validated to that narrow shape |
 | `POST /api/ingest/alarms` | INGEST_TOKEN | raw SolisCloud alarm records (`{provider, plantId, records[]}`), normalised and stripped of owner fields in the Worker |
 | `POST /api/ingest/periods` | INGEST_TOKEN | raw SolisCloud chart totals (`{provider, plantId, which: month\|year\|all, points[]}`); rejects a total the nameplate could not produce |
+| `GET /api/push/key` | open | the public half of the Web Push signing key; 404 when none is set |
+| `POST /api/push/subscribe` | API_TOKEN or the `/auth` cookie | sign this device up (`{endpoint}`); records what is already wrong without announcing it, and sends the device a first message |
+| `POST /api/push/test` | API_TOKEN or the `/auth` cookie | send one test notification to one signed-up device (`{endpoint}`) |
+| `POST /api/push/unsubscribe` | open | turn a device off (`{endpoint}`). Needs no key: only that device knows its endpoint |
+| `GET /api/push/recent?for=` | open | the last half hour's messages for every device, plus those for the device whose hash is `for`. Never cached |
 | `GET /auth?t=` | — | set the cookie the write routes accept |
 
 **Every `GET` answers anyone**, with vendor identifiers stripped — see
@@ -890,7 +929,8 @@ solar-lens/
 ├── vitest.config.ts          unit test runner, coverage provider and thresholds
 ├── playwright.config.ts      two browser projects, static server, retries
 ├── migrations/               D1 schema, applied with `wrangler d1 migrations apply`
-│                             (0012 zone names, and the offset each reading was taken under)
+│                             (0012 zone names, and the offset each reading was taken under
+│                              0013 push subscriptions and the messages they are woken for)
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log
@@ -903,6 +943,7 @@ solar-lens/
 │   │                         hourly alarms and daily period totals
 │   ├── db.ts                 D1 queries and the Env type
 │   ├── public-view.ts        strips vendor identifiers from public responses
+│   ├── push.ts               Web Push: signing, who is signed up, what is worth announcing
 │   ├── relays.ts             validates a relay's report on itself
 │   └── providers/
 │       ├── types.ts          Provider / Inverter / Reading / Metrics
@@ -928,6 +969,9 @@ solar-lens/
 ├── renew-solis-login.cmd     double-click when a SolisCloud login needs renewing
 ├── scripts/
 │   ├── wrangler.mjs             fills CF_D1_DATABASE_ID into a temp config
+│   ├── wrangler-config.mjs      that config step, shared with the scripts below
+│   ├── backfill-reading-offsets.mjs  stamps pre-2.9 readings with their offset
+│   ├── make-vapid-key.mjs       makes the Web Push key and stores it as a Worker secret
 │   ├── ci/check-privacy.mjs     refuses an identifier in a file, commit or description
 │   ├── ci/check-attribution.mjs refuses a commit credited to anyone else
 │   ├── ci/check-headers.mjs     refuses drift between the two copies of the headers
@@ -956,10 +1000,14 @@ solar-lens/
 │   ├── unit/public-view.test.ts what a public response may and may not carry
 │   ├── unit/clients.test.ts     the vendor HTTP clients against a stubbed fetch
 │   ├── unit/events.test.ts      alarms and period totals from both vendors
+│   ├── unit/solarman-alarm-detail.test.ts  SolarMan's advice, and when each fault cleared
+│   ├── unit/push.test.ts        the push signature, what is worth announcing, the routes
+│   ├── unit/service-worker.test.ts  the service worker's push and tap handling
 │   ├── unit/extras.test.ts      the hourly and daily schedule for them
 │   ├── unit/timezone.test.ts    plant timezones and where a plant's day begins
 │   ├── unit/relays.test.ts      relay reports, login expiry, and relay naming
 │   ├── fixtures/               captured vendor payloads, scrubbed of identifiers
+│   ├── e2e/push.spec.ts         turning notifications to a closed browser on and off
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first
 ├── docs/handoff.md           running, repairing and handing over the system
@@ -1022,6 +1070,12 @@ What that choice costs is bounded rather than accepted:
   live vendor calls, so it keeps the `API_TOKEN` gate; `/api/ingest/*` keeps its
   own `INGEST_TOKEN`. An agent key still cannot read, and a reader still cannot
   write.
+- **Signing a phone up for notifications is a write**, so it needs the key too,
+  and a stranger who can read the dashboard cannot have their own phone told
+  about your systems. Turning a device *off* is the one write that needs no
+  key: it takes that device's own push endpoint, which only it knows, and a
+  gate there would only keep unwanted notifications coming. Endpoints are held
+  to the push services browsers use and never served; at most ten devices.
 - Read endpoints send `Cache-Control: public, max-age=60`, so a burst of
   requests is answered at the edge instead of against D1. A public URL can be
   requested by anything at any rate, and this project has exhausted the free
@@ -1065,7 +1119,9 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] Checks on every pull request, required before merging: types, unit, end-to-end, build, privacy, attribution, headers, relay scripts
 - [x] Vulnerability, secret and code scanning, weekly as well as per pull request
 - [x] Deployment behind an approval, with a live smoke test and automatic rollback
-- [ ] An automated test for the Worker's own routes against a real D1 in CI — the one gap the pipeline does not close
+- [x] An automated test for the Worker's own routes against a real D1 in CI — SQLite behind the D1 interface, since 2.7
+- [x] SolarMan alarm detail: when each fault cleared, its advice, and the occurrences the alert list folds away
+- [x] Notifications that reach a closed browser (Web Push)
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed

@@ -7,6 +7,7 @@ import { tzNameOf, tzOffsetSec } from './providers/units';
 import { aliasFor, publicAlarms, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
 import { parseRelayStatus } from './relays';
 import { plantFilter, pollAll } from './poll';
+import { announce, forgetOldMessages, isPushEndpoint, recentMessages, subscribe, tellOne, unsubscribe, vapidKey, vapidPublicKey } from './push';
 import type { Inverter, Reading } from './providers/types';
 import {
   deviceFromCollector,
@@ -113,6 +114,10 @@ app.get('/auth', (c) => {
 app.use('/api/*', async (c, next) => {
   if (c.req.path === '/api/ingest' || c.req.path.startsWith('/api/ingest/')) return next();
   if (c.req.method === 'GET') return next();
+  // Turning notifications off for a device takes that device's own push
+  // endpoint, which only it knows; it can do no harm to anyone else, and asking
+  // for the key to stop notifications would only keep unwanted ones coming.
+  if (c.req.path === '/api/push/unsubscribe') return next();
 
   const token = c.env.API_TOKEN;
   if (!token) {
@@ -166,6 +171,60 @@ app.get('/api/series', async (c) => {
   const [points, ids] = await Promise.all([series(c.env.DB, from, to), inverterIds(c.env.DB)]);
   c.header('Cache-Control', CACHE);
   return c.json({ from, to, points: publicRows(points, aliasFor(ids)) });
+});
+
+// ---------- notifications that reach a closed browser (./push) ----------
+
+/** The public half of the signing key, which a browser needs to subscribe. */
+app.get('/api/push/key', (c) => {
+  const key = vapidKey(c.env);
+  if (!key) return c.json({ error: 'notifications to a closed browser are not set up on this server' }, 404);
+  c.header('Cache-Control', CACHE);
+  return c.json({ publicKey: vapidPublicKey(key) });
+});
+
+/**
+ * Turn notifications on for a device. A write, so it needs the key - by
+ * header, or by the cookie /auth leaves - which keeps a stranger who can read
+ * the dashboard from signing their own phone up to it. What is already wrong
+ * is recorded without being announced, and the device is sent one message so
+ * its owner sees the whole path work.
+ */
+app.post('/api/push/subscribe', async (c) => {
+  if (!vapidKey(c.env)) return c.json({ error: 'notifications to a closed browser are not set up on this server' }, 503);
+  const body = await c.req.json<{ endpoint?: unknown }>().catch(() => ({} as { endpoint?: unknown }));
+  if (!isPushEndpoint(body.endpoint)) return c.json({ error: 'not a browser push endpoint' }, 400);
+  const outcome = await subscribe(c.env.DB, body.endpoint, new URL(c.req.url).origin);
+  if (outcome === 'full') return c.json({ error: 'the most devices this server will notify are already signed up' }, 409);
+  if (outcome === 'added') await announce(c.env, nowSec(), true);
+  await tellOne(c.env, body.endpoint, 'Notifications are on',
+    'This device will be told when a system stops mid-day, a fault is recorded, or a SolisCloud login needs renewing.');
+  return c.json({ ok: true, state: outcome });
+});
+
+app.post('/api/push/unsubscribe', async (c) => {
+  const body = await c.req.json<{ endpoint?: unknown }>().catch(() => ({} as { endpoint?: unknown }));
+  if (typeof body.endpoint !== 'string') return c.json({ error: 'endpoint missing' }, 400);
+  return c.json({ ok: true, removed: await unsubscribe(c.env.DB, body.endpoint) });
+});
+
+/** Send one test message to one device, which is how its owner knows it works. */
+app.post('/api/push/test', async (c) => {
+  const body = await c.req.json<{ endpoint?: unknown }>().catch(() => ({} as { endpoint?: unknown }));
+  if (typeof body.endpoint !== 'string') return c.json({ error: 'endpoint missing' }, 400);
+  const sent = await tellOne(c.env, body.endpoint, 'SolarLens test', 'If you can read this, notifications reach this device.');
+  return sent ? c.json({ ok: true }) : c.json({ error: 'this device is not signed up, or its push service refused' }, 404);
+});
+
+/**
+ * What a woken device shows. Never cached: the device is asking because
+ * something has just been written. `for` is the device's own hash, for a
+ * message meant only for it; it is not the endpoint, which never leaves.
+ */
+app.get('/api/push/recent', async (c) => {
+  const audience = (c.req.query('for') ?? '').slice(0, 32);
+  c.header('Cache-Control', 'no-store');
+  return c.json({ now: nowSec(), messages: await recentMessages(c.env.DB, audience) });
 });
 
 app.get('/api/health', async (c) => {
@@ -518,6 +577,15 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 export default {
   fetch: app.fetch,
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(pollAll(env));
+    // Notifications are judged after the poll, against what it just stored. A
+    // failure there is logged and dropped: it must never cost a reading.
+    ctx.waitUntil(pollAll(env).then(async () => {
+      try {
+        await announce(env);
+        await forgetOldMessages(env.DB);
+      } catch (e) {
+        console.error('push:', String(e));
+      }
+    }));
   },
 } satisfies ExportedHandler<Env>;

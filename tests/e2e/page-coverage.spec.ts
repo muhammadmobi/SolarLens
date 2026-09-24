@@ -115,6 +115,28 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     relays: [{ name: 'Relay 1', state: 'ok', login_expires_at: NOW + 5 * 86_400, last_seen: NOW - 60, first_seen: NOW - 86_400, last_ok_at: NOW - 60 }],
   })));
 
+  // The browser's push machinery, replaced as tests/e2e/push.spec.ts replaces
+  // it, so the walk can turn notifications to a closed browser on and off
+  // without a push service.
+  await page.context().grantPermissions(['notifications']);
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    if (!('PushManager' in window)) w.PushManager = function PushManager() {};
+    let sub: null | { endpoint: string; unsubscribe: () => Promise<boolean> } = null;
+    const reg = { pushManager: {
+      getSubscription: async () => sub,
+      subscribe: async () => (sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/walk', unsubscribe: async () => { sub = null; return true; } }),
+    } };
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: { getRegistration: async () => reg, register: async () => reg, ready: Promise.resolve(reg) },
+    });
+  });
+  await page.route('**/api/push/key', (r) => r.fulfill(json({ publicKey: Buffer.from([4, ...Array(64).fill(7)]).toString('base64url') })));
+  for (const path of ['subscribe', 'unsubscribe', 'test']) {
+    await page.route(`**/api/push/${path}`, (r) => r.fulfill(json({ ok: true })));
+  }
+
   await page.coverage.startJSCoverage({ resetOnNavigation: false });
   await page.goto('/');
   await expect(page.locator('#view')).not.toBeEmpty();
@@ -161,6 +183,14 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   const rows = page.locator('#view table tbody tr');
   if (await rows.count()) await rows.first().click({ timeout: 2000 }).catch(() => {});
   await page.waitForTimeout(150);
+
+  // Notifications: turn them on for this device, send a test, turn them off.
+  await page.goto('/#/alerts');
+  await expect(page.locator('#view')).not.toBeEmpty();
+  for (const id of ['#pushon', '#pushtest', '#pushoff']) {
+    await page.locator(id).click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(120);
+  }
 
   const entries = await page.coverage.stopJSCoverage();
 

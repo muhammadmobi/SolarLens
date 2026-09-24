@@ -16,6 +16,39 @@ checkout of any tag says which release it is.
 
 ## [Unreleased]
 
+### Added
+
+- **Notifications that reach a closed browser.** The Alerts tab gains *Also when
+  this browser is closed*: turn it on once per device and that device is told,
+  through its browser's own push service, when a system stops reporting while it
+  was producing, when a fault is recorded, when a SolisCloud login is two days
+  from running out or has run out, and when a vendor stops answering. Each rule
+  is written for a phone rather than a screen - the on-grid system goes quiet
+  every night because its inverter sleeps, so silence counts only after a reading
+  that showed it generating. Each event is told once, and again only if it clears
+  and returns.
+
+  The push itself carries nothing: it wakes the device, whose service worker
+  asks `/api/push/recent` what to show, so what a notification says never
+  passes through the push services, and there is no payload encryption to get
+  wrong. Signing a device up needs the key - from the `/auth` cookie or typed
+  once and not kept - while turning a device off needs none. A device gets one
+  message as soon as it signs up, and a *Send a test* button after that.
+
+  Setting up is one command, `node scripts/make-vapid-key.mjs`, which makes the
+  signing key and stores it as the Worker secret `VAPID_KEY` without printing or
+  saving the private half. Migration 0013 adds the two tables.
+
+- **SolarMan alarm detail.** SolarMan's alert list says when a fault was raised
+  and nothing else. Its portal's detail panel makes two more calls - found in the
+  portal's own code - and SolarLens now makes them too, for the newest five
+  alerts each hour: the advice, where SolarMan has any, and the moments that day
+  the fault was active. Each run of five-minute samples becomes one occurrence
+  with an end, which also brings back the occurrences the list folds into one row
+  per day. On the plant observed here, two stored alerts became four occurrences,
+  each with an end. A run still going, or one that reaches midnight, is left
+  without an end rather than given a guessed one.
+
 ### Fixed
 
 - **The reading-offset backfill works against the real database.** Its first

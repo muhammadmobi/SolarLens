@@ -492,6 +492,9 @@
   .notifyrow { display: grid; gap: 6px; padding: 16px 20px; }
   .notifylabel { display: flex; align-items: center; gap: 10px; font-weight: 600; cursor: pointer; }
   .notifylabel input { width: 18px; height: 18px; accent-color: var(--solarman); cursor: pointer; }
+  .pushrow { display: grid; gap: 8px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .pushrow .exportrow { margin-top: 0; }
+  .pushkey { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); min-width: 0; width: 16em; max-width: 100%; }
   .rangebtn, .groupbtn { font: inherit; font-size: 12.5px; font-weight: 650; color: var(--muted); background: var(--surface-2);
               border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   .rangebtn:hover, .groupbtn:hover { border-color: var(--muted); }
@@ -807,6 +810,120 @@
       announcedPrimed = true;
       return true;
     } catch { return false; }
+  }
+
+  // ---------- notifications to a closed browser (Web Push) ----------
+  //
+  // The switch above needs the dashboard open. This half reaches a phone in a
+  // pocket: the device hands the server its push address, and the server wakes
+  // it when a system stops mid-day, a fault is recorded, or a SolisCloud login
+  // needs renewing. Which of those is worth waking someone for is decided on
+  // the server - see src/push.ts - because the on-grid system goes quiet every
+  // night, and a phone should not be told so every evening.
+  //
+  // Signing a device up is a write, so it needs the SolarLens key: from the
+  // cookie /auth leaves on a device that has been signed in, or typed here
+  // once. A typed key is sent with that one request and kept only in memory,
+  // for the test button, until the page is closed.
+  const pushSupported = () => window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && notifySupported();
+  const pushBytes = (s) => {
+    const b = s.replace(/-/g, '+').replace(/_/g, '/');
+    return Uint8Array.from(atob(b + '='.repeat((4 - (b.length % 4)) % 4)), (c) => c.charCodeAt(0));
+  };
+  let pushTypedKey = '';
+  let pushNote = '';
+
+  async function pushRegistration() {
+    const reg = (await navigator.serviceWorker.getRegistration()) ?? (await navigator.serviceWorker.register('/sw.js'));
+    return navigator.serviceWorker.ready.then(() => reg);
+  }
+
+  async function pushState() {
+    if (!pushSupported()) return { kind: 'unsupported' };
+    try {
+      const res = await fetch('/api/push/key', { credentials: 'same-origin' });
+      if (res.status === 404) return { kind: 'unset' };
+      if (!res.ok) return { kind: 'error' };
+      const { publicKey } = await res.json();
+      const reg = await pushRegistration();
+      const sub = await reg.pushManager.getSubscription();
+      return { kind: sub ? 'on' : 'off', publicKey, reg, sub };
+    } catch {
+      return { kind: 'error' };
+    }
+  }
+
+  const pushPost = (path, body, key) => fetch(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+    body: JSON.stringify(body),
+  });
+
+  async function pushOn(st, key) {
+    const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+    if (permission !== 'granted') return { note: 'This browser refused permission to notify. Allow notifications for this site and try again.' };
+    const sub = st.sub ?? (await st.reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushBytes(st.publicKey) }));
+    const res = await pushPost('/api/push/subscribe', { endpoint: sub.endpoint }, key);
+    if (res.ok) return { note: 'On. A test notification is on its way to this device.' };
+    // Not signed up on the server, so not signed up here either: a device that
+    // believes it will be told, and will not be, is worse than one that knows.
+    await sub.unsubscribe().catch(() => {});
+    if (res.status === 401) return { needKey: true, note: key ? 'That key was not accepted.' : '' };
+    const why = (await res.json().catch(() => ({}))).error;
+    return { note: why ? `The server refused: ${why}.` : 'The server refused.' };
+  }
+
+  async function fillPushRow(extra = {}) {
+    const row = $('pushrow');
+    if (!row) return;
+    const st = await pushState();
+    const say = (html) => { if ($('pushrow') === row) row.innerHTML = html; };
+    const note = (extra.note ?? pushNote) ? `<small class="faint">${esc(extra.note ?? pushNote)}</small>` : '';
+    const lead = '<strong>Also when this browser is closed</strong>';
+    if (st.kind === 'unsupported') {
+      say(`${lead}<small class="faint">This browser cannot be told anything while it is closed. On an iPhone or iPad, add the dashboard to the home screen first and open it from there.</small>`);
+      return;
+    }
+    if (st.kind === 'unset') {
+      say(`${lead}<small class="faint">Not set up on this server yet: it needs a signing key, which its owner adds once. The README says how.</small>`);
+      return;
+    }
+    if (st.kind === 'error') {
+      say(`${lead}<small class="faint">Could not check whether this device is signed up. Try again when the dashboard is reachable.</small>`);
+      return;
+    }
+    if (st.kind === 'on') {
+      say(`${lead}<small class="faint">On for this device. It is told when a system stops mid-day, a fault is recorded, or a SolisCloud login needs renewing.</small>
+        <div class="exportrow"><button type="button" class="rangebtn" id="pushtest">Send a test</button>
+          <button type="button" class="rangebtn" id="pushoff">Turn off for this device</button></div>${note}`);
+      $('pushtest').onclick = async () => {
+        const res = await pushPost('/api/push/test', { endpoint: st.sub.endpoint }, pushTypedKey);
+        fillPushRow({ note: res.ok ? 'Sent. It should arrive within a few seconds.'
+          : res.status === 401 ? 'Sending a test needs this device to be signed in. Turn this off and on again with the key.'
+            : 'The server could not reach this device. Turn this off and on again.' });
+      };
+      $('pushoff').onclick = async () => {
+        await pushPost('/api/push/unsubscribe', { endpoint: st.sub.endpoint }).catch(() => {});
+        await st.sub.unsubscribe().catch(() => {});
+        pushNote = 'Off. This device will not be told anything while the dashboard is closed.';
+        fillPushRow();
+      };
+      return;
+    }
+    const needKey = !!extra.needKey;
+    say(`${lead}<small class="faint">Tells this device when a system stops mid-day, a fault is recorded, or a SolisCloud login needs renewing - even with the dashboard closed.</small>
+      <div class="exportrow">${needKey
+        ? `<input type="password" class="pushkey" id="pushkey" autocomplete="off" placeholder="SolarLens key" aria-label="SolarLens key">`
+        : ''}<button type="button" class="rangebtn" id="pushon">Turn on for this device</button></div>
+      ${needKey ? '<small class="faint">This device is not signed in, and signing a device up needs the key. It is sent with this request and not stored.</small>' : ''}${note}`);
+    $('pushon').onclick = async () => {
+      const typed = $('pushkey') ? $('pushkey').value.trim() : '';
+      if (typed) pushTypedKey = typed;
+      const out = await pushOn(st, typed || pushTypedKey);
+      pushNote = out.needKey ? '' : out.note;
+      fillPushRow(out);
+    };
   }
 
   /**
@@ -1844,9 +1961,11 @@
    * A system's fault history: every alarm its vendor has on record, newest first.
    *
    * What the vendor says is what is printed. SolisCloud gives advice with each
-   * alarm and SolarMan gives none, so the column appears only where there is
-   * something in it. SolarMan also never records when a fault cleared, and the
-   * page says "not recorded" rather than implying the fault is still going on.
+   * alarm, and SolarMan has advice for some faults and none for most, so the
+   * column appears only where there is something in it. SolarMan's end times
+   * come from its timeline, which can leave one unknown - a fault running into
+   * midnight - and then the page says "not recorded" rather than implying the
+   * fault is still going on.
    */
   const FAULTS_SHOWN = 50;
   function faultHistory(inv) {
@@ -1906,6 +2025,7 @@
           <small class="faint" id="notifynote">${notifyOn()
             ? 'This browser will raise a notification when a new alert appears, while the dashboard is open.'
             : 'Raises a notification on this device when a new alert appears, while the dashboard is open here.'}</small>
+          <div class="pushrow" id="pushrow" aria-live="polite"></div>
         </div></section>`;
 
     const sections = invs.map((inv) => {
@@ -1957,6 +2077,7 @@
             : 'Raises a notification on this device when a new alert appears, while the dashboard is open here.';
       };
     }
+    fillPushRow();
   }
 
   // ---------- historical data ----------

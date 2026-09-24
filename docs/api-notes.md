@@ -160,8 +160,22 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   `{total, data[]}`. The portal's Alert page (`/plant/infos/alert`).
   - Fields used: `code`, `level` (`2` seen on a fault; lower levels assumed below it),
     `showName` (e.g. `F56DC_VoltLow_Fault`), `alertTime` (epoch **s**).
-  - There is **no** end time and **no** remediation text. An alert says when a fault was
-    raised and never when it cleared.
+  - The list itself has **no** end time and **no** remediation text, and keeps only the
+    latest occurrence of a fault per day. Each row also carries `deviceId`, `ruleId`,
+    `productId`, `timezone` (IANA) and `influence`, which the two calls below need.
+- `POST /maintain-s/operating/alert/detail` body `{deviceId, ruleId, language}` → the alert
+  again, plus `customAlertConfigDisplayReason[]` - one entry per cause, each with a
+  `solution` string whose lines are separated by `\n` - and `customAlertConfigDisplay`
+  with an optional `description`. Keyed by rule, not by occurrence. For a DC under-voltage
+  fault both came back empty: SolarMan has no advice for it. The portal's detail panel shows
+  only `solution`, and `--` when there is none.
+- `POST /maintain-s/operating/alert/timeline` body `{deviceId, ruleId, alertDay: 'YYYYMMDD'}`
+  → a bare array of epoch-**second** timestamps: the moments on that day, in the plant's own
+  zone, when the fault was active, sampled every five minutes. The portal's chart treats
+  samples no more than 300 s apart as one run and draws it from the first to the last + 300 s,
+  which is where an occurrence's end comes from. It also reveals occurrences the list folds
+  away: two faults on one day are one list row and two runs here.
+  - Found in the portal's own bundle (a lazily loaded chunk), not in any documentation.
 - `GET /maintain-s/history/batteryPower/{stationId}/stats/month?year=&month=` → `records[]`,
   one per day; `.../stats/year?year=` → `records[]` one per month, plus a `statistics` total.
   Named after the battery but covering the whole system:
