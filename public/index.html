@@ -204,13 +204,20 @@
     .guide dl.tabs dd { margin-bottom: 10px; }
   }
 
-  nav { display: flex; gap: 2px; padding: 10px 0 0; }
+  /* The tabs scroll sideways inside their own strip rather than widening the
+     page: on a phone five tabs do not fit, and a page wider than the screen
+     makes the browser zoom the whole layout out - which pushed anything fixed
+     to the bottom of the screen, like the new-version notice, out of sight. */
+  nav { display: flex; gap: 2px; padding: 10px 0 0; overflow-x: auto; scrollbar-width: none; }
+  nav::-webkit-scrollbar { display: none; }
   nav a {
+    flex: none; white-space: nowrap;
     padding: 9px 16px 12px; font-size: 14.5px; font-weight: 600; color: var(--muted);
     border-bottom: 2.5px solid transparent; transition: color .15s, border-color .15s;
   }
   nav a:hover { color: var(--ink); }
   nav a.on { color: var(--ink); border-bottom-color: var(--ink); }
+  @media (max-width: 640px) { nav a { padding: 9px 11px 12px; font-size: 14px; } }
 
   main { padding-top: 26px; }
   .back {
@@ -355,7 +362,9 @@
      never be compared. They are columns now. The height is won back mostly by
      printing each reading once: producing now, house load, grid and battery
      are in the diagram, so the tiles below it do not repeat them. */
-  .ovgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 16px; }
+  /* min(430px, 100%): a phone is narrower than one column, and a column that
+     cannot shrink below 430px widened the whole page past the screen. */
+  .ovgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr)); gap: 16px; }
   .ovsys {
     background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
     box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 0; overflow: hidden;
@@ -522,9 +531,25 @@
   .pushrow { display: grid; gap: 8px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
   .pushrow .exportrow { margin-top: 0; }
   .pushkey { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); min-width: 0; width: 16em; max-width: 100%; }
-  .rangebtn, .groupbtn { font: inherit; font-size: 12.5px; font-weight: 650; color: var(--muted); background: var(--surface-2);
+  .rangebtn, .groupbtn, .sysbtn { font: inherit; font-size: 12.5px; font-weight: 650; color: var(--muted); background: var(--surface-2);
               border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
-  .rangebtn:hover, .groupbtn:hover { border-color: var(--muted); }
+  .rangebtn:hover, .groupbtn:hover, .sysbtn:hover { border-color: var(--muted); }
+  .sysbtn.on { background: var(--ink); color: var(--surface); border-color: transparent; }
+
+  /* ---------- "a new version is available" ---------- */
+  .newversion {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60;
+    display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px 12px;
+    width: max-content; max-width: calc(100vw - 32px); padding: 10px 10px 10px 18px;
+    border-radius: 14px; background: var(--ink); color: var(--bg); box-shadow: var(--shadow-lift);
+    font-size: 14px; font-weight: 600;
+  }
+  .newversion button { font: inherit; font-size: 13px; cursor: pointer; border-radius: 999px; padding: 6px 14px; }
+  .newversion .nv-reload { background: var(--bg); color: var(--ink); border: 1px solid var(--bg); font-weight: 700; }
+  .newversion .nv-later { background: none; color: inherit; border: 1px solid transparent; font-weight: 600; }
+  .newversion button:focus-visible { outline: 2px solid var(--bg); outline-offset: 2px; }
+  body.tv .newversion { display: none; }
+  .syspick { margin-bottom: 10px; }
   .rangesep { width: 1px; background: var(--line); margin: 2px 4px; }
   .card.relays { margin-top: 18px; }
   .faulthist { padding: 6px 20px 18px; border-top: 1px solid var(--line-soft); }
@@ -985,7 +1010,10 @@
             r.source === 'vendor' ? 'vendor total' : 'recorded here']);
       }
     }
-    return { header, body, name: `solarlens-history-${group}-${new Date().toISOString().slice(0, 10)}.csv` };
+    // A file of one system is named for it, so two downloads side by side in a
+    // folder say which is which.
+    const slug = view?.system ? `${String(view.system).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-` : '';
+    return { header, body, name: `solarlens-history-${slug}${group}-${new Date().toISOString().slice(0, 10)}.csv` };
   }
   // The same vendor in a colour that can be read as small bold type: axe
   // measured the brand orange at 3.42:1 against white, and 4.5 is the bar.
@@ -2126,6 +2154,20 @@
   const ROLLUP_DAYS = 400;
   const GROUPS = [['day', 'By day'], ['month', 'By month'], ['year', 'By year']];
 
+  // Which system the Historical Data tab shows: every system, one after the
+  // other, or one on its own. Remembered per browser - someone who looks after
+  // one of the systems wants to land on it - and 'all' when the remembered one
+  // is not a system any more.
+  const HISTORY_SYSTEM_KEY = 'solarlens-history-system';
+  function historySystem(invs) {
+    let wanted = state.historySystem;
+    if (wanted === undefined) {
+      try { wanted = localStorage.getItem(HISTORY_SYSTEM_KEY) || 'all'; } catch { wanted = 'all'; }
+      state.historySystem = wanted;
+    }
+    return invs.some((i) => i.id === wanted) ? wanted : 'all';
+  }
+
   /**
    * Daily rows folded into months or years.
    *
@@ -2226,7 +2268,13 @@
     if (group !== 'day' && !state.periods) loadPeriods();
     // The day ranges mean nothing once rows are folded into months, so the
     // month and year views show only the grouping switch.
-    const picker = `<div class="rangepick">${GROUPS.map(([g, label]) =>
+    const system = historySystem(invs);
+    const systemPick = invs.length > 1
+      ? `<div class="rangepick syspick" role="group" aria-label="Which system">${[['all', 'All systems'], ...invs.map((i) => [i.id, i.name])]
+          .map(([id, label]) => `<button type="button" class="sysbtn${id === system ? ' on' : ''}" data-system="${esc(id)}"
+            aria-pressed="${id === system}">${esc(label)}</button>`).join('')}</div>`
+      : '';
+    const picker = `${systemPick}<div class="rangepick">${GROUPS.map(([g, label]) =>
       `<button type="button" class="groupbtn${g === group ? ' on' : ''}" data-group="${g}">${label}</button>`).join('')}
       ${group === 'day' ? `<span class="rangesep"></span>${HISTORY_RANGES.map((d) =>
       `<button type="button" class="rangebtn${d === days ? ' on' : ''}" data-days="${d}">${d} days</button>`).join('')}` : ''}</div>`;
@@ -2251,13 +2299,17 @@
         byInv[inv.id] = withVendor(rollup(byInv[inv.id] ?? [], group), vendor.filter((p) => p.inverter_id === inv.id), group);
       }
     }
+    // One system on its own, or all of them: everything below - the charts,
+    // the tables, the row count and the CSV - follows the switch.
+    const shown = system === 'all' ? invs : invs.filter((i) => i.id === system);
+    const shownById = Object.fromEntries(shown.map((i) => [i.id, byInv[i.id] ?? []]));
     // What the table is about to show, kept for the CSV button: the export
     // says "as shown", and this is what shown means.
-    state.historyView = { group, byInv };
-    const shownCount = Object.values(byInv).reduce((n, list) => n + list.length, 0);
+    state.historyView = { group, byInv: shownById, system: system === 'all' ? null : shown[0]?.name ?? null };
+    const shownCount = Object.values(shownById).reduce((n, list) => n + list.length, 0);
     const periodWord = group === 'month' ? 'Month' : group === 'year' ? 'Year' : 'Day';
 
-    const sections = invs.map((inv, i) => {
+    const sections = shown.map((inv, i) => {
       const mine = byInv[inv.id] ?? [];
       const m = parse(inv.metrics) ?? {};
       if (!mine.length) {
@@ -2353,6 +2405,13 @@
   }
 
   function bindRange() {
+    for (const b of document.querySelectorAll('.sysbtn')) {
+      b.onclick = () => {
+        state.historySystem = b.dataset.system;
+        try { localStorage.setItem(HISTORY_SYSTEM_KEY, b.dataset.system); } catch { /* remembered for this visit only */ }
+        renderHistory();
+      };
+    }
     for (const b of document.querySelectorAll('.rangebtn[data-days]')) {
       b.onclick = () => { state.history = null; loadHistory(Number(b.dataset.days)); renderHistory(); };
     }
@@ -2797,6 +2856,7 @@
       ['Compare both systems on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
       ['See one system on its own, in full', `${tab('#/', 'Overview')} - tap the system`],
       ['Daily, monthly or yearly totals', `${tab('#/history', 'Historical Data')} - Day, Month or Year at the top`],
+      ["One system's history on its own",`${tab('#/history', 'Historical Data')} - pick the system at the top; All systems shows both`],
       ['Take the figures into a spreadsheet', `${tab('#/history', 'Historical Data')} - Download CSV`],
       ['Know what is wrong right now', `${tab('#/alerts', 'Alerts')} - the number on the tab counts it`],
       ['See past faults, and how long each lasted', `${tab('#/alerts', 'Alerts')} - Fault history, under each system`],
@@ -2844,7 +2904,7 @@
           year and in total; grid in and out; the battery; each PV string and AC phase; and the raw telemetry.</dd>
         <dt>${tab('#/history', 'Historical Data')}</dt>
         <dd>The record, by day, month or year - back to installation for months and years, from each vendor's own totals.
-          Each row says whose figure it is. Download CSV takes the rows on screen.</dd>
+          Every system at once, or one on its own. Each row says whose figure it is. Download CSV takes the rows on screen.</dd>
         <dt>${tab('#/alerts', 'Alerts')}</dt>
         <dd>What is wrong now, system by system, and what was checked when nothing is. Below that, each system's fault
           history with how long every fault lasted. The notification switches are here.</dd>
@@ -3130,11 +3190,62 @@
     clearTimeout(still);
     still = setTimeout(() => document.body.classList.remove('moving'), 2500);
   });
+  // ---------- a new version ----------
+  //
+  // A dashboard tab refreshes its figures on its own but never the page that
+  // draws them, so a tab left open across a release - or a wall display - goes
+  // on running the old one. The page therefore asks for its own address now and
+  // then, headers only, and compares the ETag with the one it had at load:
+  // changed means the page on the server is not the page on screen. It costs
+  // one tiny request every quarter hour and one on coming back to the tab, and
+  // nothing at all on the database.
+  //
+  // A screen someone is reading gets a notice and chooses when; TV mode has
+  // nobody to choose, so it reloads itself. "Later" is taken at its word for
+  // the rest of the visit.
+  const VERSION_CHECK_MS = 15 * 60 * 1000;
+  let loadedVersion = null;
+  let newVersionSeen = false;
+
+  async function serverVersion() {
+    try {
+      const res = await fetch('/', { method: 'HEAD', cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) return null;
+      return res.headers.get('etag') || res.headers.get('last-modified');
+    } catch {
+      return null;
+    }
+  }
+
+  async function checkForNewVersion() {
+    if (newVersionSeen) return;
+    const now = await serverVersion();
+    if (!now) return;
+    if (loadedVersion === null) { loadedVersion = now; return; }
+    if (now === loadedVersion) return;
+    newVersionSeen = true;
+    if (document.body.classList.contains('tv')) { location.reload(); return; }
+    const bar = document.createElement('div');
+    bar.className = 'newversion';
+    bar.id = 'newversion';
+    bar.setAttribute('role', 'status');
+    bar.innerHTML = `<span>A new version of SolarLens is available.</span>
+      <button type="button" class="nv-reload" id="nv-reload">Reload</button>
+      <button type="button" class="nv-later" id="nv-later">Later</button>`;
+    document.body.appendChild(bar);
+    $('nv-reload').onclick = () => location.reload();
+    $('nv-later').onclick = () => bar.remove();
+  }
+  checkForNewVersion();
+  setInterval(checkForNewVersion, VERSION_CHECK_MS);
+
   // Returning to the tab is exactly when a stale figure matters, so that one
-  // fetches everything rather than waiting for the slow cycle to come round.
+  // fetches everything rather than waiting for the slow cycle to come round -
+  // and it is when a release made while the tab was hidden should be noticed.
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     refresh(true);
+    checkForNewVersion();
     if (document.body.classList.contains('tv')) holdScreen(true);
   });
 

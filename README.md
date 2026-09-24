@@ -15,8 +15,10 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Each system's day ends where its own sun sets.** Every plant's timezone is stored, and every figure, curve and daily row is cut at that plant's midnight rather than at the reader's — so two systems in different countries are each shown their own day, on the same screen.
 - **Fault history, with what the vendor advises.** Every alarm each vendor has on record, back to installation: when, how severe, the fault code, how long it lasted, and the vendor's own advice where it gives any. SolarMan's alert list says only when a fault was raised; its timeline, read for the newest alerts each hour, supplies when each one cleared, and the occurrences the list folds into one entry per day.
 - **Tells your phone, even with the dashboard closed.** Turn it on once per device on the Alerts tab, and that device is notified when a system stops reporting while it was producing, when a fault is recorded, when a SolisCloud login is about to run out, or when a vendor stops answering. A system going quiet at dusk is not news, so it is not announced. While a tab is open, a second switch announces every change the Alerts tab shows.
+- **Never stuck on an old version.** A tab left open across a release offers a *Reload* when a new version is out; a TV display reloads itself.
 - **A guide built in.** The **?** at the top of every page opens a guide to the app: what SolarLens is, what each tab holds, a "where do I find…" table, what is new in this release, and the few things worth knowing - such as an on-grid system reading offline every night. It opens even before the data has loaded.
 - **Made for a wall, too.** TV mode at `#/tv` drops the header and tabs, sizes everything to the screen, keeps the display awake, and shows a clock so a frozen page is obvious from across a room.
+- **Each system on its own, or all together.** Historical Data shows every system one after the other, or - with the switch at the top - just one, with its chart, table and CSV.
 - **History that goes back to the start.** Days, months or years. Months and years use each vendor's own totals, which reach back to the day the plant was installed, and every row says whether its figure is the vendor's or SolarLens's own and how many of its days SolarLens saw.
 - **Installable.** Add it to a phone's home screen and it opens in its own window. The worker behind that goes to the network first and falls back to a cache only when there is none, so an installed copy can never show a stale reading as a live one.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
@@ -541,7 +543,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**401 unit tests** and **336 end-to-end tests** (168 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**401 unit tests** and **356 end-to-end tests** (178 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 

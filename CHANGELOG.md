@@ -14,6 +14,38 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [Unreleased]
+
+### Added
+
+- **Historical Data, one system at a time.** A switch at the top of the tab -
+  *All systems*, or any one of them - narrows the charts, the tables, the row
+  count and the CSV to the system chosen, so looking after one system no longer
+  means scrolling past the other. All systems, one after the other, is still the
+  default, and the choice is remembered in each browser; a remembered system
+  that no longer exists falls back to all of them. A single system's CSV is
+  named for it.
+- **"A new version of SolarLens is available."** A dashboard tab refreshes its
+  figures but never the page itself, so a tab left open across a release kept
+  running the old one - which is how the 2.10 guide went unseen on a screen that
+  had been open since before it. The page now asks for its own address, headers
+  only, every quarter of an hour and on coming back to the tab, and compares the
+  ETag with the one it loaded with; when they differ it offers a Reload. TV mode
+  has nobody to press anything, so a wall display reloads itself. It costs one
+  tiny request each time and nothing on the database.
+
+### Fixed
+
+- **The page is no wider than a phone.** The tab bar could not shrink, and on a
+  phone it made every page wider than the screen - "Devices" was cut off at the
+  edge and "Historical Data" broke over two lines - while the overview's
+  columns would not go below 430px. A page wider than the screen makes the
+  browser zoom the whole layout out, which is how the new-version notice first
+  landed below the bottom of a phone screen, where it could not be pressed.
+  The tabs now scroll sideways in their own strip, one line each, and the
+  overview's columns shrink to fit; a test walks every view at phone width and
+  fails if any is wider than the screen.
+
 ## [2.10.0] — 2026-09-24
 
 Phone notifications, SolarMan faults that say when they cleared, and a guide to
