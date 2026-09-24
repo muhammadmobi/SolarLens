@@ -28,14 +28,21 @@ export const MAX_SUBSCRIPTIONS = 10;
 const QUIET_AFTER_S = 30 * 60;
 /** A relay login: how far ahead to warn. The dashboard warns at the same point. */
 const LOGIN_WARN_S = 2 * 86400;
-/** A vendor alarm older than this when first seen is history, not news. */
+/** A vendor alarm first seen longer than this after it began is history, not news. */
 const ALARM_FRESH_S = 6 * 3600;
-/** An event, once told, is not told again for as long as it stays the same event. */
-const TOLD_FOR_S = 30 * 86400;
 /** Messages are kept this long for a woken device to read. */
 const KEEP_MESSAGES_S = 7 * 86400;
-/** How far back a woken device looks. */
-const RECENT_S = 30 * 60;
+/**
+ * How long a push service holds a wake-up for a device that is off or out of
+ * signal - and so how far back a woken device must be able to look. The two are
+ * one number on purpose: a device woken late still finds what it was woken for.
+ */
+const DELIVERY_S = 24 * 3600;
+/** Most messages one wake-up shows; past this, one more says how many were left out. */
+export const MAX_SHOWN = 20;
+/** Where the told-state lives in kv, and the mark that it has been set up. */
+const TOLD = 'push:told:';
+const PRIMED = 'push:primed';
 
 /**
  * Push services a subscription may point at. An endpoint is a URL the Worker
@@ -122,23 +129,48 @@ export interface Subscription { endpoint: string; origin: string; audience: stri
 /**
  * Record a device. The origin is the dashboard's own, taken from the request
  * that subscribed; the push service is told that is the sender, which is why
- * this needs no setting of its own. Refuses past MAX_SUBSCRIPTIONS.
+ * this needs no setting of its own.
+ *
+ * The limit and the duplicate are decided by the insert itself - one statement,
+ * which D1 runs whole - so two devices signing up at the same moment cannot
+ * both slip under the limit, and the same device twice cannot trip over its own
+ * primary key. Only then is it asked which of the two refusals it was.
  */
 export async function subscribe(db: D1Database, endpoint: string, origin: string, now = nowSec()): Promise<'added' | 'known' | 'full'> {
-  const known = await db.prepare('SELECT 1 FROM push_subscriptions WHERE endpoint = ?1').bind(endpoint).first();
-  if (known) return 'known';
-  const { n } = (await db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>())!;
-  if (n >= MAX_SUBSCRIPTIONS) return 'full';
-  await db
-    .prepare('INSERT INTO push_subscriptions (endpoint, origin, audience, created_at) VALUES (?1, ?2, ?3, ?4)')
-    .bind(endpoint, origin, await audienceOf(endpoint), now)
+  const res = await db
+    .prepare(
+      `INSERT INTO push_subscriptions (endpoint, origin, audience, created_at)
+       SELECT ?1, ?2, ?3, ?4 WHERE (SELECT COUNT(*) FROM push_subscriptions) < ?5
+       ON CONFLICT(endpoint) DO NOTHING`,
+    )
+    .bind(endpoint, origin, await audienceOf(endpoint), now, MAX_SUBSCRIPTIONS)
     .run();
-  return 'added';
+  if (res.meta.changes > 0) return 'added';
+  const known = await db.prepare('SELECT 1 FROM push_subscriptions WHERE endpoint = ?1').bind(endpoint).first();
+  return known ? 'known' : 'full';
 }
 
+/**
+ * Forget a device. The last one to go takes the told-state with it, so that
+ * whoever signs up next starts from what is wrong then, not from what was
+ * wrong when the previous devices were listening.
+ */
 export async function unsubscribe(db: D1Database, endpoint: string): Promise<boolean> {
   const res = await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?1').bind(endpoint).run();
+  const { n } = (await db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>())!;
+  if (!n) await db.prepare('DELETE FROM kv WHERE k = ?1 OR k LIKE ?2').bind(PRIMED, `${TOLD}%`).run();
   return res.meta.changes > 0;
+}
+
+/**
+ * Whether the told-state has been set up for the devices now listening. Kept
+ * as a state of its own rather than inferred from "this is the only device":
+ * two first devices signing up at the same moment would each see the other and
+ * neither would prime, whereas both finding this unset and both priming does no
+ * harm - nobody has been told anything yet.
+ */
+export async function needsPriming(db: D1Database): Promise<boolean> {
+  return !(await db.prepare('SELECT 1 FROM kv WHERE k = ?1').bind(PRIMED).first());
 }
 
 // ---------------------------------------------------------------- what is worth saying
@@ -157,20 +189,24 @@ function clock(ts: number, offsetSec: number | null): string {
 const kw = (w: number) => (w >= 1000 ? `${(w / 1000).toFixed(1)} kW` : `${Math.round(w)} W`);
 
 /**
- * Everything currently worth a notification. Each event's key names the
- * occurrence - the reading it went quiet after, the alarm, the login's expiry
- * - so the same trouble is told once, and trouble that clears and returns is
- * told again.
+ * Everything wrong right now that is worth a notification. Each event's key
+ * names the *condition* - this system quiet, this relay's login expired, this
+ * vendor down - and never a moment within it, so a condition that lasts has one
+ * key for as long as it lasts. announce() tells a key once and forgets it only
+ * when the key is no longer here, which is what "told once, and again only if
+ * it clears and returns" needs.
  *
  * - **Stopped while producing.** Nothing for 30 minutes after a reading that
  *   showed the system generating. A system that goes quiet at dusk, having
  *   produced nothing for its last reading, is asleep rather than broken.
- * - **A new fault.** A vendor alarm that began within six hours when it was
- *   first seen, saying whether it has already cleared. Older alarms are the
- *   history that arrives when a feed is first connected.
+ * - **A new fault.** A vendor alarm first seen within six hours of when it
+ *   began, and first seen within the last six. The first half keeps out the
+ *   history that arrives when a feed is first connected; the second means a
+ *   fault is news for six hours and then is not.
  * - **A SolisCloud login.** Two days before it runs out, and when it has.
- * - **A vendor not answering.** Three failed polls in a row, spanning at
- *   least fifteen minutes - one failure is weather, three is a token.
+ * - **A vendor not answering.** Every poll failed since the last one that
+ *   worked, at least three of them, across at least fifteen minutes - one
+ *   failure is weather, a run of them is usually a token.
  */
 export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEvent[]> {
   const out: PushEvent[] = [];
@@ -194,7 +230,7 @@ export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEv
       ? ' It is fed by a relay laptop: check that laptop is awake and its SolisCloud login is current.'
       : '';
     out.push({
-      key: `quiet:${f.id}:${f.ts}`,
+      key: `quiet:${f.id}`,
       title: `${f.name}: stopped reporting`,
       body: `Nothing since ${clock(f.ts, f.tz_offset_sec)}, when it was producing ${kw(watts)}.${relay}`,
     });
@@ -205,9 +241,9 @@ export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEv
     .prepare(
       `SELECT a.id, a.code, a.message, a.severity, a.advice, a.begin_ts, a.end_ts, a.state, i.name, i.tz_offset_sec
        FROM alarms a JOIN inverters i ON i.id = a.inverter_id
-       WHERE a.first_seen >= ?1 AND a.begin_ts >= ?2`,
+       WHERE a.first_seen >= ?1 AND a.first_seen - a.begin_ts <= ?2`,
     )
-    .bind(now - ALARM_FRESH_S, now - ALARM_FRESH_S)
+    .bind(now - ALARM_FRESH_S, ALARM_FRESH_S)
     .all<{ id: string; code: string; message: string | null; severity: string | null; advice: string | null;
       begin_ts: number; end_ts: number | null; state: string; name: string; tz_offset_sec: number | null }>();
   for (const a of alarms) {
@@ -237,14 +273,14 @@ export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEv
     const exp = r.login_expires_at;
     if (r.state === 'login-expired' || (exp !== null && exp <= now)) {
       out.push({
-        key: `relay-expired:${r.id}:${exp ?? 'unknown'}`,
+        key: `relay-expired:${r.id}`,
         title: `SolisCloud login expired on ${name}`,
         body: `Readings from it have stopped. On that computer, double-click renew-solis-login.cmd and log in.`,
       });
     } else if (exp !== null && exp - now <= LOGIN_WARN_S) {
       const hours = Math.max(1, Math.round((exp - now) / 3600));
       out.push({
-        key: `relay-expiring:${r.id}:${exp}`,
+        key: `relay-expiring:${r.id}`,
         title: `SolisCloud login on ${name} runs out in ${hours < 48 ? `${hours} h` : '2 days'}`,
         body: `Renew it before then: on that computer, double-click renew-solis-login.cmd.`,
       });
@@ -252,25 +288,25 @@ export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEv
   });
 
   // --- a vendor that has stopped answering --------------------------------
-  const { results: polls } = await db
-    .prepare(`SELECT ts, provider, ok, detail FROM poll_log WHERE ts >= ?1 ORDER BY ts DESC LIMIT 60`)
-    .bind(now - 6 * 3600)
-    .all<{ ts: number; provider: string; ok: number; detail: string | null }>();
-  const byProvider = new Map<string, typeof polls>();
-  for (const p of polls) {
-    if (p.provider === 'none') continue;
-    const list = byProvider.get(p.provider) ?? [];
-    if (list.length < 3) list.push(p);
-    byProvider.set(p.provider, list);
-  }
-  for (const [provider, last] of byProvider) {
-    if (last.length < 3 || last.some((p) => p.ok)) continue;
-    const first = last[last.length - 1];
-    if (now - first.ts < 15 * 60) continue;
+  // The run of failures since each vendor last answered, whole: its length, when
+  // it began, and the newest failure's words. One grouped read, over the week
+  // the poll log keeps.
+  const { results: runs } = await db
+    .prepare(
+      `SELECT p.provider, COUNT(*) AS failed, MIN(p.ts) AS since,
+              (SELECT detail FROM poll_log WHERE provider = p.provider ORDER BY ts DESC LIMIT 1) AS detail
+       FROM poll_log p
+       WHERE p.provider != 'none' AND p.ok = 0
+         AND p.ts > COALESCE((SELECT MAX(ts) FROM poll_log WHERE provider = p.provider AND ok = 1), 0)
+       GROUP BY p.provider`,
+    )
+    .all<{ provider: string; failed: number; since: number; detail: string | null }>();
+  for (const r of runs) {
+    if (r.failed < 3 || now - r.since < 15 * 60) continue;
     out.push({
-      key: `poll:${provider}:${first.ts}`,
-      title: `${providerName(provider)} is not answering`,
-      body: `The last three reads failed: ${String(last[0].detail ?? 'no detail given').slice(0, 140)}`,
+      key: `poll:${r.provider}`,
+      title: `${providerName(r.provider)} is not answering`,
+      body: `Every read for ${Math.max(1, Math.round((now - r.since) / 60))} min has failed: ${String(r.detail ?? 'no detail given').slice(0, 140)}`,
     });
   }
 
@@ -280,10 +316,20 @@ export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEv
 // ---------------------------------------------------------------- sending
 
 /**
- * Store what is new, and wake every device if anything is. Returns how many
- * events were new. With `prime`, what is already wrong is recorded as told
- * without telling anyone: that is what a device turning this on wants, rather
- * than the last six hours at once.
+ * Tell what is new, and forget what has cleared. Returns how many events were
+ * new.
+ *
+ * The told-state is the set of condition keys already announced, kept in kv
+ * with no expiry of its own. Each run compares it with what is wrong now: a key
+ * that is new is announced and added, a key still present is left alone however
+ * long it lasts, and a key no longer present is dropped - so if that trouble
+ * returns, it is news again.
+ *
+ * With `prime`, the told-state is set to exactly what is wrong now without
+ * telling anyone, and marked as set up. That is for the first device to sign
+ * up, which wants to hear what happens next rather than everything already
+ * wrong. A later device is never primed (see needsPriming): priming then would
+ * mark as told an event the devices already signed up have not yet heard.
  */
 export async function announce(env: Env, now = nowSec(), prime = false): Promise<number> {
   // Nobody listening, or no key to sign with: not worth the reads.
@@ -292,23 +338,34 @@ export async function announce(env: Env, now = nowSec(), prime = false): Promise
   if (!n) return 0;
 
   const events = await pushEvents(env.DB, now);
-  const fresh: PushEvent[] = [];
-  for (const e of events) {
-    const told = await env.DB.prepare('SELECT 1 FROM kv WHERE k = ?1 AND expires_at > ?2').bind(`push:${e.key}`, now).first();
-    if (told) continue;
-    await env.DB
+  const current = new Set(events.map((e) => TOLD + e.key));
+  const { results: toldRows } = await env.DB.prepare(`SELECT k FROM kv WHERE k LIKE ?1`).bind(`${TOLD}%`).all<{ k: string }>();
+  const told = new Set(toldRows.map((r) => r.k));
+
+  const cleared = [...told].filter((k) => !current.has(k));
+  const fresh = events.filter((e) => !told.has(TOLD + e.key));
+  const stmts = [
+    ...cleared.map((k) => env.DB.prepare('DELETE FROM kv WHERE k = ?1').bind(k)),
+    // Far in the future rather than never, only because kv wants a number: the
+    // entry goes when its trouble clears, not when this date arrives.
+    ...fresh.map((e) => env.DB
       .prepare(`INSERT INTO kv (k, v, expires_at) VALUES (?1, ?2, ?3)
                 ON CONFLICT(k) DO UPDATE SET v = excluded.v, expires_at = excluded.expires_at`)
-      .bind(`push:${e.key}`, String(now), now + TOLD_FOR_S)
-      .run();
-    fresh.push(e);
-  }
+      .bind(TOLD + e.key, String(now), now + 100 * 365 * 86400)),
+    ...(prime
+      ? [env.DB.prepare(`INSERT INTO kv (k, v, expires_at) VALUES (?1, ?2, ?3)
+                         ON CONFLICT(k) DO UPDATE SET v = excluded.v`).bind(PRIMED, String(now), now + 100 * 365 * 86400)]
+      : []),
+  ];
+  if (stmts.length) await env.DB.batch(stmts);
   if (prime || !fresh.length) return prime ? 0 : fresh.length;
 
   for (const e of fresh) {
+    // The id carries the moment: the same condition returning later is a new
+    // message, which a device that has shown the first must still show.
     await env.DB
       .prepare('INSERT OR IGNORE INTO push_messages (id, ts, audience, title, body) VALUES (?1, ?2, ?3, ?4, ?5)')
-      .bind(await audienceOf(e.key), now, '', e.title, e.body)
+      .bind(await audienceOf(`${e.key}@${now}`), now, '', e.title, e.body)
       .run();
   }
   await wakeAll(env, now);
@@ -341,27 +398,32 @@ async function wakeAll(env: Env, now: number): Promise<void> {
  * One empty push. A 404 or 410 means the browser has dropped the subscription
  * - uninstalled, cleared, or turned off from its own settings - and it is
  * removed here too. Anything else counts a failure; a device that has failed
- * fifty times in a row with no success between is removed as well.
+ * fifty times in a row with no success between is removed as well. Every
+ * failure is logged with the push service's host and the status, never the
+ * endpoint, which is the one secret a subscription has.
  */
 export async function wake(env: Env, sub: Subscription, now = nowSec()): Promise<boolean> {
   const key = vapidKey(env);
   if (!key) return false;
+  const host = new URL(sub.endpoint).host;
   let status = 0;
+  let error = '';
   try {
     const res = await fetch(sub.endpoint, {
       method: 'POST',
       headers: {
         Authorization: await vapidHeader(key, sub.endpoint, sub.origin, now),
-        TTL: String(24 * 3600),
+        TTL: String(DELIVERY_S),
         Urgency: 'high',
         'Content-Length': '0',
       },
     });
     status = res.status;
-  } catch {
-    status = 0;
+  } catch (e) {
+    error = String(e);
   }
   if (status === 404 || status === 410) {
+    console.log(JSON.stringify({ push: 'dropped', host, status }));
     await unsubscribe(env.DB, sub.endpoint);
     return false;
   }
@@ -369,22 +431,37 @@ export async function wake(env: Env, sub: Subscription, now = nowSec()): Promise
     await env.DB.prepare('UPDATE push_subscriptions SET last_ok_at = ?2, failures = 0 WHERE endpoint = ?1').bind(sub.endpoint, now).run();
     return true;
   }
-  await env.DB.prepare('UPDATE push_subscriptions SET failures = failures + 1 WHERE endpoint = ?1').bind(sub.endpoint).run();
-  await env.DB.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?1 AND failures >= 50').bind(sub.endpoint).run();
+  console.warn(JSON.stringify({ push: 'failed', host, status, ...(error ? { error: error.slice(0, 200) } : {}) }));
+  const row = await env.DB
+    .prepare('UPDATE push_subscriptions SET failures = failures + 1 WHERE endpoint = ?1 RETURNING failures')
+    .bind(sub.endpoint)
+    .first<{ failures: number }>();
+  if (row && row.failures >= 50) await unsubscribe(env.DB, sub.endpoint);
   return false;
 }
 
-/** What a woken device shows: the last half hour's messages, for everyone or for it. */
+/**
+ * What a woken device shows: the messages from as far back as a push service
+ * would still deliver a wake-up, for every device and for this one - but only
+ * for a device that is signed up. The audience is a hash of the device's own
+ * endpoint, so knowing one means being that device; anyone else gets null.
+ *
+ * Newest first, and at most MAX_SHOWN of them; `more` says how many were left
+ * out, so the device can say so rather than drop them in silence.
+ */
 export async function recentMessages(db: D1Database, audience: string, now = nowSec()) {
+  if (!audience) return null;
+  const known = await db.prepare('SELECT 1 FROM push_subscriptions WHERE audience = ?1').bind(audience).first();
+  if (!known) return null;
   const { results } = await db
     .prepare(
       `SELECT id, ts, title, body FROM push_messages
        WHERE ts >= ?1 AND (audience = '' OR audience = ?2)
-       ORDER BY ts DESC LIMIT 10`,
+       ORDER BY ts DESC LIMIT ?3`,
     )
-    .bind(now - RECENT_S, audience)
+    .bind(now - DELIVERY_S, audience, MAX_SHOWN + 1)
     .all<{ id: string; ts: number; title: string; body: string }>();
-  return results;
+  return { messages: results.slice(0, MAX_SHOWN), more: results.length > MAX_SHOWN };
 }
 
 /** Messages older than a week have been read or missed; either way they are done. */

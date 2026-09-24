@@ -154,7 +154,7 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 
 | Table | One row per | Notes |
 |---|---|---|
-| `inverters` | monitored unit | `id` is `{provider}:{vendor_id}`, or `{provider}:station:{plant_id}` when the plant is the unit. `tz_name` is the zone's name where the vendor states one (SolarMan does, SolisCloud never has); `tz_offset_sec` the offset in force now |
+| `inverters` | monitored unit | `id` is `{provider}:{vendor_id}`, or `{provider}:station:{plant_id}` when the plant is the unit. `tz_name` is the zone's name where the vendor states one - SolarMan's `regionTimezone`, SolisCloud's `timeZoneStandardId` - which the SolarMan plant here does and the SolisCloud plant here, as its relay forwards it, does not; `tz_offset_sec` the offset in force now |
 | `readings` | sample | Keyed `(inverter_id, ts, source)`. Holds the normalised columns **and** `raw`, the untouched vendor JSON, which is never served. `tz_offset_sec` is the offset in force *when it was read*, so a day keeps its boundary after the clocks change; every row in production carries it since the 2.9 backfill |
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC |
 | `alarms` | vendor fault | Severity, raised, cleared, readable name |

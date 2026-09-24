@@ -15,7 +15,7 @@ const ENDPOINT = 'https://fcm.googleapis.com/fcm/send/device-one';
 
 type Listener = (event: unknown) => void;
 
-function loadWorker(answers: Array<{ ok: boolean; messages?: unknown[] } | 'offline'>, opts: { subscribed?: boolean } = {}) {
+function loadWorker(answers: Array<{ ok: boolean; messages?: unknown[]; more?: boolean } | 'offline'>, opts: { subscribed?: boolean } = {}) {
   const listeners = new Map<string, Listener>();
   const shown: Array<{ title: string; options: Record<string, unknown> }> = [];
   const asked: string[] = [];
@@ -51,7 +51,7 @@ function loadWorker(answers: Array<{ ok: boolean; messages?: unknown[] } | 'offl
     asked.push(url);
     const a = answers.shift() ?? { ok: true, messages: [] };
     if (a === 'offline') throw new Error('offline');
-    return { ok: a.ok, json: async () => ({ messages: a.messages ?? [] }) };
+    return { ok: a.ok, json: async () => ({ messages: a.messages ?? [], more: a.more ?? false }) };
   };
 
   new Function('self', 'caches', 'fetch', 'crypto', 'TextEncoder', 'btoa', SOURCE)(self, caches, fetch, crypto, TextEncoder, btoa);
@@ -113,6 +113,13 @@ describe('a push, as the service worker handles it', () => {
     await w.push();
     await w.push();
     expect(w.shown).toHaveLength(1);
+  });
+
+  it('says when there was more than one wake-up can show, instead of dropping the rest in silence', async () => {
+    const w = loadWorker([{ ok: true, messages: [msg('a')], more: true }]);
+    await w.push();
+    expect(w.shown.map((s) => s.title)).toEqual(['SolarLens: more than this', 'Title a']);
+    expect(w.shown[0].options).toMatchObject({ tag: 'solarlens-more', data: { url: '/#/alerts' } });
   });
 
   it('asks for general messages only when the device has no subscription of its own', async () => {

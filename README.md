@@ -459,7 +459,7 @@ A device that turns this on gets one message at once, so you can see the whole p
 | A SolisCloud login | two days before it runs out, and when it has | names the relay as the Devices tab names it, never by its id |
 | A vendor not answering | its last three polls failed, across at least fifteen minutes | one failure is weather; three in a row is usually a token |
 
-Each is told once, and again only if it clears and returns. The push carries no text: it only wakes the device, which then asks `/api/push/recent` what to show, so what a notification says never passes through Google, Apple, Mozilla or Microsoft.
+Each is told once - however long it lasts - and again only if it clears and returns. The push carries no text: it only wakes the device, which then asks `/api/push/recent` what to show, so what a notification says never passes through Google, Apple, Mozilla or Microsoft.
 
 ## Configuration reference
 
@@ -873,7 +873,7 @@ node scripts/backfill-reading-offsets.mjs                        # what it would
 node scripts/backfill-reading-offsets.mjs --apply                # do it
 ```
 
-A plant whose zone name is not known is left alone rather than stamped with today's number, which would look like a repair and could never be revisited. If the vendor only ever sends a number — SolisCloud does — and the plant's zone does not observe daylight saving, that number is right for every past reading: add `--use-current-offset`. It costs one write per row repaired, against D1's 100,000 a day.
+A plant whose zone name is not known is left alone rather than stamped with today's number, which would look like a repair and could never be revisited. If a plant's payload only ever carries a number - the SolisCloud plant this was first run against did, although SolisCloud can send a zone name - and the plant's zone does not observe daylight saving, that number is right for every past reading: add `--use-current-offset`. It costs one write per row repaired, against D1's 100,000 a day.
 
 Neither cloud reports a battery cycle counter, so the detail view derives one — lifetime charge energy over the pack's usable capacity — and labels it `derived` rather than presenting it as a vendor figure.
 
@@ -902,7 +902,7 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `POST /api/push/subscribe` | API_TOKEN or the `/auth` cookie | sign this device up (`{endpoint}`); records what is already wrong without announcing it, and sends the device a first message |
 | `POST /api/push/test` | API_TOKEN or the `/auth` cookie | send one test notification to one signed-up device (`{endpoint}`) |
 | `POST /api/push/unsubscribe` | open | turn a device off (`{endpoint}`). Needs no key: only that device knows its endpoint |
-| `GET /api/push/recent?for=` | open | the last half hour's messages for every device, plus those for the device whose hash is `for`. Never cached |
+| `GET /api/push/recent?for=` | a signed-up device | what a woken device shows: the last day's messages - as long as a push service holds a wake-up - for every device and for the one whose hash is `for`, newest first, at most 20, with `more` when there were others. 404 for any hash that is not a signed-up device. Never cached |
 | `GET /auth?t=` | — | set the cookie the write routes accept |
 
 **Every `GET` answers anyone**, with vendor identifiers stripped — see
