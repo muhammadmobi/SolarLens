@@ -406,17 +406,25 @@ export class SolisCloudProvider implements Provider {
 
   constructor(private readonly creds: SolisCredentials) {}
 
+  /** Where each plant is, learned from the plant list and used by the fallback below. */
+  private readonly zones = new Map<string, { tzOffsetSec: number | null; tzName: string | null }>();
+
   async listPlants(): Promise<Plant[]> {
     const data = await call<SolisPage<Rec>>(this.creds, '/v1/api/userStationList', {
       pageNo: 1,
       pageSize: 50,
     });
-    return (data.page?.records ?? []).map((r) => ({
-      id: String(r.id),
-      name: String(pick(r, 'stationName', 'name') ?? r.id),
-      capacityW: toWatts(pick(r, 'capacity'), pick(r, 'capacityStr')),
-      tzOffsetSec: tzOffsetSec(r),
-    }));
+    return (data.page?.records ?? []).map((r) => {
+      const plant = {
+        id: String(r.id),
+        name: String(pick(r, 'stationName', 'name') ?? r.id),
+        capacityW: toWatts(pick(r, 'capacity'), pick(r, 'capacityStr')),
+        tzOffsetSec: tzOffsetSec(r),
+        tzName: tzNameOf(r),
+      };
+      this.zones.set(plant.id, { tzOffsetSec: plant.tzOffsetSec, tzName: plant.tzName });
+      return plant;
+    });
   }
 
   async listInverters(plantId: string): Promise<Inverter[]> {
@@ -438,6 +446,7 @@ export class SolisCloudProvider implements Provider {
         plantName: String(pick(r, 'stationName') ?? ''),
         capacityW: toWatts(pick(r, 'power'), pick(r, 'powerStr')),
         tzOffsetSec: tzOffsetSec(r),
+      tzName: tzNameOf(r),
       };
     });
     if (invs.length > 0) return invs;
@@ -455,6 +464,9 @@ export class SolisCloudProvider implements Provider {
         plantId,
         plantName: '',
         capacityW: null,
+        // The plant list knows where this is; the empty inverter list does not.
+        tzOffsetSec: this.zones.get(plantId)?.tzOffsetSec ?? null,
+        tzName: this.zones.get(plantId)?.tzName ?? null,
       },
     ];
   }

@@ -510,7 +510,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**323 unit tests** and **290 end-to-end tests** (145 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**323 unit tests** and **296 end-to-end tests** (148 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -564,7 +564,7 @@ dashboard in one inline script. `tests/e2e/page-coverage.spec.ts` records what
 that walk-through actually executes, using V8's own coverage, and writes the
 figure to `coverage/page-coverage.json` — attached to every run.
 
-**67.7% of the dashboard script**, against a floor of 65% that fails the run if
+**67.3% of the dashboard script**, against a floor of 65% that fails the run if
 it drops. The figure moves as the page grows: it was 69.6% before this release
 added the CSV writer and the notification switch, which the walk-through only
 partly reaches. The floor is set below the reading, not flush against it, so an

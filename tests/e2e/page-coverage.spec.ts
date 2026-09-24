@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 /**
  * Set below what the walk-through achieves, with room for the code to grow.
  *
- * Measured at 67.7% when this was written, of 117 kB of script. It had been
+ * Measured at 67.3% when this was written, of 118 kB of script. It had been
  * 69.6% an hour earlier, and the difference was not the machine: this change
  * added the CSV writer and the notification switch, whose branches the
  * walk-through only partly reaches, so the same suite covers a larger page.

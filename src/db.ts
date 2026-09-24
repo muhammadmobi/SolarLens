@@ -111,7 +111,11 @@ export async function insertReading(db: D1Database, r: Reading): Promise<boolean
       `UPDATE readings SET
          ac_power_w = ?4, dc_power_w = ?5, today_kwh = ?6, total_kwh = ?7,
          battery_soc = ?8, battery_power_w = ?9, grid_power_w = ?10, load_power_w = ?11,
-         temp_c = ?12, status = ?13, raw = ?14, metrics = ?15
+         temp_c = ?12, status = ?13, raw = ?14, metrics = ?15,
+         -- Repairs a row stored before 2.9, or by a poll that did not yet know
+         -- where the plant is: without this, re-polling could never fix a day
+         -- boundary, because the offset is only ever written on insert.
+         tz_offset_sec = COALESCE(?16, tz_offset_sec)
        WHERE inverter_id = ?1 AND ts = ?2 AND source = ?3`,
     )
     .bind(
@@ -121,6 +125,7 @@ export async function insertReading(db: D1Database, r: Reading): Promise<boolean
       r.tempC, r.status,
       JSON.stringify(r.raw ?? null),
       r.metrics ? JSON.stringify(r.metrics) : null,
+      tzOffsetSec,
     )
     .run();
   return false;

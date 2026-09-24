@@ -116,18 +116,30 @@ test('every control that can be focused shows that it is', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#view')).not.toBeEmpty();
 
-  const invisible = await page.evaluate(() => {
-    const out: string[] = [];
-    for (const el of document.querySelectorAll<HTMLElement>('a[href], button, input, select')) {
-      if (el.offsetParent === null) continue;      // not on screen in this view
-      el.focus();
+  // Tabbed to, not focused by script: `:focus-visible` is what draws the ring,
+  // and it deliberately does not apply to a programmatic focus() - which is why
+  // an earlier version of this test proved nothing.
+  const seen: string[] = [];
+  const invisible: string[] = [];
+  for (let i = 0; i < 20; i++) {
+    await page.keyboard.press('Tab');
+    const at = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el || el === document.body) return null;
       const s = getComputedStyle(el);
-      const ring = s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0;
-      const shadow = s.boxShadow !== 'none';
-      const border = s.borderColor !== '';
-      if (!ring && !shadow && !border) out.push(el.tagName + (el.id ? '#' + el.id : '') + '.' + el.className);
-    }
-    return out;
-  });
-  expect(invisible).toEqual([]);
+      return {
+        what: el.tagName + (el.id ? '#' + el.id : '') + (el.className ? '.' + String(el.className).split(' ')[0] : ''),
+        focusVisible: el.matches(':focus-visible'),
+        outline: s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0,
+        shadow: s.boxShadow !== 'none',
+        underline: s.textDecorationLine !== 'none',
+      };
+    });
+    if (!at) continue;
+    seen.push(at.what);
+    if (!at.outline && !at.shadow && !at.underline) invisible.push(at.what);
+  }
+
+  expect(seen.length, 'nothing took keyboard focus, so nothing was checked').toBeGreaterThan(5);
+  expect(invisible, 'these controls show nothing when focused with a keyboard').toEqual([]);
 });
