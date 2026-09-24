@@ -44,9 +44,11 @@ checkout of any tag says which release it is.
   files say what they hold the code to, and the shared test helpers - SQLite
   behind D1, a Worker to send requests to, a stand-in push service and service
   worker - are explained where they are defined.
-- **Every CI job says how to reproduce it.** Each job in the workflows now opens
-  with what it proves and the command that runs the same check on your own
-  machine, so a red cross comes with its next step. The two tsconfig files say
+- **Every CI job says what it proves, and what to do when it fails.** Each job
+  that can run on your own machine now gives the command that does, so a red
+  cross comes with its next step. The three that exist only on GitHub - CodeQL,
+  dependency review and the reviewer request - say instead where their findings
+  appear, or how to ask again. The two tsconfig files say
   what each type-checks and why there are two. Every test helper that builds
   data or fakes an API has a line saying what it stands for, and one helper
   nothing called is gone.
