@@ -510,7 +510,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**323 unit tests** and **310 end-to-end tests** (155 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**324 unit tests** and **310 end-to-end tests** (155 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### The frameworks, and why each
 
@@ -800,6 +800,7 @@ the repository.
 |---|---|
 | **Coverage**, per file | The **Unit tests** job of any run → *Artifacts* → `coverage` (HTML and lcov, kept 14 days) |
 | **End-to-end failures**: screenshots, video-free traces, the exact step | The **End-to-end tests** job of a *failed* run → *Artifacts* → `playwright-report`. Open a trace with `npx playwright show-trace <file>` |
+| **How much of the dashboard script the walk-through ran** | The **End-to-end tests** job of any run → *Artifacts* → `page-coverage` (kept 14 days) |
 | **Code analysis findings** (CodeQL) | Repository → **Security** → *Code scanning* |
 | **Vulnerable dependencies** | Repository → **Security** → *Dependabot* (alerts are on; they warn and open nothing) |
 | **Leaked secrets** | Repository → **Security** → *Secret scanning*, plus the **Secret scan** job, which reads the whole history |

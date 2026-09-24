@@ -373,6 +373,11 @@ export class SolarmanProvider implements Provider {
       stationId: Number(plantId),
       deviceType: 'INVERTER',
     });
+    // A device row says nothing about where it stands; the station list did,
+    // and that is what was kept on the way past. Without it every reading from
+    // a plant that has device rows - which is most of them - would be stamped
+    // with the reader's offset instead of the plant's own.
+    const placed = this.plants.get(plantId);
     const invs = (json.deviceListItems ?? []).map((d): Inverter => {
       const serial = String(pick(d, 'deviceSn') ?? '');
       const vendorId = String(pick(d, 'deviceId') ?? serial);
@@ -385,6 +390,8 @@ export class SolarmanProvider implements Provider {
         plantId,
         plantName: '',
         capacityW: null,
+        tzOffsetSec: placed?.tzOffsetSec ?? null,
+        tzName: placed?.tzName ?? null,
       };
     });
     if (invs.length > 0) return invs;
