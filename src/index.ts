@@ -4,8 +4,10 @@
  * Requests arrive here from three kinds of caller:
  *
  * - The dashboard (public/index.html), which reads the GET /api/* routes. Those
- *   are open to anyone, and every answer goes through ./public-view first so
- *   no vendor identifier leaves the Worker.
+ *   are open to anyone, and every answer carrying plant data goes through
+ *   ./public-view first so no vendor identifier leaves the Worker. The two push
+ *   reads are the exceptions: /api/push/key serves only a public key, and
+ *   /api/push/recent answers only a device that is signed up.
  * - The relay laptops, which push what SolisCloud's portal shows them to
  *   POST /api/ingest/*, each request carrying INGEST_TOKEN.
  * - Anyone else writing: signing a phone up for notifications, or forcing a
@@ -13,8 +15,9 @@
  *   except turning a phone's notifications off, which needs only that phone's
  *   own push address (see the middleware below).
  *
- * Anything that is not an /api route is the dashboard itself, served from
- * public/ by the static-assets binding at the bottom of this file.
+ * Anything else is the dashboard itself, served from public/ by the
+ * static-assets binding at the bottom of this file - apart from /auth, which
+ * sets the sign-in cookie and sends the browser back to the dashboard.
  *
  * The cron (scheduled, at the very end) polls every vendor the secrets allow,
  * then decides whether anything is worth a phone notification.
