@@ -85,6 +85,7 @@ const views = [
   ['Alerts', '#/alerts'],
   ['Devices', '#/devices'],
   ['TV mode', '#/tv'],
+  ['Guide', '#/guide'],
 ] as const;
 
 for (const [name, hash] of views) {

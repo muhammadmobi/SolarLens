@@ -14,9 +14,21 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
-## [Unreleased]
+## [2.10.0] — 2026-09-24
+
+Phone notifications, SolarMan faults that say when they cleared, and a guide to
+the whole app.
 
 ### Added
+
+- **A guide, behind the ? at the top of every page.** What SolarLens is, what
+  each tab holds, a "where do I find" table from everyday questions to the place
+  that answers them, what is new in this release, and the few things worth
+  knowing - that an on-grid system reads offline every night, that one relay
+  laptop is enough, that a SolisCloud login lasts seven days. An icon rather than
+  a tab, because a guide is read now and then and the tabs are used every day;
+  it opens even before the data has loaded, and its version is held equal to
+  the release by a test.
 
 - **Notifications that reach a closed browser.** The Alerts tab gains *Also when
   this browser is closed*: turn it on once per device and that device is told,
@@ -1129,6 +1141,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.10.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.6.0...v2.7.0

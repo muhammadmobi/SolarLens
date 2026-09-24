@@ -1,6 +1,6 @@
 {
   "name": "solar-lens",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "private": true,
   "description": "One screen for both inverters: SolisCloud + SolarMan, unified.",
   "type": "module",
