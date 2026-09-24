@@ -16,7 +16,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Fault history, with what the vendor advises.** Every alarm each vendor has on record, back to installation: when, how severe, the fault code, how long it lasted, and the vendor's own advice where it gives any. SolarMan's alert list says only when a fault was raised; its timeline, read for the newest alerts each hour, supplies when each one cleared, and the occurrences the list folds into one entry per day.
 - **Tells your phone, even with the dashboard closed.** Turn it on once per device on the Alerts tab, and that device is notified when a system stops reporting while it was producing, when a fault is recorded, when a SolisCloud login is about to run out, or when a vendor stops answering. A system going quiet at dusk is not news, so it is not announced. While a tab is open, a second switch announces every change the Alerts tab shows.
 - **Never stuck on an old version.** A tab left open across a release offers a *Reload* when a new version is out; a TV display reloads itself.
-- **A guide built in.** The **?** at the top of every page opens a guide to the app: what SolarLens is, what each tab holds, a "where do I find…" table, what is new in this release, and the few things worth knowing - such as an on-grid system reading offline every night. It opens even before the data has loaded.
+- **A guide built in.** The **Guide** button - an open book - at the top of every page opens a guide to the app: what SolarLens is, what each tab holds, a "where do I find…" table, what is new in this release, and the few things worth knowing - such as an on-grid system reading offline every night. It opens even before the data has loaded.
 - **Made for a wall, too.** TV mode at `#/tv` drops the header and tabs, sizes everything to the screen, keeps the display awake, and shows a clock so a frozen page is obvious from across a room.
 - **Each system on its own, or all together.** Historical Data shows every system one after the other, or - with the switch at the top - just one, with its chart, table and CSV.
 - **History that goes back to the start.** Days, months or years. Months and years use each vendor's own totals, which reach back to the day the plant was installed, and every row says whether its figure is the vendor's or SolarLens's own and how many of its days SolarLens saw.
@@ -625,7 +625,7 @@ sends:
 |---|---|
 | `dashboard.spec.ts` | The bulk, 133 tests: the overview and its layout at both widths, the theme, the header figures, each system's page, charts, alerts, history, devices, relays, TV mode, freshness and the auth gate |
 | `accessibility.spec.ts` | axe-core's WCAG 2 A and AA rules on every view, a keyboard walk-through, and a full keyboard lap of each view showing focus |
-| `guide.spec.ts` | The **?** guide: one tap from anywhere, opens with no data or a refused request, names the systems, links only to real pages |
+| `guide.spec.ts` | The guide: one tap from anywhere, opens with no data or a refused request, names the systems, links only to real pages |
 | `history-systems.spec.ts` | Historical Data's system switch: narrows charts, tables, count and CSV; remembered; falls back when a system is gone |
 | `new-version.spec.ts` | The reload notice: silent when nothing changed, offered after a release, "Later" respected, TV reloads itself, a release caught even in the moment after load |
 | `push.spec.ts` | Notifications to a closed browser: on, off, the key asked for and never stored, every refusal explained |
@@ -1074,7 +1074,7 @@ solar-lens/
 │   ├── fixtures/               captured vendor payloads, scrubbed of identifiers
 │   ├── unit/release-version.test.ts  the guide's release is the package's
 │   ├── e2e/push.spec.ts         turning notifications to a closed browser on and off
-│   ├── e2e/guide.spec.ts        the ? guide
+│   ├── e2e/guide.spec.ts        the guide page and its button
 │   ├── e2e/history-systems.spec.ts  Historical Data, one system or all
 │   ├── e2e/new-version.spec.ts  the reload notice after a release
 │   ├── e2e/phone-width.spec.ts  no view wider than a phone

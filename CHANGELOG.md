@@ -18,6 +18,10 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **A proper icon for the guide.** The header's "?" is now an open book with
+  the word *Guide* beside it - drawn in the text colour, so it follows the theme
+  and inverts while the guide is open - and the book alone on a phone, where the
+  header has room for icons only.
 - **Historical Data, one system at a time.** A switch at the top of the tab -
   *All systems*, or any one of them - narrows the charts, the tables, the row
   count and the CSV to the system chosen, so looking after one system no longer
