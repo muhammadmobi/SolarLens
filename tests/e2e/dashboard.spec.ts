@@ -593,7 +593,7 @@ test.describe('Historical Data', () => {
       return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ now: NOW, days: 30, rows: [] }) });
     });
     await page.goto('/#/history');
-    await expect(page.locator('.rangepick')).toBeVisible();
+    await expect(page.locator('.rangepick:not(.syspick)')).toBeVisible();
     // A solar day ends at the array's midnight; grouping by UTC would split
     // every day in the wrong place for most of the world.
     expect(url).toContain('tz=');
