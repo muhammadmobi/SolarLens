@@ -683,7 +683,11 @@
    */
   const csvCell = (v) => {
     if (v === null || v === undefined) return '';
-    const text = String(v);
+    let text = String(v);
+    // A plant is named by its vendor, and a spreadsheet runs any cell starting
+    // with =, +, - or @ as a formula the moment the file is opened. A leading
+    // apostrophe makes it text again, which is all a name ever was.
+    if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
     return /[",\n\r]/.test(text) ? '"' + text.split('"').join('""') + '"' : text;
   };
 
@@ -805,21 +809,37 @@
     } catch { return false; }
   }
 
+  /**
+   * The Historical tab's rows, exactly as the table shows them.
+   *
+   * Taken from what the view built rather than from the raw response: the
+   * month and year tables are days folded together, and sometimes the vendor's
+   * own totals in their place. Exporting the raw days under a file named
+   * "month" would be a different set of numbers wearing the same label.
+   */
   function historyCsv() {
-    const group = state.historyGroup ?? 'day';
-    const rows = state.history?.rows ?? [];
+    const view = state.historyView;
+    const group = view?.group ?? state.historyGroup ?? 'day';
     const nameOf = (id) => (state.latest?.inverters ?? []).find((i) => i.id === id)?.name ?? id;
-    const header = [
-      group === 'day' ? 'day' : group, 'system', 'generated_kwh', 'peak_w', 'consumed_kwh',
-      'imported_kwh', 'exported_kwh', 'battery_charged_kwh', 'battery_discharged_kwh',
-      'samples', 'first_reading_utc', 'last_reading_utc',
-    ];
     const iso = (ts) => (ts ? new Date(ts * 1000).toISOString() : '');
-    const body = rows.map((r) => [
-      r.day ?? r.key, nameOf(r.inverter_id), r.yield_kwh, r.peak_w, r.load_kwh,
-      r.import_kwh, r.export_kwh, r.batt_charge_kwh, r.batt_discharge_kwh,
-      r.samples, iso(r.first_ts), iso(r.last_ts),
-    ]);
+
+    const header = group === 'day'
+      ? ['day', 'system', 'generated_kwh', 'peak_w', 'consumed_kwh', 'imported_kwh', 'exported_kwh',
+        'battery_charged_kwh', 'battery_discharged_kwh', 'samples', 'first_reading_utc', 'last_reading_utc']
+      : [group, 'system', 'generated_kwh', 'recorded_here_kwh', 'peak_w', 'consumed_kwh', 'imported_kwh',
+        'exported_kwh', 'battery_charged_kwh', 'battery_discharged_kwh', 'days_recorded', 'samples', 'figures_from'];
+
+    const body = [];
+    for (const [invId, rows] of Object.entries(view?.byInv ?? {})) {
+      for (const r of rows) {
+        body.push(group === 'day'
+          ? [r.day, nameOf(invId), r.yield_kwh, r.peak_w, r.load_kwh, r.import_kwh, r.export_kwh,
+            r.batt_charge_kwh, r.batt_discharge_kwh, r.samples, iso(r.first_ts), iso(r.last_ts)]
+          : [r.day, nameOf(invId), r.yield_kwh, r.recorded_kwh ?? r.yield_kwh, r.peak_w, r.load_kwh,
+            r.import_kwh, r.export_kwh, r.batt_charge_kwh, r.batt_discharge_kwh, r.days, r.samples,
+            r.source === 'vendor' ? 'vendor total' : 'recorded here']);
+      }
+    }
     return { header, body, name: `solarlens-history-${group}-${new Date().toISOString().slice(0, 10)}.csv` };
   }
   // The same vendor in a colour that can be read as small bold type: axe
@@ -2040,6 +2060,10 @@
         byInv[inv.id] = withVendor(rollup(byInv[inv.id] ?? [], group), vendor.filter((p) => p.inverter_id === inv.id), group);
       }
     }
+    // What the table is about to show, kept for the CSV button: the export
+    // says "as shown", and this is what shown means.
+    state.historyView = { group, byInv };
+    const shownCount = Object.values(byInv).reduce((n, list) => n + list.length, 0);
     const periodWord = group === 'month' ? 'Month' : group === 'year' ? 'Year' : 'Day';
 
     const sections = invs.map((inv, i) => {
@@ -2122,7 +2146,7 @@
         ${picker}
         <div class="exportrow"><button type="button" class="rangebtn" id="csv"
           title="Download these rows as a CSV file">Download CSV</button>
-          <small class="faint">${rows.length} row${rows.length === 1 ? '' : 's'}, as shown</small></div>
+          <small class="faint">${shownCount} row${shownCount === 1 ? '' : 's'}, as shown</small></div>
         <p class="cardnote" style="margin-top:14px">Built from the samples SolarLens has stored, so the record begins when it
         started collecting — not when the array was installed. Each vendor's own running totals are shown at the
         foot of its section for comparison.</p>
