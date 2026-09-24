@@ -154,8 +154,8 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 
 | Table | One row per | Notes |
 |---|---|---|
-| `inverters` | monitored unit | `id` is `{provider}:{vendor_id}`, or `{provider}:station:{plant_id}` when the plant is the unit |
-| `readings` | sample | Keyed `(inverter_id, ts, source)`. Holds the normalised columns **and** `raw`, the untouched vendor JSON, which is never served |
+| `inverters` | monitored unit | `id` is `{provider}:{vendor_id}`, or `{provider}:station:{plant_id}` when the plant is the unit. `tz_name` is the zone's name where the vendor states one (SolarMan does, SolisCloud never has); `tz_offset_sec` the offset in force now |
+| `readings` | sample | Keyed `(inverter_id, ts, source)`. Holds the normalised columns **and** `raw`, the untouched vendor JSON, which is never served. `tz_offset_sec` is the offset in force *when it was read*, so a day keeps its boundary after the clocks change; every row in production carries it since the 2.9 backfill |
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC |
 | `alarms` | vendor fault | Severity, raised, cleared, readable name |
 | `periods` | vendor period total | Day, month, year, lifetime, per plant |
@@ -341,6 +341,7 @@ The short history a newcomer would otherwise repeat.
 | **A batch file that updates itself ran half a line as a command** when the update replaced it mid-run | `.cmd` files do their work inside one parenthesised block |
 | **A deploy's rollback target was read with a command substitution inside `echo`**, which cannot fail, so a failed lookup silently left the run unable to undo itself | A step that cannot fail cannot protect you |
 | **The privacy guard read the digits inside a pinned commit hash as a plant id**, and Dependabot's sign-off as a leaked address | A guard's false positives are its own bug; fix them, do not weaken the rule |
+| **A maintenance script passed every local test and answered `undefined` against production**: `wrangler d1 execute --file` returns rows from a local database but import statistics from a remote one, and `--command` through `scripts/wrangler.mjs` is split at every space by the shell | Dry-run against the real thing before `--apply`. A script that talks to D1 runs wrangler's own entry point with node, as `scripts/backfill-reading-offsets.mjs` does |
 
 ## 14. What is still missing
 
@@ -361,8 +362,7 @@ The short history a newcomer would otherwise repeat.
 - **SolarMan alarm detail**: when a fault cleared, and the vendor's advice. It
   needs one capture from the alert's own page in a logged-in browser.
 
-Neither is urgent. Both are written down so they are not rediscovered as
-surprises.
+None is urgent. Each is written down so it is not rediscovered as a surprise.
 
 ## 15. Glossary
 

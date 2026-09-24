@@ -6,7 +6,8 @@ rollouts, warranty orders, org/role management, SIM billing, device provisioning
 throughout — an owner account cannot reach them.
 
 Observed on live owner accounts in September 2026: one on-grid plant on SolisCloud, one hybrid
-station on SolarMan. No account identifiers appear in this document.
+station on SolarMan. No account identifiers appear in this document. Last checked against the
+live database after 2.9.0.
 
 **Legend** — ● has it · ◐ partial · ○ does not have it
 
@@ -61,7 +62,8 @@ station on SolarMan. No account identifiers appear in this document.
 | Alarm code, level, duration, recovery time | ● | ◐ | ● all four for SolisCloud; SolarMan records no recovery time, and the page says "not recorded" |
 | **Suggested treatment text** | ● | ○ | ● SolisCloud's advice beside each alarm |
 | Fault / warning history per device | ● | ◐ | ● per system, back to installation, newest first |
-| Push or email notification on fault or outage | ◐ | ◐ | ○ out of scope |
+| Notification on fault or outage | ◐ | ◐ | ◐ a browser notification for each new alert, on any device with the dashboard open (2.9); nothing reaches a closed browser yet |
+| Email or webhook alerts | ◐ | ◐ | ○ out of scope |
 
 ### History and reporting
 
@@ -70,7 +72,7 @@ station on SolarMan. No account identifiers appear in this document.
 | Day / month / year / lifetime charts | ● | ● | ● by day, month and year; months and years use the vendor's own totals back to installation, each row saying whose figure it is |
 | Battery SOC history | ◐ | ● | ● today's charge curve with its low and high, on the system page |
 | Power-analysis view (generation vs consumption vs grid) | ◐ | ● | ○ out of scope |
-| CSV / data export | ● | ○ | ○ out of scope — but every sample **is** stored |
+| CSV / data export | ● | ○ | ● Download CSV on the Historical Data tab: the rows on screen, by day, month or year (2.9) |
 | Scheduled email reports | ● | ○ | ○ out of scope |
 | Raw sample retention you control | ○ | ○ | ● full payload kept in your own D1 |
 
@@ -206,15 +208,23 @@ each check; `Security` in the repository carries what the scanners found.
 - **A vendor "daily yield" can disagree with the live snapshot.** The Device page showed a full
   day's yield while the plant snapshot reported `dayEnergy: 0` — the counter resets at local
   midnight while the unit is offline. A "last known good" value would read better than a bare 0.
-- **`temp_c` is null for both units.** Temperature is per-device telemetry, not part of the
-  station snapshot.
+- **Temperature is on the device, never on a reading.** `readings.temp_c` is null on every one
+  of about 7,100 stored readings from both systems, because neither station snapshot carries it;
+  the inverter's device record does, and that is what the hardware panel shows.
 - **An on-grid plant still reports battery fields as zero.** Taking them at face value invents a
   permanently-empty battery, so battery presence is decided by the plant's own inventory
   (`batteryCount` / `batteries`), not by whether a number happens to be present.
-- **Per-string *power* is reported; per-string voltage and current are not** — at least not on
-  the plant Device page, where `pow1`…`pow32` are watts only.
+- **Per-string voltage and current live on the inverter, not the plant.** The plant Device page
+  carries `pow1`…`pow32`, watts only; voltage and current per string come from the inverter's
+  own device record, which is where SolarLens reads them. Both systems report all three.
 - **The two vendors state a timezone three different ways.** SolisCloud sends whole hours
   (`timeZone: 9`), SolarMan's station detail sends seconds (`timeZoneOffset: 32400`) and its
   station search sends an IANA name (`regionTimezone: "Asia/Tokyo"`). All three are read, and
   seconds win over hours where a plant sends both, because a half-hour zone cannot be said in
   whole hours at all.
+- **SolisCloud never states a zone by name, only by number.** Checked in production after 2.9:
+  the SolarMan plant arrived with its zone's name and the SolisCloud plant with an offset alone.
+  A number cannot say whether a place observes daylight saving, so a SolisCloud plant's history is
+  cut on its current offset - exact where the zone has no daylight saving, which is true of the
+  plant observed here. Its stored readings were stamped with `--use-current-offset` for that
+  reason.
