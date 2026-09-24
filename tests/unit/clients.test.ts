@@ -321,6 +321,25 @@ describe('SolarmanProvider', () => {
     expect(Array.isArray(invs)).toBe(true);
     expect(jsonBody(calls[0].init).stationId).toBe(62000000);
   });
+
+  it('gives each device the zone the station list reported, which the device rows never carry', async () => {
+    stubFetch([
+      ['/station/v1.0/list', () => ({
+        success: true,
+        stationList: [{ id: 62000000, name: 'Demo', installedCapacity: 3.5, regionTimezone: 'Europe/London' }],
+      })],
+      ['/station/v1.0/device', () => ({
+        success: true,
+        deviceListItems: [{ deviceId: 9911, deviceSn: 'SN1', deviceType: 'INVERTER' }],
+      })],
+    ]);
+    const provider = new SolarmanProvider(creds, memoryTokens({ accessToken: 'T', expiresAt: future }));
+    await provider.listPlants();
+    const [inv] = await provider.listInverters('62000000');
+    // Without this the readings from a plant that has device rows - which is
+    // most of them - are stamped with the reader's offset instead of its own.
+    expect(inv).toMatchObject({ tzName: 'Europe/London' });
+  });
 });
 
 // ===================== SolarMan browser session =====================

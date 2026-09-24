@@ -74,6 +74,16 @@ jobs:
       # this makes sure of it rather than assuming.
       - run: npx playwright install --with-deps chrome
       - run: npm run test:e2e
+      # How much of the dashboard's own script that walk-through executed. A
+      # passing run is exactly when this is worth keeping: it is the number the
+      # README quotes, and a run that failed never finished measuring.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: page-coverage
+          path: coverage/page-coverage.json
+          retention-days: 14
+          if-no-files-found: warn
       # The report carries screenshots and a step-by-step trace of any failure.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
