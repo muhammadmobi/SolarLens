@@ -824,11 +824,22 @@ node scripts/ci/check-privacy.mjs     # the guard, over the working tree
 
 Five tables in D1 (`migrations/`), plus a poll log:
 
-- **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`.
-- **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
+- **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
+- **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
 - **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. Filled by the relay agent; the vendor payload is stripped of address, coordinates and account identifiers before storage.
 - **`kv`** — a small expiring key/value shelf (`k`, `v`, `expires_at`), used by the weather cache.
 - **`tokens`** — cached bearer/refresh tokens per provider. **`poll_log`** — one line per poll with success and detail, surfaced in the dashboard footer.
+
+### Upgrading from before 2.9: stamping the readings you already have
+
+Migration 0012 adds `readings.tz_offset_sec` and every reading from 2.9 on carries it, but rows stored earlier come back null and fall back to the plant's current offset. `scripts/backfill-reading-offsets.mjs` gives them the offset they were taken under. It reads your signed-in wrangler session and needs `CF_D1_DATABASE_ID` like every other wrangler script:
+
+```bash
+node scripts/backfill-reading-offsets.mjs                        # what it would do; writes nothing
+node scripts/backfill-reading-offsets.mjs --apply                # do it
+```
+
+A plant whose zone name is not known is left alone rather than stamped with today's number, which would look like a repair and could never be revisited. If the vendor only ever sends a number — SolisCloud does — and the plant's zone does not observe daylight saving, that number is right for every past reading: add `--use-current-offset`. It costs one write per row repaired, against D1's 100,000 a day.
 
 Neither cloud reports a battery cycle counter, so the detail view derives one — lifetime charge energy over the pack's usable capacity — and labels it `derived` rather than presenting it as a vendor figure.
 

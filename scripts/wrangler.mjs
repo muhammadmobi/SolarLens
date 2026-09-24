@@ -19,44 +19,10 @@
  * it will simply fail with the unresolved placeholder in the message, which is
  * a clearer error than a silently wrong database.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { writeLocalConfig } from './wrangler-config.mjs';
 
-const SOURCE = resolve('wrangler.jsonc');
-const GENERATED = resolve('.wrangler.local.jsonc');
-
-function loadDevVars() {
-  const path = resolve('.dev.vars');
-  if (!existsSync(path)) return;
-  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(line);
-    if (!m) continue;
-    const value = m[2].trim().replace(/^["']|["']$/g, '');
-    if (value && process.env[m[1]] === undefined) process.env[m[1]] = value;
-  }
-}
-loadDevVars();
-
-const template = readFileSync(SOURCE, 'utf8');
-const missing = [];
-const filled = template.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name) => {
-  const value = process.env[name];
-  if (!value) { missing.push(name); return `\${${name}}`; }
-  return value;
-});
-
-if (missing.length) {
-  console.error(
-    `wrangler.jsonc needs ${[...new Set(missing)].join(', ')}.\n` +
-    `Set it in the environment or in .dev.vars. For CF_D1_DATABASE_ID, run\n` +
-    `  npx wrangler d1 create solar-lens\n` +
-    `and copy the id it prints (or take it from the Cloudflare dashboard).`,
-  );
-  process.exit(2);
-}
-
-writeFileSync(GENERATED, filled);
+const GENERATED = writeLocalConfig();
 
 // shell:true so this works the same from cmd, PowerShell and a POSIX shell -
 // npx resolves through a .cmd shim on Windows that spawnSync will not find on
