@@ -691,6 +691,11 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
+  // What is actually running: this script and the page's styles, exactly as
+  // they were served. Read now, while the script is executing - currentScript
+  // is only set during that - for the new-version check at the foot of this file.
+  const RUNNING_SCRIPT = document.currentScript ? document.currentScript.textContent : null;
+  const RUNNING_STYLE = document.querySelector('head style')?.textContent ?? null;
   /**
    * How often to ask.
    *
@@ -2847,7 +2852,9 @@
   function renderGuide() {
     const systems = (state.latest?.inverters ?? []).map((inv) => {
       const size = inv.capacity_w ? ` · ${(inv.capacity_w / 1000).toFixed(inv.capacity_w % 1000 ? 1 : 0)} kW` : '';
-      const batt = inv.battery_soc != null ? ' · with a battery' : '';
+      // The same test every other page uses, so a battery whose charge figure
+      // is missing for the moment is still a battery here too.
+      const batt = hasBattery(inv, parse(inv.metrics)) ? ' · with a battery' : '';
       return `<span><strong>${esc(inv.name)}</strong> · ${esc(providerName(inv.provider))}${size}${batt}</span>`;
     }).join('');
     const tab = (href, name) => `<a href="${href}">${name}</a>`;
@@ -2953,6 +2960,10 @@
       holdScreen(tv);
       schedule();
     }
+    // The guide needs no data, so it waits for none and is stopped by no data
+    // error: it is the page to read while the rest is still loading, when the
+    // feeds are down, or when the server has refused a request.
+    if (hash === '#/guide') return renderGuide();
     if (state.error === 'unauthorized') {
       // Reads are public, so this should not happen. It is kept because a
       // deployment mid-rollout can still answer 401, and a blank page would
@@ -2960,9 +2971,6 @@
       $('view').innerHTML = `<div class="card"><div class="empty">The server refused this request. If it persists, redeploy.</div></div>`;
       return;
     }
-    // The guide needs no data, so it does not wait for any: it is the page to
-    // read while the rest is still loading, or when the feeds are down.
-    if (hash === '#/guide') return renderGuide();
     if (!state.latest) return; // first paint waits for data
     const sys = hash.match(/^#\/system\/(.+)$/);
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
@@ -3217,12 +3225,37 @@
     }
   }
 
+  /**
+   * Whether the page the server has now is the page running here: its script
+   * and its styles, compared as text. Null when it cannot be told.
+   */
+  async function serverHasThisPage() {
+    if (!RUNNING_SCRIPT) return null;
+    try {
+      const res = await fetch('/', { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) return null;
+      const html = await res.text();
+      return html.includes(RUNNING_SCRIPT) && (!RUNNING_STYLE || html.includes(RUNNING_STYLE));
+    } catch {
+      return null;
+    }
+  }
+
   async function checkForNewVersion() {
     if (newVersionSeen) return;
     const now = await serverVersion();
     if (!now) return;
-    if (loadedVersion === null) { loadedVersion = now; return; }
-    if (now === loadedVersion) return;
+    if (loadedVersion === null) {
+      // The first ETag is only a fair baseline if it belongs to the page that is
+      // running. A release landing between this page loading and this request
+      // would otherwise be taken as this page's own version, and never offered.
+      // So the first look also fetches the page once and compares what it
+      // holds with what is running; a mismatch is a new version already.
+      loadedVersion = now;
+      if ((await serverHasThisPage()) !== false) return;
+    } else if (now === loadedVersion) {
+      return;
+    }
     newVersionSeen = true;
     if (document.body.classList.contains('tv')) { location.reload(); return; }
     const bar = document.createElement('div');

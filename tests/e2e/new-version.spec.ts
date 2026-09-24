@@ -61,6 +61,40 @@ test('offers a reload once a new version is out, and reloads when asked', async 
   await expect(page).toHaveURL(/#\/power$/);
 });
 
+test('notices a release that landed between the page loading and its first look', async ({ page }) => {
+  await stubApi(page);
+  const srv = await server(page);
+  // The page itself is served as it is; any later fetch of it gets a newer one -
+  // a release made in the moment between the two.
+  await page.route((url) => url.pathname === '/', async (route) => {
+    const req = route.request();
+    if (req.method() !== 'GET' || req.isNavigationRequest()) return route.fallback();
+    const res = await route.fetch();
+    const newer = (await res.text()).replace('const RELEASE = ', '// a newer release\n  const RELEASE = ');
+    return route.fulfill({ response: res, body: newer });
+  });
+  await page.goto('/');
+  // No ETag ever changes: only the comparison of what runs with what is served
+  // can see this one.
+  await expect(page.getByRole('status').filter({ hasText: 'A new version of SolarLens is available.' })).toBeVisible();
+  expect(srv.etag).toBe('"release-a"');
+});
+
+test('does not cry wolf when the page it fetches is the page it is running', async ({ page }) => {
+  await stubApi(page);
+  let fetched = 0;
+  await page.route((url) => url.pathname === '/', (route) => {
+    const req = route.request();
+    if (req.method() === 'HEAD') return route.fulfill({ status: 200, headers: { etag: '"same"' }, body: '' });
+    if (!req.isNavigationRequest()) fetched++;
+    return route.continue();
+  });
+  await page.goto('/');
+  await expect.poll(() => fetched).toBe(1);
+  await page.waitForTimeout(300);
+  await expect(page.locator('#newversion')).toHaveCount(0);
+});
+
 test('takes "Later" at its word for the rest of the visit', async ({ page }) => {
   await stubApi(page);
   const srv = await server(page);

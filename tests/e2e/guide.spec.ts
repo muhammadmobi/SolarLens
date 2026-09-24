@@ -61,6 +61,25 @@ test('opens even when the data has not arrived', async ({ page }) => {
   await expect(page.locator('.guide .systems')).toHaveCount(0);
 });
 
+test('still opens when the server refuses a request', async ({ page }) => {
+  await page.route('**/api/**', (r) => r.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"unauthorized"}' }));
+  await page.goto('/#/guide');
+  await expect(page.locator('.guide')).toContainText('SolarLens puts your solar systems on one page');
+  await expect(page.locator('#view')).not.toContainText('The server refused this request');
+});
+
+test('calls a system with a battery one, even while its charge figure is missing', async ({ page }) => {
+  await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters: [
+    { id: 's2', name: 'Hybrid', provider: 'solarman', capacity_w: 3500, ts: NOW - 120, ac_power_w: 1200,
+      battery_soc: null, status: 'normal', source: 'solarman', metrics: JSON.stringify({ batteryStatus: 'STATIC', battChargeTotalKwh: 1100 }) },
+  ] })));
+  for (const path of ['**/api/series**', '**/api/devices', '**/api/alarms**', '**/api/periods', '**/api/health', '**/api/history**']) {
+    await page.route(path, (r) => r.fulfill(json({ now: NOW, points: [], devices: [], alarms: [], periods: [], polls: [], feeds: [], relays: [], rows: [] })));
+  }
+  await page.goto('/#/guide');
+  await expect(page.locator('.guide .systems span')).toHaveText('Hybrid · SolarMan · 3.5 kW · with a battery');
+});
+
 test('sends you only to pages that exist', async ({ page }) => {
   await stubApi(page);
   await page.goto('/#/guide');
