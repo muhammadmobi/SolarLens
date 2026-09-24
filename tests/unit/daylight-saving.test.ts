@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createTestD1 } from '../helpers/d1';
-import { daily, insertReading, upsertInverter } from '../../src/db';
+import { daily, earliestDayStart, insertReading, upsertInverter } from '../../src/db';
 import { offsetOfZoneAt, tzNameOf, tzOffsetSec } from '../../src/providers/units';
 
 /** Europe/London: BST (+1) until 02:00 on 25 October 2026, GMT (+0) after. */
@@ -126,6 +126,50 @@ describe('a day of history, read back after the clocks change', () => {
     // The reader is five hours east, so that instant is already the 16th there.
     const rows = await daily(d1.db, at - 86_400, at + 86_400, -300);
     expect(rows[0].day).toBe('2026-07-16');
+    d1.close();
+  });
+});
+
+/**
+ * The window the page is handed has to contain the day.
+ *
+ * The page filters the points it is given by the offset each was read under,
+ * but it cannot filter its way to a row the query never returned - and on the
+ * morning after the clocks go back, a window opened with the offset now in
+ * force starts an hour after the day did.
+ */
+describe('the window one fetch covers', () => {
+  // 25 October 2026: the clocks went back at 02:00 BST, so the day began at
+  // 23:00 UTC on the 24th and the offset in force by mid-morning is 0.
+  const MORNING_AFTER = Math.floor(Date.UTC(2026, 9, 25, 9, 0, 0) / 1000);
+  const TRUE_MIDNIGHT = Math.floor(Date.UTC(2026, 9, 24, 23, 0, 0) / 1000);
+
+  it('opens at the hour the day actually began, not the one the current offset implies', async () => {
+    const d1 = createTestD1();
+    await upsertInverter(d1.db, london({ tzOffsetSec: 0 }) as never);
+
+    const from = await earliestDayStart(d1.db, MORNING_AFTER, 0);
+    expect(from).toBe(TRUE_MIDNIGHT);
+    d1.close();
+  });
+
+  it('falls back to the stored number for a plant nobody placed', async () => {
+    const d1 = createTestD1();
+    await upsertInverter(d1.db, london({ tzName: null, tzOffsetSec: 3600 }) as never);
+
+    // No zone to ask, so the number stands: midnight an hour east of UTC.
+    const from = await earliestDayStart(d1.db, MORNING_AFTER, 0);
+    expect(from).toBe(Math.floor(Date.UTC(2026, 9, 24, 23, 0, 0) / 1000));
+    d1.close();
+  });
+
+  it('is unchanged on an ordinary day', async () => {
+    const d1 = createTestD1();
+    await upsertInverter(d1.db, london({ tzOffsetSec: 3600 }) as never);
+
+    const july = Math.floor(Date.UTC(2026, 6, 15, 9, 0, 0) / 1000);
+    const from = await earliestDayStart(d1.db, july, 0);
+    expect(from).toBe(Math.floor(Date.UTC(2026, 6, 14, 23, 0, 0) / 1000));  // 00:00 BST
     d1.close();
   });
 });

@@ -15,6 +15,12 @@
  * gets the same offset it would have had anyway - and it is worth running only
  * once, after deploying 2.9.
  *
+ * A plant whose zone is not known yet is left alone rather than stamped with
+ * today's number. Writing that number would look like a repair and could never
+ * be undone - the rows would no longer be null, so no later run would revisit
+ * them once a poll had learned the zone. Run this after a poll has been round,
+ * or pass --use-current-offset for a plant whose vendor only ever sends one.
+ *
  *   node scripts/backfill-reading-offsets.mjs            # what it would do
  *   node scripts/backfill-reading-offsets.mjs --apply    # do it
  *   node scripts/backfill-reading-offsets.mjs --apply --local
@@ -23,14 +29,29 @@
  * this says how many it needs before it spends any of them.
  */
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const APPLY = process.argv.includes('--apply');
 const LOCAL = process.argv.includes('--local');
+const NUMERIC_OK = process.argv.includes('--use-current-offset');
 const BATCH = 200;
 
-/** One `wrangler d1 execute`, through the wrapper that fills in the database id. */
+const WORK = mkdtempSync(join(tmpdir(), 'solarlens-backfill-'));
+
+/**
+ * One `wrangler d1 execute`, through the wrapper that fills in the database id.
+ *
+ * The statement goes in a file rather than on the command line: the wrapper
+ * spawns wrangler with a shell, which splits every argument again at its
+ * spaces, and a SQL statement is nothing but spaces. --file is handed one path
+ * and reads the rest itself.
+ */
 function d1(sql) {
-  const args = ['scripts/wrangler.mjs', 'd1', 'execute', 'solar-lens', LOCAL ? '--local' : '--remote', '--json', '--command', sql];
+  const path = join(WORK, 'statement.sql');
+  writeFileSync(path, sql);
+  const args = ['scripts/wrangler.mjs', 'd1', 'execute', 'solar-lens', LOCAL ? '--local' : '--remote', '--json', '--file', path];
   const out = execFileSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   const start = out.indexOf('[');
   const end = out.lastIndexOf(']');
@@ -68,8 +89,20 @@ for (const p of plants) {
 
 let planned = 0;
 let written = 0;
+let waiting = 0;
 
 for (const plant of plants) {
+  // No zone name, no way to ask what the clocks were doing: today's number is
+  // a guess, and writing it would leave the row looking repaired forever.
+  if (!plant.tz_name && !NUMERIC_OK) {
+    const counted = d1(`SELECT COUNT(*) AS n FROM readings WHERE inverter_id = '${plant.id.replace(/'/g, "''")}' AND tz_offset_sec IS NULL`);
+    const n = counted[0]?.n ?? 0;
+    waiting += n;
+    console.log(`\n${plant.id}: no zone reported yet, ${n} row(s) left as they are.`);
+    console.log('  Run a poll first, so discovery can learn the zone - or, for a plant');
+    console.log('  whose vendor only ever sends a number, re-run with --use-current-offset.');
+    continue;
+  }
   const rows = d1(`SELECT ts, source FROM readings WHERE inverter_id = '${plant.id.replace(/'/g, "''")}' AND tz_offset_sec IS NULL`);
   if (!rows.length) {
     console.log(`\n${plant.id}: nothing to repair.`);
@@ -109,6 +142,12 @@ for (const plant of plants) {
   process.stdout.write('\n');
 }
 
+rmSync(WORK, { recursive: true, force: true });
+
 console.log(APPLY
   ? `\nDone: ${written} reading(s) now carry the offset they were taken under.`
   : `\n${planned} reading(s) would be repaired. Run again with --apply to do it.`);
+if (waiting) {
+  console.log(`${waiting} reading(s) left alone, on plants whose zone nobody has reported yet.`);
+  console.log('They stay null, so a later run can repair them once a poll knows where they are.');
+}

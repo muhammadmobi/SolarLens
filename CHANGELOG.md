@@ -47,7 +47,7 @@ up, and accessibility checked rather than assumed.
 
 - **The dashboard's own script is measured.** V8 coverage during an end-to-end
   walk-through, written to `coverage/page-coverage.json` and attached to the
-  run: **67.5%**, with a floor of 65% that fails the run if it drops. The figure
+  run: **67.3%**, with a floor of 65% that fails the run if it drops. The figure
   moves as the page grows - it was 69.6% before this release added the export and
   notification code - so the floor is set below it rather than at it. Until now
   only the Worker's half of the project had a number.

@@ -896,8 +896,13 @@
   // The offset in force around an instant, read off the nearest sample rather
   // than assumed: every reading carries the offset it was taken under.
   const offsetNear = (pts, ts, fallback) => {
-    let off = fallback;
-    for (const p of pts || []) {
+    const list = pts || [];
+    // Before the first sample, the first sample's own offset - the axis opens
+    // at the day's start, which is earlier than anything recorded in it, and
+    // the offset in force now is the wrong clock for that end of the day.
+    const first = list.find((p) => p.tz_offset_sec != null);
+    let off = first ? first.tz_offset_sec : fallback;
+    for (const p of list) {
       if (p.ts > ts) break;
       if (p.tz_offset_sec != null) off = p.tz_offset_sec;
     }
@@ -1220,7 +1225,7 @@
       const px = x(peak.ts), py = y(peak.ac_power_w);
       out += `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4" fill="${c}"/>`;
       const flip = px > W * 0.75;
-      if (!bare) out += `<text class="peaklab" x="${(px + (flip ? -10 : 10)).toFixed(1)}" y="${Math.max(T + 12, py - 10).toFixed(1)}" text-anchor="${flip ? 'end' : 'start'}">peak ${fmtWs(peak.ac_power_w)} · ${new Date(peak.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</text>`;
+      if (!bare) out += `<text class="peaklab" x="${(px + (flip ? -10 : 10)).toFixed(1)}" y="${Math.max(T + 12, py - 10).toFixed(1)}" text-anchor="${flip ? 'end' : 'start'}">peak ${fmtWs(peak.ac_power_w)} · ${esc(hhmm(peak.ts, peak.tz_offset_sec ?? inv.tz_offset_sec))}</text>`;
     }
     out += `<circle cx="${x(last.ts).toFixed(1)}" cy="${y(last.ac_power_w).toFixed(1)}" r="3.5" fill="${c}" opacity=".55"/>`;
 
