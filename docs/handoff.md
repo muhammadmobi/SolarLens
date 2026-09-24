@@ -161,7 +161,9 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `periods` | vendor period total | Day, month, year, lifetime, per plant |
 | `polls` | poll attempt | The health endpoint and the footer read this |
 | `relays` | relay computer | Random id, state, login expiry, last seen |
-| `kv` | scheduled job | "Is this hourly job due yet" |
+| `kv` | scheduled job | "Is this hourly job due yet", and which notification events have been told |
+| `push_subscriptions` | device signed up for notifications | The push endpoint is the secret and is never served; at most ten |
+| `push_messages` | notification text | What a woken device shows, for every device or one; kept a week |
 
 Two things worth knowing before writing SQL here:
 
@@ -280,6 +282,7 @@ break it mid-run).
 | When | What |
 |---|---|
 | Weekly, when the dashboard warns | Renew a SolisCloud login: `renew-solis-login.cmd` on the named laptop |
+| Once, then per new phone | `node scripts/make-vapid-key.mjs` gives the Worker its push key; then Alerts tab → *Turn on for this device* on each phone |
 | After a release that changes relay code | Double-click `setup-solarlens-relay.cmd` on each relay laptop; the deploy summary says when |
 | Occasionally | Check the D1 read budget if the dashboard is left open on many screens |
 
@@ -345,7 +348,7 @@ The short history a newcomer would otherwise repeat.
 
 ## 14. What is still missing
 
-`docs/feature-gaps.md` is the honest list. The two that matter:
+`docs/feature-gaps.md` is the honest list. SolarMan alarm detail and notifications to a closed browser, both listed here before, are built. What is left:
 
 - ~~The Worker's own routes have no test that runs them before a merge.~~
   **Closed in 2.7**: `tests/helpers/d1.ts` puts SQLite behind the D1 interface,
@@ -355,12 +358,10 @@ The short history a newcomer would otherwise repeat.
   and the deploy's smoke test cover.
 - **SolisCloud's official API key** would remove the weekly login, the laptop
   and the relay entirely.
-- **Notifications while the browser is closed.** The Alerts tab can raise a
-  notification when a new alert appears, but only on a device with the
-  dashboard open. Reaching a closed browser needs Web Push - a key pair, a
-  subscription stored per device, and the cron sending to each.
-- **SolarMan alarm detail**: when a fault cleared, and the vendor's advice. It
-  needs one capture from the alert's own page in a logged-in browser.
+- **Push is set up once per server and once per device.** Until
+  `node scripts/make-vapid-key.mjs` has run, the Alerts tab says notifications to
+  a closed browser are not set up - which is the state to check first when a
+  phone is not being told anything.
 
 None is urgent. Each is written down so it is not rediscovered as a surprise.
 

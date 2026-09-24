@@ -62,3 +62,89 @@ self.addEventListener('fetch', (event) => {
       }),
   );
 });
+
+// ---------------------------------------------------------------- push
+//
+// The push itself is empty: the server only wakes this worker, and this asks
+// what there is to say. That keeps the words out of the push services, and
+// needs no encryption. Messages already shown on this device are remembered,
+// so a second wake-up does not bring back a notification you dismissed.
+
+const SEEN = 'solarlens-push-seen';
+
+/** This device's own address for messages meant only for it: a hash of its endpoint. */
+async function audience() {
+  const sub = await self.registration.pushManager.getSubscription();
+  if (!sub) return '';
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sub.endpoint)));
+  return btoa(String.fromCharCode(...digest)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 16);
+}
+
+async function seenIds() {
+  try {
+    const hit = await (await caches.open(SEEN)).match('/__push-seen');
+    return hit ? await hit.json() : [];
+  } catch {
+    return [];
+  }
+}
+
+async function remember(ids) {
+  const keep = ids.slice(-100);
+  await (await caches.open(SEEN)).put('/__push-seen', new Response(JSON.stringify(keep)));
+}
+
+async function showWhatIsNew() {
+  let messages = [];
+  try {
+    const res = await fetch(`/api/push/recent?for=${encodeURIComponent(await audience())}`, { cache: 'no-store' });
+    if (res.ok) messages = (await res.json()).messages ?? [];
+  } catch {
+    // Offline in the instant it was woken: say so rather than nothing, because
+    // a browser that is woken and shows nothing warns the user about the site.
+  }
+  const seen = await seenIds();
+  const fresh = messages.filter((m) => !seen.includes(m.id)).reverse();
+  if (!fresh.length) {
+    if (!messages.length) {
+      await self.registration.showNotification('SolarLens', {
+        body: 'Something changed. Open the dashboard to see what.',
+        tag: 'solarlens-generic',
+        icon: '/icon-192.png',
+      });
+    }
+    return;
+  }
+  for (const m of fresh) {
+    await self.registration.showNotification(m.title, {
+      body: m.body,
+      tag: m.id,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      timestamp: m.ts * 1000,
+      data: { url: '/#/alerts' },
+    });
+  }
+  await remember([...seen, ...fresh.map((m) => m.id)]);
+}
+
+self.addEventListener('push', (event) => {
+  event.waitUntil(showWhatIsNew());
+});
+
+// A tap opens the Alerts tab: in a dashboard window that is already open if
+// there is one, rather than stacking another.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/#/alerts';
+  event.waitUntil((async () => {
+    const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of open) {
+      if (new URL(client.url).origin === self.location.origin && 'focus' in client) {
+        if ('navigate' in client) await client.navigate(url).catch(() => {});
+        return client.focus();
+      }
+    }
+    return self.clients.openWindow(url);
+  })());
+});

@@ -1,8 +1,8 @@
 import type { Device, Inverter, Plant, Provider, Reading } from './types';
 import { CallQueue } from './queue';
-import { num, pick, toWatts, tzNameOf, tzOffsetSec } from './units';
+import { num, offsetOfZoneAt, pick, toWatts, tzNameOf, tzOffsetSec } from './units';
 import { STATION_PREFIX, deviceFromRecord, deviceFromV3Detail, stationInverter, stationReading, type TokenStore } from './solarman';
-import { solarmanAlert, solarmanPeriods, type Alarm, type Period } from './events';
+import { solarmanAdvice, solarmanAlert, solarmanOccurrences, solarmanPeriods, type Alarm, type Period } from './events';
 
 /**
  * UNOFFICIAL fallback: drives the same endpoints the SOLARMAN Smart web portal
@@ -25,6 +25,9 @@ const TOKEN_KEY = 'solarman-web';
 const REFRESH_KEY = 'solarman-web-refresh';
 
 export const queue = new CallQueue(1500);
+
+/** How many of the newest alerts are asked for their detail and timeline each hour. */
+const DETAILED_ALERTS = 5;
 
 type Rec = Record<string, unknown>;
 
@@ -150,16 +153,54 @@ export class SolarmanWebProvider implements Provider {
    * The plant's alert list, newest first: the same call the portal's Alert page
    * makes. A hundred covers far more than an owner's plant raises between two
    * hourly reads, and alerts already stored are updated rather than duplicated.
+   *
+   * The list names a fault and the day it was raised, and nothing else. The
+   * newest few are then asked the two questions the portal's own detail panel
+   * asks - what SolarMan advises, and when on that day the fault was active -
+   * which gives each occurrence an end, and the history the occurrences the list
+   * folds away. Only the newest few, because each costs two vendor calls and the
+   * hourly run shares its request budget with everything else; an alert gets
+   * its turn while it is among the newest, which is while it can still change.
+   * If either call fails, the alert is stored as the list gave it.
    */
-  async listAlarms(plantId: string): Promise<Alarm[]> {
+  async listAlarms(plantId: string, nowTs = Math.floor(Date.now() / 1000)): Promise<Alarm[]> {
     const json = await this.call<{ data?: Rec[] }>(
       'POST',
       '/maintain-s/operating/alert/search?order.direction=DESC&order.property=alertTime&page=1&size=100',
       { deviceType: '', language: 'en', level: '', startTime: '', levelList: null, plantId: Number(plantId) },
     );
-    return (json.data ?? [])
-      .map((r) => solarmanAlert(plantId, r))
-      .filter((a): a is Alarm => a !== null);
+    const advice = new Map<string, string | null>();
+    const out = new Map<string, Alarm>();
+    let asked = 0;
+    for (const rec of json.data ?? []) {
+      const listed = solarmanAlert(plantId, rec);
+      if (!listed) continue;
+      if (asked >= DETAILED_ALERTS || rec.deviceId == null || rec.ruleId == null) {
+        if (!out.has(listed.id)) out.set(listed.id, listed);
+        continue;
+      }
+      asked++;
+      try {
+        const rule = `${rec.deviceId}|${rec.ruleId}`;
+        if (!advice.has(rule)) {
+          const detail = await this.call<Rec>('POST', '/maintain-s/operating/alert/detail',
+            { deviceId: rec.deviceId, ruleId: rec.ruleId, language: 'en' });
+          advice.set(rule, solarmanAdvice(detail));
+        }
+        const zone = typeof rec.timezone === 'string' ? rec.timezone : null;
+        const offset = (zone ? offsetOfZoneAt(zone, listed.beginTs) : null) ?? this.plants.get(plantId)?.tzOffsetSec ?? 0;
+        const dayStart = Math.floor((listed.beginTs + offset) / 86400) * 86400 - offset;
+        const alertDay = new Date((dayStart + offset) * 1000).toISOString().slice(0, 10).replace(/-/g, '');
+        const points = await this.call<unknown>('POST', '/maintain-s/operating/alert/timeline',
+          { deviceId: rec.deviceId, ruleId: rec.ruleId, alertDay });
+        for (const a of solarmanOccurrences(plantId, rec, points, advice.get(rule) ?? null, dayStart + 86400, nowTs)) {
+          out.set(a.id, a);
+        }
+      } catch {
+        if (!out.has(listed.id)) out.set(listed.id, listed);
+      }
+    }
+    return [...out.values()];
   }
 
   /**

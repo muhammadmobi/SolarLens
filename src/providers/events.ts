@@ -134,6 +134,85 @@ export function solarmanAlert(plantId: string, rec: Rec): Alarm | null {
   };
 }
 
+/**
+ * SolarMan's advice for an alert, from its detail call: one line per
+ * `solution`, which is all the portal itself shows. Most faults carry none,
+ * and then this says nothing rather than something invented.
+ */
+export function solarmanAdvice(detail: Rec | null | undefined): string | null {
+  if (!detail) return null;
+  const reasons = Array.isArray(detail.customAlertConfigDisplayReason) ? (detail.customAlertConfigDisplayReason as Rec[]) : [];
+  const lines = reasons
+    .flatMap((r) => (typeof r.solution === 'string' ? r.solution.split(/\r?\n/) : []))
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length) return lines.join('\n');
+  const display = detail.customAlertConfigDisplay as Rec | null | undefined;
+  return text(display?.description) ?? null;
+}
+
+/** SolarMan samples every five minutes, so a gap longer than that ends a run. */
+const SAMPLE_GAP_S = 300;
+
+/**
+ * Every occurrence of one SolarMan alert on one day, from its timeline.
+ *
+ * The alert list keeps a single entry per fault per day, and never says when
+ * it cleared. The timeline says more: the moments that day when the fault was
+ * active, sampled every five minutes. A run of samples no more than five
+ * minutes apart is one occurrence; it began at the first and had cleared by the
+ * next sample after the last - which is exactly how SolarMan's own chart draws
+ * it. So the history gains the earlier occurrences the list leaves out, and
+ * each gains an end.
+ *
+ * Two cases are left unclaimed rather than guessed. A run whose last sample is
+ * recent may still be going on, so it is `active` with no end. A run that
+ * reaches the end of the day may carry on into the next, which this timeline
+ * cannot see, so its end is left unknown.
+ *
+ * The run containing the listed alert keeps the id the list alone would have
+ * given it, so an alert already stored is completed rather than duplicated.
+ */
+export function solarmanOccurrences(
+  plantId: string,
+  rec: Rec,
+  points: unknown,
+  advice: string | null,
+  dayEndTs: number,
+  nowTs: number,
+): Alarm[] {
+  const listed = solarmanAlert(plantId, rec);
+  if (!listed) return [];
+  const ts = [...new Set((Array.isArray(points) ? points : []).map((p) => num(p)).filter((p): p is number => p !== null).map(toEpochSeconds))]
+    .sort((a, b) => a - b);
+  if (!ts.length) return [{ ...listed, advice }];
+
+  const runs: Array<[number, number]> = [];
+  for (const t of ts) {
+    const last = runs[runs.length - 1];
+    if (last && t - last[1] <= SAMPLE_GAP_S) last[1] = t;
+    else runs.push([t, t]);
+  }
+
+  const out = runs.map(([first, last]): Alarm => {
+    const holdsListed = listed.beginTs >= first && listed.beginTs <= last;
+    const stillGoing = nowTs - last <= 2 * SAMPLE_GAP_S;
+    const intoTomorrow = dayEndTs - last <= SAMPLE_GAP_S;
+    return {
+      ...listed,
+      id: holdsListed ? listed.id : `solarman:${plantId}:${listed.code}:${first}`,
+      advice,
+      beginTs: first,
+      endTs: stillGoing || intoTomorrow ? null : last + SAMPLE_GAP_S,
+      state: stillGoing ? 'active' : intoTomorrow ? 'unknown' : 'recovered',
+    };
+  });
+  // The timeline and the list should agree; where they do not, the list's own
+  // entry is still an alert that happened, so it is kept as it was.
+  if (!out.some((a) => a.id === listed.id)) out.push({ ...listed, advice });
+  return out;
+}
+
 const kind = (k: 'month' | 'year' | 'all'): PeriodKind => (k === 'month' ? 'day' : k === 'year' ? 'month' : 'year');
 
 /**

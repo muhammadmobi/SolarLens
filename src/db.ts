@@ -20,6 +20,8 @@ export interface Env {
   INCLUDE_PLANTS?: string;
   API_TOKEN?: string;
   INGEST_TOKEN?: string;
+  /** Web Push signing key, a private P-256 JWK. Unset = no notifications to a closed browser. */
+  VAPID_KEY?: string;
 }
 
 export function nowSec(): number {

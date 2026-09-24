@@ -59,10 +59,10 @@ live database after 2.9.0.
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
 | Active alarm list | ● | ◐ message centre | ● an alarm SolisCloud still holds open reads "ongoing" in the fault history, beside the vendor's own count on the Alerts tab |
-| Alarm code, level, duration, recovery time | ● | ◐ | ● all four for SolisCloud; SolarMan records no recovery time, and the page says "not recorded" |
-| **Suggested treatment text** | ● | ○ | ● SolisCloud's advice beside each alarm |
+| Alarm code, level, duration, recovery time | ● | ◐ | ● all four for both. SolarMan's end times come from its alert timeline, which also restores the occurrences its list folds away |
+| **Suggested treatment text** | ● | ◐ | ● each vendor's advice beside each alarm, where it gives any - SolarMan has none for most faults |
 | Fault / warning history per device | ● | ◐ | ● per system, back to installation, newest first |
-| Notification on fault or outage | ◐ | ◐ | ◐ a browser notification for each new alert, on any device with the dashboard open (2.9); nothing reaches a closed browser yet |
+| Notification on fault or outage | ◐ | ◐ | ● a notification on any signed-up phone or computer, dashboard open or not: a system stopped mid-generation, a fault, a SolisCloud login running out, a vendor not answering |
 | Email or webhook alerts | ◐ | ◐ | ○ out of scope |
 
 ### History and reporting
@@ -153,7 +153,8 @@ close - see section 6. What remains:
 |---|---|---|---|
 | 1 | ~~Daylight saving on a stored offset~~ | **Closed in 2.9.** The plant's zone name is stored where the vendor states one, and each reading is stamped with the offset in force at its own timestamp - so a day keeps the boundary it was recorded under, and a summer evening read back in winter still lands in its own day. A plant whose vendor only ever sends a number still falls back to that number | done |
 | 2 | ~~An automated test for the Worker itself~~ | **Closed in 2.7.** Every route, the auth middleware, the SQL and the cron fan-out now run in the unit suite against a real database: `tests/helpers/d1.ts` puts SQLite behind the D1 interface with the project's own migrations applied. All of `src/` measures 97% of statements, where the Worker's own files measured nothing. What a unit test still cannot reach is workerd itself - `crypto.subtle`'s MD5, the asset binding, real network - covered by `npm run probe:solis`, the end-to-end suite and the deploy's smoke test | done |
-| 3 | SolarMan alarm detail | The alert list names a fault and when it was raised, but not when it cleared or what to do about it. SolarMan's portal may carry both on an alert's own detail page; it has not been captured | S |
+| 3 | ~~SolarMan alarm detail~~ | **Closed.** The portal's detail panel calls `alert/detail` for advice and `alert/timeline` for the moments a fault was active; SolarLens now calls both for the newest alerts each hour, giving every occurrence an end and bringing back the occurrences the list folds away. SolarMan has no advice for most faults, and says so by returning none | done |
+| 4 | ~~Notifications that reach a closed browser~~ | **Closed.** Web Push, with the push itself empty and the words fetched by the woken device. Needs `node scripts/make-vapid-key.mjs` once, then a tap per device | done |
 
 ## 4b. What the pipeline checks, so this list stays honest
 
@@ -170,12 +171,9 @@ each check; `Security` in the repository carries what the scanners found.
   figure the vendor never reported as empty rather than zero. Built in the page from data
   already fetched, so it costs no database read. *Scheduled reports* remain out of scope.
 - **Weather, CO₂/trees, earnings and tariffs.**
-- **Notifications, partly.** The Alerts tab has a *Tell me when something changes* switch: the
-  browser raises a notification when a new alert appears, on whichever device has the dashboard
-  open. It is a louder dashboard, not a pager - a machine that is asleep tells nobody anything.
-  **Notifications that arrive with the browser closed** need Web Push: a VAPID key pair, a
-  subscription stored per device, and the cron sending to each. That is worth doing and is not
-  done.
+- ~~**Notifications that arrive with the browser closed.**~~ **Built**: Web Push, set up with
+  one command and turned on per device from the Alerts tab. See the README's *Notifications on
+  your phone*.
 - **Email and webhook alerts** remain out of scope.
 - **Battery on the on-grid system** — it has none, so the block is hidden rather than showing
   zeros. Only the hybrid renders it.
