@@ -409,6 +409,7 @@ async function wakeAll(env: Env, now: number): Promise<void> {
 export async function wake(env: Env, sub: Subscription, now = nowSec()): Promise<boolean> {
   const key = vapidKey(env);
   if (!key) return false;
+  // The host is what gets logged; the endpoint itself is a secret.
   const host = new URL(sub.endpoint).host;
   let status = 0;
   let error = '';
@@ -426,15 +427,18 @@ export async function wake(env: Env, sub: Subscription, now = nowSec()): Promise
   } catch (e) {
     error = String(e);
   }
+  // Gone: the browser threw the subscription away.
   if (status === 404 || status === 410) {
     console.log(JSON.stringify({ push: 'dropped', host, status }));
     await unsubscribe(env.DB, sub.endpoint);
     return false;
   }
+  // Delivered: note it, and forgive earlier failures.
   if (status >= 200 && status < 300) {
     await env.DB.prepare('UPDATE push_subscriptions SET last_ok_at = ?2, failures = 0 WHERE endpoint = ?1').bind(sub.endpoint, now).run();
     return true;
   }
+  // Anything else: log it, count it, and give up on the device after fifty.
   console.warn(JSON.stringify({ push: 'failed', host, status, ...(error ? { error: error.slice(0, 200) } : {}) }));
   const row = await env.DB
     .prepare('UPDATE push_subscriptions SET failures = failures + 1 WHERE endpoint = ?1 RETURNING failures')

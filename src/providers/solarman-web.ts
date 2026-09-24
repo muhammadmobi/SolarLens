@@ -174,12 +174,17 @@ export class SolarmanWebProvider implements Provider {
       '/maintain-s/operating/alert/search?order.direction=DESC&order.property=alertTime&page=1&size=100',
       { deviceType: '', language: 'en', level: '', startTime: '', levelList: null, plantId: Number(plantId) },
     );
+    // Advice is per rule, so it is asked once per device and rule; the results
+    // are keyed by alarm id, so an occurrence the list and a timeline both
+    // produce is stored once.
     const advice = new Map<string, string | null>();
     const out = new Map<string, Alarm>();
     let asked = 0;
     for (const rec of json.data ?? []) {
       const listed = solarmanAlert(plantId, rec);
       if (!listed) continue;
+      // Past the newest few, or with nothing to ask the detail calls about,
+      // the alert is kept as the list gave it.
       if (asked >= DETAILED_ALERTS || rec.deviceId == null || rec.ruleId == null) {
         if (!out.has(listed.id)) out.set(listed.id, listed);
         continue;
@@ -192,6 +197,8 @@ export class SolarmanWebProvider implements Provider {
             { deviceId: rec.deviceId, ruleId: rec.ruleId, language: 'en' });
           advice.set(rule, solarmanAdvice(detail));
         }
+        // The timeline is asked for one day, in the plant's own calendar: work
+        // out the plant-local day the alert fell on, and when that day ends.
         const zone = typeof rec.timezone === 'string' ? rec.timezone : null;
         const offset = (zone ? offsetOfZoneAt(zone, listed.beginTs) : null) ?? this.plants.get(plantId)?.tzOffsetSec ?? 0;
         const dayStart = Math.floor((listed.beginTs + offset) / 86400) * 86400 - offset;
