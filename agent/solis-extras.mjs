@@ -80,6 +80,7 @@ export async function readAlarms(page, portal, plantId, { allPages = false, maxP
  */
 export async function readPeriods(page, portal, plantId, { backfill = false, maxYears = 10 } = {}) {
   const out = [];
+  // Click one of the chart's tabs and keep the answer the portal fetches for it.
   const tab = async (label, which, path) => {
     const wait = waitFor(page, path).then((r) => r.json()).catch(() => null);
     await page.getByText(label, { exact: true }).first().click({ timeout: 15_000 });
@@ -98,6 +99,8 @@ export async function readPeriods(page, portal, plantId, { backfill = false, max
   const lifetime = await tab('Lifetime', 'all', '/api/chart/station/all');
   await tab('Year', 'year', '/api/chart/station/year');
 
+  // Walk back a year at a time with the chart's own "previous" button, as far
+  // as the first year the Lifetime view reported, stopping at an empty year.
   if (backfill) {
     const years = (lifetime ?? []).map((p) => Number(p.year ?? String(p.dateStr ?? '').slice(0, 4))).filter(Boolean);
     const first = years.length ? Math.min(...years) : new Date().getFullYear() - maxYears;

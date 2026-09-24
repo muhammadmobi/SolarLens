@@ -57,11 +57,17 @@ export const STATION_PREFIX = 'solarman:station:';
  *   generationUploadTotal (lifetime kWh), lastUpdateTime (epoch s).
  */
 export function stationReading(inv: Inverter, s: Rec, source = 'solarman'): Reading {
+  // Grid, as SolarLens signs it: + importing, - exporting. SolarMan sends the
+  // two directions as separate positive figures (buying, feeding in); where it
+  // sends only the net wirePower, that is already + while buying.
   const buy = num(pick(s, 'purchasePower', 'buyPower'));
   const sell = num(pick(s, 'gridPower'));
   const wire = num(pick(s, 'wirePower'));
   const gridPowerW = buy !== null || sell !== null ? (buy ?? 0) - (sell ?? 0) : wire;
 
+  // Battery, as SolarLens signs it: + charging, - discharging. Separate charge
+  // and discharge figures win when either is non-zero; otherwise batteryPower
+  // is used, signed by batteryStatus, because its own sign is not reliable.
   const charge = num(pick(s, 'chargePower')) ?? 0;
   const discharge = num(pick(s, 'dischargePower')) ?? 0;
   const rawBattery = num(pick(s, 'batteryPower'));
@@ -94,6 +100,8 @@ export function stationReading(inv: Inverter, s: Rec, source = 'solarman'): Read
   metrics.batteryStatus = (pick(s, 'batteryStatus') as string | null) ?? null;
   metrics.gridStatus = (pick(s, 'wireStatus') as string | null) ?? null;
 
+  // One status word for the plant: any warning makes it 'alarm', a normal
+  // datalogger link makes it 'online', and any other link state is passed on.
   const network = String(pick(s, 'networkStatus') ?? '').toUpperCase();
   const warning = String(pick(s, 'warningStatus') ?? '').toUpperCase();
   let status: string | null = null;

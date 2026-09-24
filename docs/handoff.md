@@ -392,6 +392,14 @@ The short history a newcomer would otherwise repeat.
   and the deploy's smoke test cover.
 - **SolisCloud's official API key** would remove the weekly login, the laptop
   and the relay entirely.
+- **The page reads a raw vendor payload the server never sends.** For privacy,
+  `src/public-view.ts` drops each vendor's raw payload from every public
+  answer, but three parts of the dashboard still read it: the Raw telemetry
+  table, the alerts built from the payload's own fields (SolisCloud's alarm
+  count and level, SolarMan's warning flags and datalogger link), and a device's
+  own alert count. None of them shows on the live site, and the guide still
+  points people to the raw table. The tests use fixtures that include the
+  payload, so they pass. `docs/feature-gaps.md` gap 5 has the two ways to close it.
 - **Push is set up once per server and once per device.** Until
   `node scripts/make-vapid-key.mjs` has run, the Alerts tab says notifications to
   a closed browser are not set up - which is the state to check first when a

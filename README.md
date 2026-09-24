@@ -77,11 +77,11 @@ A single Cloudflare Worker does three jobs:
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
 3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Five tabs, plus a per-system page they all link into:
    - **Overview** (`#/`) — one column per system, sized to fit a laptop screen without scrolling: the energy-flow diagram, then that system's figures as tiles, then its day curve. Producing now, house load, grid direction and battery charge live in the diagram and are not repeated as figures. Model and datalogger signal are not here at all — they never change, so they sit on Devices. Anything above the curve opens that system's detail page; the curve opens Power. Below 1080px wide the columns stack, and below 660px tall the page scrolls, because two systems will not fit on a phone and a very short window cannot hold a diagram, twelve figures and a readable curve at once.
-   - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry.
+   - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry (built, but not shown on the live site yet: the payload it reads is withheld from public answers - `docs/feature-gaps.md` gap 5).
    - **Historical Data** (`#/history`) — day by day per system: produced, consumed, imported, exported, battery in and out, peak and sample count, with a bar per day. Columns appear only where that system measures the quantity, and the page says plainly that the record begins when SolarLens started collecting rather than when the array was installed.
    - **Alerts** (`#/alerts`) — everything either cloud says is wrong, one collapsible section per system. Nothing is invented: each row names the field it came from, so an empty section reads as "both vendors report normal" rather than "nobody looked". The tab carries a count badge.
    - **Devices** (`#/devices`) — hardware inventory: inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
-   - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table.
+   - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table (not shown on the live site yet - gap 5).
 
    There is no Energy flow tab: the diagrams lead the overview instead, and an old `#/flow` bookmark lands there.
 
@@ -645,7 +645,7 @@ figure to `coverage/page-coverage.json` — uploaded on every run. Measured on
 the desktop walk-through only: both projects are Chromium and both would write
 the same file, so the figure kept would otherwise be whichever finished last.
 
-**70.5% of the dashboard script**, against a floor of 65% that fails the run if
+**70.7% of the dashboard script**, against a floor of 65% that fails the run if
 it drops. The figure moves as the page grows: it was 69.6% before this release
 added the CSV writer and the notification switch, which the walk-through only
 partly reaches. The floor is set below the reading, not flush against it, so an
@@ -1236,7 +1236,8 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] Extended metrics (month/year/lifetime, grid, battery, self-consumption)
 - [x] Unit tests (Vitest) and e2e tests (Playwright, desktop + mobile)
 - [x] Hardware inventory: Devices view, datalogger status and RSSI, per-MPPT-string PV power
-- [x] Per-system detail view with searchable raw telemetry
+- [x] Per-system detail view
+- [ ] Searchable raw telemetry, and the alerts built from vendor flags, on the live site - they read a payload the server withholds (`docs/feature-gaps.md` gap 5)
 - [x] Energy-flow diagram (PV / grid / battery / load), battery arm omitted for on-grid
 - [x] Checks on every pull request, required before merging: types, unit, end-to-end, build, privacy, attribution, headers, relay scripts
 - [x] Vulnerability, secret and code scanning, weekly as well as per pull request

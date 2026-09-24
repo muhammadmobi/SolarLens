@@ -987,6 +987,8 @@
   async function fillPushRow(extra = {}) {
     const row = $('pushrow');
     if (!row) return;
+    // Ask where this device stands, then draw the matching state below:
+    // unsupported, not set up on the server, unreadable, on, or off.
     const st = await pushState();
     const say = (html) => { if ($('pushrow') === row) row.innerHTML = html; };
     const note = (extra.note ?? pushNote) ? `<small class="faint">${esc(extra.note ?? pushNote)}</small>` : '';
@@ -1003,6 +1005,7 @@
       say(`${lead}<small class="faint">Could not check whether this device is signed up. Try again when the dashboard is reachable.</small>`);
       return;
     }
+    // On: offer a test, and a way to turn it off (no key needed for that).
     if (st.kind === 'on') {
       say(`${lead}<small class="faint">On for this device. It is told when a system stops mid-day, a fault is recorded, or a SolisCloud login needs renewing.</small>
         <div class="exportrow"><button type="button" class="rangebtn" id="pushtest">Send a test</button>
@@ -1021,6 +1024,7 @@
       };
       return;
     }
+    // Off: offer to turn it on, with a field for the key if the server asked for one.
     const needKey = !!extra.needKey;
     say(`${lead}<small class="faint">Tells this device when a system stops mid-day, a fault is recorded, or a SolisCloud login needs renewing - even with the dashboard closed.</small>
       <div class="exportrow">${needKey
@@ -1513,6 +1517,8 @@
     for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
     // Collapsible per system: with two full detail sets on one page, the
     // second is otherwise a long scroll away.
+    // One section per system: its day chart, then its detail blocks and raw
+    // telemetry, all built by detailBlocks.
     const per = invs.map((inv, i) => {
       const b = detailBlocks(inv);
       const st = statusOf(inv);
@@ -1758,6 +1764,7 @@
 
     const pct = inv.capacity_w ? Math.round((solar / inv.capacity_w) * 100) : null;
 
+    // One circle of the diagram - icon, label, figure - and the arrow between two.
     const node = (icon, lab, value, opts) => {
       const o = opts || {};
       return '<div class="ovnode' + (o.live ? ' live' : '') + '">' +
@@ -2122,6 +2129,8 @@
     if (!rows.length) {
       return `${head}<div class="ac-sub">${esc(providerName(inv.provider))} has no alarms on record for this system.</div>`;
     }
+    // A one-line summary above the table: how many, since when, and the fault
+    // that happens most - usually the one worth asking about.
     const oldest = rows[rows.length - 1].begin_ts;
     const counts = new Map();
     for (const a of rows) {
@@ -2129,8 +2138,10 @@
       counts.set(k, (counts.get(k) ?? 0) + 1);
     }
     const [common, commonN] = [...counts.entries()].sort((x, y) => y[1] - x[1])[0];
+    // The advice column appears only if some alarm has advice to show.
     const anyAdvice = rows.some((a) => a.advice);
     const sev = (a) => `<span class="pill ${a.severity === 'fault' ? 'bad' : a.severity === 'warning' ? 'warn' : ''}"><i></i>${esc(a.severity ?? 'level ' + (a.vendor_level ?? '?'))}</span>`;
+    // The newest FAULTS_SHOWN alarms, as table rows.
     const body = rows.slice(0, FAULTS_SHOWN).map((a) => `<tr>
         <td class="mono">${esc(when(a.begin_ts))}</td>
         <td>${sev(a)}</td>
@@ -2174,6 +2185,8 @@
           <div class="pushrow" id="pushrow" aria-live="polite"></div>
         </div></section>`;
 
+    // One collapsible section per system: its alerts as a list, or "nothing
+    // reported" with what was checked, then its fault history below.
     const sections = invs.map((inv) => {
       const rows = alertsFor(inv);
       const st = statusOf(inv);
@@ -2201,6 +2214,7 @@
       </details>`;
     }).join('');
 
+    // The headline: how many things to look at across every system.
     const total = invs.reduce((a, i) => a + alertsFor(i).length, 0);
     $('view').innerHTML = `<section class="card"><h2>Alerts</h2><div class="body">
         <div class="alertsum">${total
@@ -2210,6 +2224,7 @@
         <div class="ac-sub">SolarLens reports what the vendors report, plus what it can see about its own polling. It does not raise alerts of its own beyond a feed going quiet.</div>
       </div></section>${notifyRow}${sections}`;
 
+    // Wire the while-open switch, then draw the closed-browser half below it.
     const box = $('notify');
     if (box) {
       box.onchange = async () => {

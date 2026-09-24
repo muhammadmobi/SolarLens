@@ -502,6 +502,8 @@ export class SolisCloudProvider implements Provider {
 
   /** The newest sample for one unit: the plant's snapshot, or the inverter's own detail. */
   async getReading(inv: Inverter): Promise<Reading | null> {
+    // A plant standing in for its inverter: read the plant snapshot, and fill
+    // in the name, serial and size the empty inverter list could not give.
     if (inv.id.startsWith(STATION_PREFIX)) {
       const d = await call<Rec>(this.creds, '/v1/api/stationDetail', { id: inv.vendorId });
       if (!d) return null;
@@ -511,6 +513,8 @@ export class SolisCloudProvider implements Provider {
       return stationReading(inv, d);
     }
 
+    // A real inverter: its own detail record, read field by field. Each value
+    // comes with a unit string ("kW", "W") and is scaled by it.
     const d = await call<Rec>(this.creds, '/v1/api/inverterDetail', {
       id: inv.vendorId,
       sn: inv.serial ?? undefined,
@@ -552,6 +556,7 @@ export class SolisCloudProvider implements Provider {
 export function deviceFromInverterDetail(d: Rec, plantId: string | null = null): Device {
   const sn = (pick(d, 'sn', 'inverterSn') as string | null) ?? null;
 
+  // Up to 32 PV strings, numbered pow1/uPv1/iPv1 (watts, volts, amps) and so on.
   const strings: { index: number; powerW: number; voltageV: number | null; currentA: number | null }[] = [];
   for (let i = 1; i <= 32; i++) {
     const w = num(pick(d, `pow${i}`));
@@ -564,6 +569,7 @@ export function deviceFromInverterDetail(d: Rec, plantId: string | null = null):
     }
   }
 
+  // Up to three AC phases, uAc1/iAc1 (volts, amps); a single-phase inverter sends one.
   const acPhases: { index: number; voltageV: number | null; currentA: number | null }[] = [];
   for (let i = 1; i <= 3; i++) {
     const v = num(pick(d, `uAc${i}`));

@@ -57,6 +57,17 @@ checkout of any tag says which release it is.
   and *Debugging the live system*: the Worker's live log, /api/health, a query
   against production that reaches it in one piece, and watching a relay laptop
   work, since a hidden relay writes no log.
+- **Comments inside the long functions, too.** Every function over thirty lines
+  now carries a comment at least every fifteen lines, stating each step and the
+  reason for it: how SolarMan's grid and battery figures are signed, how a
+  SolarMan timeline becomes occurrences, what a failed push does, how the relay's
+  chart tabs are walked back a year at a time.
+- **A gap written down.** Checking the comments against the live API showed that
+  three parts of the dashboard read a raw vendor payload the server deliberately
+  never sends: the Raw telemetry table, the alerts built from vendor flags, and a
+  device's own alert count. None of them shows on the live site, and the tests
+  missed it because their fixtures include the payload. It is recorded as gap 5
+  in docs/feature-gaps.md, with the ways to close it, rather than changed here.
 - **The documents match the code again.** Checked mechanically against it: the
   README's data model now has all eleven tables (it was missing alarms, vendor
   totals and relays), its end-to-end section describes all ten spec files rather

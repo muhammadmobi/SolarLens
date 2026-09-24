@@ -189,6 +189,8 @@ export function solarmanOccurrences(
     .sort((a, b) => a - b);
   if (!ts.length) return [{ ...listed, advice }];
 
+  // Group the sorted samples into runs: a gap longer than one sample
+  // interval starts a new occurrence.
   const runs: Array<[number, number]> = [];
   for (const t of ts) {
     const last = runs[runs.length - 1];
@@ -196,6 +198,7 @@ export function solarmanOccurrences(
     else runs.push([t, t]);
   }
 
+  // Each run becomes one alarm, with an end only when it can be told honestly.
   const out = runs.map(([first, last]): Alarm => {
     const holdsListed = listed.beginTs >= first && listed.beginTs <= last;
     const stillGoing = nowTs - last <= 2 * SAMPLE_GAP_S;
