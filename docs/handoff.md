@@ -135,6 +135,7 @@ quota, `/api/ingest/*` because they write.
 | `src/poll.ts` | The cron fan-out: which providers to call, in what order, what to do when one fails. |
 | `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, drops raw payloads. |
 | `src/relays.ts` | Validates a relay's report on itself into a narrow shape. |
+| `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. |
 | `src/providers/types.ts` | The `Provider` interface every adapter implements, plus shared shapes. |
 | `src/providers/soliscloud.ts` | SolisCloud's official API adapter (dormant until an API key exists) and the relay payload normaliser. |
 | `src/providers/solarman.ts` | SolarMan's Business API adapter and its normaliser. |
@@ -145,8 +146,16 @@ quota, `/api/ingest/*` because they write.
 | `agent/solis-relay.mjs` | The relay: drives Chrome, waits for the portal's own responses, pushes. |
 | `agent/solis-extras.mjs` | Its slower reads - alarm history, period totals. |
 | `agent/relay-status.mjs` | Login expiry from the portal cookie, the relay's random id, its nickname. |
-| `public/index.html` | The whole dashboard - markup, styles and script in one file, no build step. |
-| `scripts/` | Operational tooling: the wrangler wrapper, the relay installer, login renewal, token rotation, the capture tool, and `scripts/ci/` (the guards). |
+| `public/index.html` | The whole dashboard - markup, styles and script in one file, no build step. The script opens with a map of its sections; search for `---------- <name>` to jump to one. |
+| `public/sw.js` | The service worker: network-first fetching for the installable app, and what a push shows. |
+| `scripts/` | Operational tooling: the wrangler wrapper and its shared config step (`wrangler-config.mjs`), the relay installer, login renewal, token rotation, the capture tool, the push key (`make-vapid-key.mjs`), the reading-offset backfill, and `scripts/ci/` (the guards). |
+
+Every one of these files starts with a comment saying what it is for, and each
+function worth explaining has one above it - so reading a file top down is the
+intended way in. The tests follow the same rule: each file says what it holds
+the code to, and the helpers it uses (a SQLite database behind D1's interface,
+a Worker to send requests to, a stand-in push service) are explained where they
+are defined in `tests/helpers/`.
 
 ## 5. The data model
 
@@ -158,8 +167,9 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `readings` | sample | Keyed `(inverter_id, ts, source)`. Holds the normalised columns **and** `raw`, the untouched vendor JSON, which is never served. `tz_offset_sec` is the offset in force *when it was read*, so a day keeps its boundary after the clocks change; every row in production carries it since the 2.9 backfill |
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC |
 | `alarms` | vendor fault | Severity, raised, cleared, readable name |
-| `periods` | vendor period total | Day, month, year, lifetime, per plant |
-| `polls` | poll attempt | The health endpoint and the footer read this |
+| `vendor_periods` | vendor period total | Day, month and year totals per plant, from the vendor itself, back to installation |
+| `poll_log` | poll attempt | The health endpoint and the footer read this; pruned after a week |
+| `tokens` | provider | A vendor's cached bearer and refresh tokens, so a token outlives one cron run |
 | `relays` | relay computer | Random id, state, login expiry, last seen |
 | `kv` | scheduled job | "Is this hourly job due yet", and which notification events have been told |
 | `push_subscriptions` | device signed up for notifications | The push endpoint is the secret and is never served; at most ten |
@@ -259,18 +269,26 @@ somewhere safe. Everything else can be rebuilt from this repository.
    guards, a Windows job for the relay scripts, CodeQL, dependency review,
    `npm audit`, a secret scan of the whole history, workflow lint, and a check
    that every action is pinned to a commit.
-3. Merge. The checks run again on the merged result.
-4. **A person approves the deploy** on GitHub - the `production` environment
+3. **Wait for Copilot's review** of the latest commit, then for each suggestion:
+   fix it or explain why not, reply on the conversation, and resolve it. A push
+   brings a fresh review, so repeat until nothing is open - the ruleset refuses
+   a merge while any conversation is unresolved. Check merged pull requests too:
+   a review can land after the merge.
+4. Merge. The checks run again on the merged result.
+5. **A person approves the deploy** on GitHub - the `production` environment
    requires a reviewer.
-5. Migrations, deploy, then a **smoke test against the live site**: the page and
+6. Migrations, deploy, then a **smoke test against the live site**: the page and
    its security policy, health and latest answering, a vendor feed current, no
    identifiers in the public responses, and the token-protected routes still
    refusing a caller without one.
-6. **If the smoke test fails, the previous version is restored automatically**
+7. **If the smoke test fails, the previous version is restored automatically**
    and the run is marked failed.
-7. Releases: set the version in `package.json`, write the changelog section,
-   merge, then run **Actions → Release**. It refuses unless the version, the
-   changelog section and its link reference agree and no such tag exists.
+8. Releases: set the version in `package.json` (`npm version X.Y.Z --no-git-tag-version`),
+   the same number in `RELEASE` in `public/index.html`, and rewrite the guide's
+   "What is new" card beside it; write the changelog section and its link
+   reference; merge, then run **Actions → Release**. It refuses unless the
+   version, the changelog section and its link reference agree and no such tag
+   exists, and a unit test fails if the guide names a different release.
 
 The four guards in `scripts/ci/` are worth reading before your first pull
 request: `check-privacy` (identifiers, in every commit *and* the description),
@@ -288,6 +306,7 @@ break it mid-run).
 | Weekly, when the dashboard warns | Renew a SolisCloud login: `renew-solis-login.cmd` on the named laptop |
 | Once, then per new phone | `node scripts/make-vapid-key.mjs` gives the Worker its push key; then Alerts tab → *Turn on for this device* on each phone |
 | After a release that changes relay code | Double-click `setup-solarlens-relay.cmd` on each relay laptop; the deploy summary says when |
+| After any release | Nothing: an open dashboard offers *Reload* within fifteen minutes, or on coming back to the tab, and a TV display reloads itself |
 | Occasionally | Check the D1 read budget if the dashboard is left open on many screens |
 
 **When something is wrong**
@@ -300,6 +319,7 @@ break it mid-run).
 | A deploy failed at the first step | The Cloudflare token expired or was rolled | New token → update the `production` secret |
 | A plant appears that should not | Someone shared a plant into the account | `INCLUDE_PLANTS` in `.dev.vars` |
 | Rolling back by hand | | `npm run cf -- rollback <version-id> -y -m "why"`; list with `npm run cf -- deployments list` |
+| A screen shows an old version of the page | It was opened before the reload notice itself was deployed, after 2.10.0, so it has no notice to show | Reload it once by hand (Ctrl + F5, or close and reopen the phone app) |
 | A `.cmd` window stays open saying something failed | That run failed on purpose, so you can read why | The lines above it say what |
 
 **Where the reports are**: coverage and Playwright artifacts hang off each
@@ -349,6 +369,9 @@ The short history a newcomer would otherwise repeat.
 | **A deploy's rollback target was read with a command substitution inside `echo`**, which cannot fail, so a failed lookup silently left the run unable to undo itself | A step that cannot fail cannot protect you |
 | **The privacy guard read the digits inside a pinned commit hash as a plant id**, and Dependabot's sign-off as a leaked address | A guard's false positives are its own bug; fix them, do not weaken the rule |
 | **A maintenance script passed every local test and answered `undefined` against production**: `wrangler d1 execute --file` returns rows from a local database but import statistics from a remote one, and `--command` through `scripts/wrangler.mjs` is split at every space by the shell | Dry-run against the real thing before `--apply`. A script that talks to D1 runs wrangler's own entry point with node, as `scripts/backfill-reading-offsets.mjs` does |
+| **A dashboard tab left open across a release kept running the old page**, so the 2.10 guide went unseen on a screen that had been open all along | A page refreshes its figures, never itself; it now compares its own script with the server's and offers a reload |
+| **On a phone the page was wider than the screen**: the tab bar could not shrink, the browser zoomed the layout out, and a notice fixed to the bottom landed below it where it could not be tapped | Test layouts at phone width, and hold the page to the screen width - `tests/e2e/phone-width.spec.ts` does |
+| **Several Copilot review rounds found real bugs** - a notification repeating every five minutes, a race in the reload check - and some threads had been resolved without a word | Every pull request: wait for the review, fix, reply, resolve, repeat until none is open. The ruleset now refuses a merge with an open conversation |
 
 ## 14. What is still missing
 

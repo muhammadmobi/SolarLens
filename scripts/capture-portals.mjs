@@ -93,6 +93,7 @@ function redact(obj) {
   }
   return obj;
 }
+/** Request headers with every credential-looking one replaced by its length. */
 function redactHeaders(h) {
   const out = {};
   for (const [k, v] of Object.entries(h)) {
@@ -100,7 +101,9 @@ function redactHeaders(h) {
   }
   return out;
 }
+// Parse JSON where it is JSON; keep anything else as the text it was.
 function tryJson(s) { try { return JSON.parse(s); } catch { return s; } }
+/** A captured URL as a file name. */
 function fileSafe(url) {
   const u = new URL(url);
   return (u.host + u.pathname).replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '').slice(0, 120);

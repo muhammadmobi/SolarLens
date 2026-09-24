@@ -54,6 +54,7 @@ const FORBIDDEN = [
   },
 ];
 
+// Run git and return what it printed.
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 const rangeArg = process.argv.indexOf('--range');

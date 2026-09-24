@@ -11,8 +11,14 @@ const NOW = Math.floor(Date.now() / 1000);
 const SOLIS = 'soliscloud:station:1';
 const HYBRID = 'solarman:station:62000000';
 
+// The API sends metrics as a JSON string, so the fixtures do too.
 const metrics = (o: Record<string, unknown>) => JSON.stringify(o);
 
+/**
+ * The two systems, as /api/latest returns them: an on-grid SolisCloud plant with
+ * no battery, and a SolarMan hybrid with one. A test changes one of them by
+ * passing overrides for 'solis' or 'solarman'.
+ */
 function inverters(overrides: Partial<Record<'solis' | 'solarman', Record<string, unknown>>> = {}) {
   return [
     {
@@ -44,6 +50,7 @@ function inverters(overrides: Partial<Record<'solis' | 'solarman', Record<string
   ];
 }
 
+/** The hardware behind them, as /api/devices returns it: inverters and dataloggers. */
 function devices() {
   return [
     {
@@ -100,6 +107,7 @@ function devices() {
   ];
 }
 
+/** Today's samples for both systems, from local midnight, as /api/series returns them. */
 function series() {
   const start = new Date(); start.setHours(0, 0, 0, 0);
   const t0 = Math.floor(start.getTime() / 1000);
@@ -134,6 +142,11 @@ function historyRows() {
   return rows;
 }
 
+/**
+ * Answer every /api route the page calls from the fixtures above, so the
+ * dashboard runs with no Worker, no database and no vendor. Options change one
+ * answer at a time - different inverters, a failed poll, an error status.
+ */
 async function stubApi(page: Page, opts: {
   invs?: unknown[]; devs?: unknown[]; status?: number; series?: unknown[];
   poll?: { ts?: number; ok: number; detail: string; provider: string };

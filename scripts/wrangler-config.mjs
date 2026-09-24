@@ -16,6 +16,7 @@ import { resolve } from 'node:path';
 const SOURCE = resolve('wrangler.jsonc');
 const GENERATED = resolve('.wrangler.local.jsonc');
 
+/** Read KEY=value lines from .dev.vars into the environment, without overriding what is set. */
 function loadDevVars() {
   const path = resolve('.dev.vars');
   if (!existsSync(path)) return;

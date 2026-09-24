@@ -21,6 +21,7 @@ const inverters = [
   { id: 'solarman:demo2', provider: 'solarman', vendorId: 'demo2', serial: 'SM-DEMO-002', name: 'Deye 3.6K', plant: 'Home (SolarMan)', cap: 3600, peak: 3100, battery: false },
 ];
 
+// A value as a quoted SQL string literal.
 const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
 const sql = [];
 sql.push('DELETE FROM readings; DELETE FROM inverters; DELETE FROM poll_log;');

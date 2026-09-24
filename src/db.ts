@@ -1,9 +1,34 @@
+/**
+ * Everything that reads or writes the D1 database, and the Worker's bindings.
+ *
+ * Every SQL statement in the project lives here, so this is the file to read
+ * before changing a table or a query. The tables themselves are made by the
+ * files in migrations/, applied in order; nothing here creates one.
+ *
+ * Two constraints shape almost every query:
+ *
+ * - D1's free tier allows about five million rows read a day, and this project
+ *   has run out twice. A query that looks harmless - a correlated subquery, a
+ *   scan without an index - can spend most of that budget on its own, so
+ *   queries here are written against the indexes in 0008_read_indexes.sql.
+ * - Writes are idempotent. The relay laptops, the cron and the vendors can all
+ *   send the same thing twice; each upsert is written so a repeat updates the
+ *   row it already made instead of adding another.
+ *
+ * Times are epoch seconds throughout; power is watts and energy kWh.
+ */
 import type { Device, Inverter, Reading } from './providers/types';
 import type { TokenStore } from './providers/solarman';
 import type { Alarm, Period } from './providers/events';
 import { offsetOfZoneAt } from './providers/units';
 import type { RelayStatus } from './relays';
 
+/**
+ * The Worker's bindings: the database, the static-assets service that serves
+ * public/, and the secrets set with `wrangler secret put`. Every secret is
+ * optional - a provider is switched on simply by its secrets being present
+ * (see buildProviders in poll.ts), and the Worker runs without any of them.
+ */
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
@@ -24,10 +49,16 @@ export interface Env {
   VAPID_KEY?: string;
 }
 
+/** The current time in epoch seconds, the unit every table here uses. */
 export function nowSec(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/**
+ * Record a monitored unit, or refresh the one already recorded. A field the
+ * vendor did not send this time keeps what was known before (COALESCE), so a
+ * sparse answer never erases a serial number or a plant name.
+ */
 export async function upsertInverter(db: D1Database, inv: Inverter, seenAt = nowSec()): Promise<void> {
   await db
     .prepare(
@@ -71,6 +102,13 @@ async function offsetForReading(db: D1Database, inverterId: string, tsSec: numbe
   return row.tz_offset_sec;
 }
 
+/**
+ * Store one sample. Returns true when it is a new sample, false when the same
+ * system, time and source was already stored - in which case the stored row is
+ * refreshed from this payload (see below) but still counts as nothing new.
+ * Each new row is stamped with the plant's UTC offset at that moment, so its
+ * day survives a later change of clocks.
+ */
 export async function insertReading(db: D1Database, r: Reading): Promise<boolean> {
   const tzOffsetSec = await offsetForReading(db, r.inverterId, r.ts);
   const res = await db
@@ -265,6 +303,7 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
     .run();
 }
 
+/** Every device, SolisCloud first, then inverters before dataloggers, then by serial. */
 export async function listDevices(db: D1Database): Promise<DeviceRow[]> {
   const { results } = await db
     .prepare(
@@ -322,6 +361,7 @@ export async function series(db: D1Database, fromTs: number, toTs: number): Prom
     .map(({ source: _source, ...row }) => row);
 }
 
+/** Whether a row came from a backfilled day curve rather than a live reading. */
 const isHistory = (source: string | null) => !!source && source.endsWith('-history');
 
 const POLL_LOG_KEEP_S = 7 * 24 * 3600;
@@ -482,6 +522,7 @@ export function latestPerProvider(polls: PollRow[]): PollRow[] {
   return real.length ? real : all;
 }
 
+/** The newest lines of the poll log, newest first: what the footer and /api/health show. */
 export async function recentPolls(db: D1Database, limit = 20) {
   const { results } = await db
     .prepare(`SELECT ts, provider, ok, detail FROM poll_log ORDER BY ts DESC LIMIT ?1`)
@@ -490,6 +531,10 @@ export async function recentPolls(db: D1Database, limit = 20) {
   return results;
 }
 
+/**
+ * A provider's bearer-token cache, kept in the tokens table so a token is
+ * reused across cron runs instead of a fresh login every five minutes.
+ */
 export function tokenStore(db: D1Database): TokenStore {
   return {
     async get(provider) {
@@ -637,6 +682,7 @@ export async function isDue(db: D1Database, key: string, now = nowSec()): Promis
   return !row || row.expires_at <= now;
 }
 
+/** Record that the job named `key` has just run, and is not due again for `everySec`. */
 export async function markDone(db: D1Database, key: string, everySec: number, now = nowSec()): Promise<void> {
   await db
     .prepare(

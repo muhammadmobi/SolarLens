@@ -1,3 +1,12 @@
+/**
+ * A relay's report on itself, from both ends.
+ *
+ * The relay (agent/relay-status.mjs) works out whether its SolisCloud login
+ * works and when it runs out, from the portal's own login cookie, and keeps a
+ * random id and an optional nickname. The Worker (src/relays.ts) checks that
+ * report strictly before storing it, and names relays in public by nickname or
+ * order, never by id. These tests hold both sides to that.
+ */
 import { describe, expect, it } from 'vitest';
 import { parseRelayStatus } from '../../src/relays';
 import { publicRelays } from '../../src/public-view';

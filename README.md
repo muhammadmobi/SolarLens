@@ -490,6 +490,8 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 | `RELAY_HEADLESS` | relay agent | `1` runs the relay browser invisibly. The background task always runs hidden whatever this says; the installer and `renew-solis-login.cmd` set it for their own checks. Only matters when running the relay by hand. |
 | `RELAY_NAME` | relay agent | A nickname the dashboard uses for this relay, such as `Office laptop`. Shown publicly, so keep it vague. Unset = *Relay 1*, *Relay 2*. |
 | `RELAY_CDP` | relay agent | Attach to an already-running Chrome, e.g. `http://127.0.0.1:9222`, instead of starting one. Set by `setup-relay.cmd -UseMyChrome`. |
+| `CAPTURE_MINUTES` | `scripts/capture-portals.mjs` | How long a capture session runs (default 9); 25 gives time to log in first. |
+| `CAPTURE_CDP_PORT` | `scripts/capture-portals.mjs` | Opens the capture window's debugging port, so a second script can drive the same window. |
 | `RELAY_INTERVAL_MIN` | relay agent | Minutes between pushes (default 5). |
 | `RELAY_ONCE` | relay agent | `1` runs one cycle and exits: `0` sent, `3` needs a login, `1` other failure. Used by the installer and `renew-solis-login.cmd`; not set in normal running. |
 | `RELAY_SKIP_EXTRAS` | relay agent | `1` skips alarm history and period totals, for a quick login check. Not set in normal running. |
@@ -571,6 +573,7 @@ Seventeen files, one concern each. Most are pure-function tests against fixtures
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
 - **`solarman-alarm-detail.test.ts`** — SolarMan's advice and timeline read the way its own detail panel reads them: each run of five-minute samples one occurrence with an end, a recent run left active, a run into midnight left unknown, the plant's own day asked for, and only the newest few alerts detailed each hour.
 - **`push.test.ts`** — a real ES256 signature verified with the public key the browser is given; what is worth waking a phone for, including that a system going quiet at dusk is not; each event told once; a device the browser dropped forgotten; and the routes keeping sign-up behind the key while anyone can turn their own device off.
+- **`release-version.test.ts`** — the release the guide names is the one in `package.json`, and the changelog has a section for it.
 - **`service-worker.test.ts`** — `public/sw.js` run in a stand-in worker scope: a push shows what is new and never brings back a notification already shown, and a tap opens the Alerts tab.
 - **`extras.test.ts`** — the hourly and daily schedule for those reads: what the first run walks back through, what later runs skip, and that an empty current year in January does not stop the walk.
 - **`relays.test.ts`** — a relay's report on itself: what the Worker refuses, including a computer name offered as an id; the login expiry read from the portal's cookie; the random id a relay keeps; relays named by nickname or order, never by id; and the exit code that tells the renewal script to open a window for a login.
@@ -587,9 +590,24 @@ Seventeen files, one concern each. Most are pure-function tests against fixtures
 
 ### End-to-end tests — `tests/e2e/`
 
-One spec file of 133 tests, run twice: **chrome** (Desktop Chrome) and **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/` and every `/api/*` route is fulfilled from fixtures in the spec, so a run takes about a minute and needs nothing external. They use the Google Chrome already on the machine (`channel: 'chrome'`); drop that line in `playwright.config.ts` for Playwright's bundled Chromium.
+Ten spec files, **182 tests**, each run twice: **chrome** (Desktop Chrome) and
+**mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/`, and every
+`/api/*` route is answered from fixtures in the spec, so the suite needs no
+Worker, database or vendor. They assert what a person sees and what the page
+sends:
 
-They assert what a person sees, grouped by what it is for: the overview and its layout at both widths, the theme toggle (including that the choice is applied before first paint), the labelled header totals, the energy-flow diagram (structure, direction from the signs, wire thickness tracking power, per-diagram marker ids), the battery panel and the derived cycle count, offline handling and zeroed figures, the Alerts tab, the collapsible Power sections and the clickable chart legend, the device inventory, raw telemetry filtering, and the token-gate guidance.
+| Spec | What it holds the dashboard to |
+|---|---|
+| `dashboard.spec.ts` | The bulk, 133 tests: the overview and its layout at both widths, the theme, the header figures, each system's page, charts, alerts, history, devices, relays, TV mode, freshness and the auth gate |
+| `accessibility.spec.ts` | axe-core's WCAG 2 A and AA rules on every view, a keyboard walk-through, and a full keyboard lap of each view showing focus |
+| `guide.spec.ts` | The **?** guide: one tap from anywhere, opens with no data or a refused request, names the systems, links only to real pages |
+| `history-systems.spec.ts` | Historical Data's system switch: narrows charts, tables, count and CSV; remembered; falls back when a system is gone |
+| `new-version.spec.ts` | The reload notice: silent when nothing changed, offered after a release, "Later" respected, TV reloads itself, a release caught even in the moment after load |
+| `push.spec.ts` | Notifications to a closed browser: on, off, the key asked for and never stored, every refusal explained |
+| `export-and-notify.spec.ts` | Download CSV, and the while-open notification switch |
+| `daylight-saving.spec.ts` | The morning the clocks go back: the day's first hour kept, and times shown on the clock they were read under |
+| `phone-width.spec.ts` | No view wider than a phone, and the last tab reachable |
+| `page-coverage.spec.ts` | Walks the dashboard and measures how much of its script ran (below) |
 
 One retry is allowed locally (two on CI): the suite drives two real Chrome projects in parallel and a page load occasionally overruns the timeout on a loaded laptop. A genuine break still fails twice.
 
@@ -602,7 +620,7 @@ figure to `coverage/page-coverage.json` — uploaded on every run. Measured on
 the desktop walk-through only: both projects are Chromium and both would write
 the same file, so the figure kept would otherwise be whichever finished last.
 
-**69.4% of the dashboard script**, against a floor of 65% that fails the run if
+**70.5% of the dashboard script**, against a floor of 65% that fails the run if
 it drops. The figure moves as the page grows: it was 69.6% before this release
 added the CSV writer and the notification switch, which the walk-through only
 partly reaches. The floor is set below the reading, not flush against it, so an
@@ -631,17 +649,18 @@ while charts keep the brighter ones.
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **98.1%** | **91.5%** | **97.5%** | **99.5%** |
-| &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 98% | 90% | 97% | **100%** |
-| &nbsp;&nbsp;`db.ts` — every line of SQL | **100%** | 95% | **100%** | **100%** |
+| **All of `src/`** — everything the Worker ships | **98.2%** | **91.6%** | **97.6%** | **99.5%** |
+| &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 97% | 91% | 91% | **100%** |
+| &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 91% | **100%** | **100%** |
 | &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |
+| &nbsp;&nbsp;`push.ts` — phone notifications | **100%** | 99% | **100%** | **100%** |
 | &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 92% | **100%** | **100%** |
 | &nbsp;&nbsp;`relays.ts` — a relay's report, validated | **100%** | **100%** | **100%** | **100%** |
-| &nbsp;&nbsp;`events.ts` — alarms and period totals | **100%** | 87% | **100%** | **100%** |
-| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 94% | 92% | **100%** | **100%** |
+| &nbsp;&nbsp;`events.ts` — alarms and period totals | **100%** | 91% | **100%** | **100%** |
+| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 94% | 93% | **100%** | **100%** |
 | &nbsp;&nbsp;`solarman.ts` | 99% | 91% | **100%** | 99% |
-| &nbsp;&nbsp;`soliscloud.ts` | 98% | 92% | **100%** | 99% |
-| &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 94% | 79% | 94% | 95% |
+| &nbsp;&nbsp;`soliscloud.ts` | 98% | 91% | **100%** | 99% |
+| &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 95% | 84% | 93% | 97% |
 | Thresholds enforced in CI | **97%** | **90%** | **97%** | **99%** |
 
 **There is one figure now, and it covers the whole Worker.** Until 2.7 there
@@ -742,10 +761,15 @@ be moved after it has been reviewed.
 Two reviewers are asked for on every pull request that is ready for one, so
 nobody has to remember:
 
-- **Copilot**, which comments on the diff. A second pair of eyes, not a gate:
-  its comments never block a merge, and the twelve required checks decide that
-  by themselves. On the free plan its reviews have a monthly allowance, so it
-  will sometimes not answer - the run's summary says when it could not be asked.
+- **Copilot**, which reviews the diff again after every push. Its suggestions
+  are not approvals, but each one opens a conversation, and **the ruleset refuses
+  a merge while any conversation is unresolved**. So each suggestion is checked,
+  fixed with a test or answered, replied to, and resolved - then the push that
+  fixes it is reviewed again, until nothing is open. On the free plan its
+  reviews have a monthly allowance, so it will sometimes not answer - the run's
+  summary says when it could not be asked. Note that GitHub does not wait for
+  the review to arrive: merging in the minutes before Copilot has posted is not
+  blocked, which is why waiting for it is part of the routine rather than a rule.
 - **The repository's owner**, when the pull request is somebody else's: a
   contributor's, or one of Dependabot's. GitHub never asks anyone to review
   their own, so the owner's own pull requests get Copilot alone.
@@ -863,6 +887,9 @@ Five tables in D1 (`migrations/`), plus a poll log:
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
 - **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. Filled by the relay agent; the vendor payload is stripped of address, coordinates and account identifiers before storage.
+- **`alarms`** — each vendor fault: `code`, `message`, `severity` (`info` / `warning` / `fault`), the vendor's own `vendor_level`, `advice`, `begin_ts`, `end_ts` (null while active, or where the vendor never says), and `state` (`active` / `recovered` / `unknown`). Its `id` contains the vendor's plant id and is never served.
+- **`vendor_periods`** — each vendor's own totals per `period` (`day` / `month` / `year`) and `key` (`2026-09`, `2026`): generation, load, grid both ways, battery both ways and full-load hours. These reach back to installation, which SolarLens's own readings cannot.
+- **`relays`** — each SolisCloud relay's report on itself: a random `id` (never a computer name, never served), an optional `name`, `state` (`ok` / `login-expired` / `error`), `login_expires_at` from the portal's own login cookie, and when it was first and last heard from.
 - **`kv`** — a small expiring key/value shelf (`k`, `v`, `expires_at`), used by the weather cache, the hourly and daily schedules, and to remember which notification events have already been told.
 - **`push_subscriptions`** — each device signed up for notifications: its push `endpoint` (never served), the dashboard `origin` it subscribed from, a short `audience` hash, and its delivery record. At most ten. **`push_messages`** — what a woken device shows (`title`, `body`), for every device or for one; kept a week.
 - **`tokens`** — cached bearer/refresh tokens per provider. **`poll_log`** — one line per poll with success and detail, surfaced in the dashboard footer.
@@ -967,7 +994,8 @@ solar-lens/
 ├── agent/
 │   ├── solis-relay.mjs       local Chrome relay for SolisCloud
 │   ├── solis-extras.mjs      its slower reads: alarm history and period totals
-│   └── relay-status.mjs      login expiry, and the relay's random id and nickname
+│   ├── relay-status.mjs      login expiry, and the relay's random id and nickname
+│   └── relay-status.d.mts    its types, for the tests that import it
 ├── setup-relay.cmd           double-click entry point for the relay installer
 ├── renew-solis-login.cmd     double-click when a SolisCloud login needs renewing
 ├── scripts/
@@ -1010,13 +1038,33 @@ solar-lens/
 │   ├── unit/timezone.test.ts    plant timezones and where a plant's day begins
 │   ├── unit/relays.test.ts      relay reports, login expiry, and relay naming
 │   ├── fixtures/               captured vendor payloads, scrubbed of identifiers
+│   ├── unit/release-version.test.ts  the guide's release is the package's
 │   ├── e2e/push.spec.ts         turning notifications to a closed browser on and off
+│   ├── e2e/guide.spec.ts        the ? guide
+│   ├── e2e/history-systems.spec.ts  Historical Data, one system or all
+│   ├── e2e/new-version.spec.ts  the reload notice after a release
+│   ├── e2e/phone-width.spec.ts  no view wider than a phone
+│   ├── e2e/export-and-notify.spec.ts  Download CSV, and while-open notifications
+│   ├── e2e/daylight-saving.spec.ts  the morning the clocks go back
 │   └── e2e/dashboard.spec.ts    the dashboard, desktop and mobile
 ├── CHANGELOG.md              release history, newest first
 ├── docs/handoff.md           running, repairing and handing over the system
 ├── docs/api-notes.md         observed vendor field names and conventions
 └── docs/feature-gaps.md      SolisCloud vs SolarMan vs SolarLens, feature by feature
 ```
+
+### Finding your way around the code
+
+Every source file starts with a comment saying what it is for and how it fits
+with the others, so opening a file is the quickest way to learn it. Three
+places to start:
+
+- **`src/index.ts`** - every route and the cron. Follow a route to the function
+  it calls in `src/db.ts` (all the SQL) or `src/push.ts` (notifications).
+- **`public/index.html`** - the whole dashboard. Its script opens with a map of
+  its sections in order; search for `---------- <name>` to jump to one.
+- **`docs/handoff.md`** - the system as a whole: how data flows, the file-by-file
+  tour, the data model, and what has gone wrong before and why.
 
 ## Troubleshooting
 

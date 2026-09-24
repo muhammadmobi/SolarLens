@@ -1,3 +1,13 @@
+/**
+ * One cron run: build a client for every vendor whose secrets are present, and
+ * for each of them list the plants, list the inverters, and store a reading for
+ * each. Slower things - fault history hourly, the vendor's own period totals
+ * daily - ride along through pollExtras when they are due.
+ *
+ * SolisCloud normally has no client here: its portal cannot be read from a
+ * server, so a relay laptop pushes its readings to /api/ingest instead (see
+ * agent/solis-relay.mjs). It appears here only once an official API key is set.
+ */
 import type { Env } from './db';
 import { insertReading, isDue, logPoll, markDone, tokenStore, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods } from './db';
 import type { Period } from './providers/events';
@@ -58,6 +68,11 @@ export interface PollSummary {
   error?: string;
 }
 
+/**
+ * Poll one vendor end to end and log the outcome. A failure is caught and
+ * written to the poll log rather than thrown, so one vendor being down never
+ * stops the other being read.
+ */
 async function pollProvider(env: Env, p: Provider): Promise<PollSummary> {
   const wanted = plantFilter(env);
   let inverters = 0;

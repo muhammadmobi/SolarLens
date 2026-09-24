@@ -61,6 +61,7 @@ const secrets = (process.env.PRIVACY_VALUES ?? '')
   .map((s) => s.trim())
   .filter((s) => s.length >= 4);
 
+// Run git and return what it printed.
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 
 /** Every rule returns the reason it refused a line, or null. */
@@ -99,6 +100,7 @@ const rules = [
 ];
 
 const findings = [];
+/** Check every line of `text` against every rule, recording each refusal against `where`. */
 const scan = (where, text) => {
   text.split(/\r?\n/).forEach((line, i) => {
     for (const rule of rules) {

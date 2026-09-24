@@ -1,3 +1,13 @@
+/**
+ * The shapes every vendor is normalised into.
+ *
+ * SolisCloud and SolarMan describe the same things in different words, units
+ * and nesting. Each provider (soliscloud.ts, solarman.ts, solarman-web.ts)
+ * turns its vendor's answers into these types, and nothing past the provider
+ * ever sees a vendor's own field names. Power is watts, energy kWh, times epoch
+ * seconds, and a figure the vendor did not report is null - never zero, because
+ * zero is a measurement.
+ */
 import type { Alarm, Period } from './events';
 
 export type ProviderId = 'soliscloud' | 'solarman';
@@ -125,6 +135,7 @@ export interface Metrics {
   gridStatus: string | null;
 }
 
+/** A Metrics with every figure null: the starting point a provider fills in. */
 export function emptyMetrics(): Metrics {
   return {
     genMonthKwh: null, genYearKwh: null, genTotalKwh: null,

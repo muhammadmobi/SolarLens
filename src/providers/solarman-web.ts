@@ -101,6 +101,7 @@ export class SolarmanWebProvider implements Provider {
 
   private plants = new Map<string, Plant>();
 
+  /** Every plant the portal account can see, remembered for its zone and name. */
   async listPlants(): Promise<Plant[]> {
     const json = await this.call<{ data?: Rec[] }>('POST', '/maintain-s/operating/station/search', {});
     const plants = (json.data ?? []).map((s) => ({
@@ -114,6 +115,10 @@ export class SolarmanWebProvider implements Provider {
     return plants;
   }
 
+  /**
+   * The portal treats the plant as the unit: one Inverter standing for the
+   * station, whose readings come from the station snapshot below.
+   */
   async listInverters(plantId: string): Promise<Inverter[]> {
     const plant = this.plants.get(plantId) ?? { id: plantId, name: `Station ${plantId}` };
     return [stationInverter(plant)];
@@ -216,6 +221,7 @@ export class SolarmanWebProvider implements Provider {
     return solarmanPeriods(plantId, month ? 'month' : 'year', year, json.records ?? []);
   }
 
+  /** The station's newest snapshot as a Reading. */
   async getReading(inv: Inverter): Promise<Reading | null> {
     if (!inv.id.startsWith(STATION_PREFIX)) return null;
     // operating/system is the richest single snapshot: live power + battery +

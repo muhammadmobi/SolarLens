@@ -32,6 +32,10 @@ function assetsStub(): Fetcher {
   } as unknown as Fetcher;
 }
 
+/**
+ * A Worker ready to take requests: a fresh database, test tokens, and whatever
+ * bindings the test overrides - VAPID_KEY for push, say, or a vendor's secrets.
+ */
 export function createHarness(overrides: Partial<Env> = {}): Harness {
   const d1 = createTestD1();
   const env: Env = {

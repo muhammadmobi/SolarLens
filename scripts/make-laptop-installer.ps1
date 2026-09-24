@@ -28,6 +28,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Output helpers: a success, a warning, and a stop with a reason.
 function Ok($t)   { Write-Host "    OK  $t" -ForegroundColor Green }
 function Warn($t) { Write-Host "    !!  $t" -ForegroundColor Yellow }
 function Die($t)  { Write-Host "    XX  $t" -ForegroundColor Red; exit 1 }

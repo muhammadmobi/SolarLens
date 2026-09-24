@@ -689,6 +689,37 @@
 </div>
 
 <script>
+/*
+  The whole dashboard is this one script: no framework, no build step. It
+  fetches JSON from the Worker's /api routes and draws each view as an HTML
+  string into <main id="view">. Its parts, in the order they appear - search
+  for "---------- <name>" to jump to one:
+
+    setup            how often to fetch, and the one `state` object every view reads
+    history as a file    Download CSV on Historical Data
+    notifications    "Tell me when something changes", while the page is open
+    notifications to a closed browser (Web Push)    the phone half
+    formatting       watts, kWh, dates, "5 min ago", HTML escaping
+    time and days    each plant's own midnight, and which day a reading belongs to
+    batteries        whether a system has one, and its derived cycle count
+    charts           sparklines, one system's day curve, the shared chart
+    energy flow      the solar / house / grid / battery diagram
+    power            the Power tab
+    overview         the Overview tab
+    alerts           the Alerts tab: what is wrong now, and fault history
+    historical data  the Historical Data tab
+    devices          the Devices tab: hardware and SolisCloud relays
+    system detail    one system in full: the blocks Power and a system page share
+    the guide        the ? page
+    routing          which view the address (#/...) asks for; TV mode
+    loading data     fetching from /api, on a timer and on coming back to the tab
+    theme            light, dark, or follow the device
+    a new version    offering a reload when a release is out
+
+  Everything a view needs is in `state` (below): state.latest from
+  /api/latest, state.series from /api/series, and so on. A view reads state and
+  writes HTML; refresh() fills state and asks the current view to draw again.
+*/
 (() => {
   const $ = (id) => document.getElementById(id);
   // What is actually running: this script and the page's styles, exactly as
@@ -696,6 +727,7 @@
   // is only set during that - for the new-version check at the foot of this file.
   const RUNNING_SCRIPT = document.currentScript ? document.currentScript.textContent : null;
   const RUNNING_STYLE = document.querySelector('head style')?.textContent ?? null;
+  // ---------- setup ----------
   /**
    * How often to ask.
    *
@@ -727,10 +759,15 @@
   const savedHidden = (() => {
     try { return new Set(JSON.parse(localStorage.getItem('sl-hidden') || '[]')); } catch { return new Set(); }
   })();
+  // Everything the views draw from, filled by refresh() and the load*()
+  // functions: the newest reading per system, today's samples, the hardware,
+  // the poll log, and which chart lines the reader has switched off.
   const state = { latest: null, series: null, devices: [], health: null, error: null, hidden: savedHidden };
 
+  // Each vendor's colour, for chart lines and accents.
   const colorFor = (p) => ({ soliscloud: 'var(--solis)', solarman: 'var(--solarman)', local: 'var(--local)' }[p] || 'var(--muted)');
 
+  // ---------- history as a file ----------
   /**
    * History, as a file.
    *
@@ -752,6 +789,7 @@
     return /[",\n\r]/.test(text) ? '"' + text.split('"').join('""') + '"' : text;
   };
 
+  /** A header and rows as CSV text, with Windows line endings Excel expects. */
   function toCsv(header, rows) {
     return [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
   }
@@ -776,7 +814,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  /** The Historical tab's rows, in the shape they are shown in. */
+  // ---------- notifications ----------
   /**
    * Telling you once, when something changes.
    *
@@ -789,9 +827,7 @@
    * Deliberately modest about what it claims. The browser only runs this page
    * while a tab holds it open, so this is a louder dashboard rather than a
    * pager: a machine that is asleep tells nobody anything. Notifications that
-   * arrive with the browser closed need Web Push, a key pair and a
-   * subscription per device, which is a bigger thing and is written up in
-   * docs/feature-gaps.md rather than half-built here.
+   * reach a closed browser are the Web Push half, in the next section.
    *
    * Permission is asked for only when the switch is turned on, never on load.
    */
@@ -818,6 +854,10 @@
     return rows;
   }
 
+  /**
+   * Raise a browser notification for each alert that was not there before.
+   * Called after every refresh; does nothing unless the switch is on.
+   */
   function notifyOfAlerts() {
     if (!notifyOn()) return;
     const rows = currentAlertRows();
@@ -891,11 +931,16 @@
   let pushTypedKey = '';
   let pushNote = '';
 
+  /** The page's service worker - registered now if it was not yet - once it is ready. */
   async function pushRegistration() {
     const reg = (await navigator.serviceWorker.getRegistration()) ?? (await navigator.serviceWorker.register('/sw.js'));
     return navigator.serviceWorker.ready.then(() => reg);
   }
 
+  /**
+   * Where this device stands: push unsupported, not set up on the server, or
+   * set up and either on or off here - with what is needed to change it.
+   */
   async function pushState() {
     if (!pushSupported()) return { kind: 'unsupported' };
     try {
@@ -911,6 +956,7 @@
     }
   }
 
+  // A POST to one of the push routes, with the typed key when there is one.
   const pushPost = (path, body, key) => fetch(path, {
     method: 'POST',
     credentials: 'same-origin',
@@ -918,6 +964,11 @@
     body: JSON.stringify(body),
   });
 
+  /**
+   * Turn notifications on for this device: ask the browser for permission,
+   * subscribe with the server's public key, and hand the subscription to the
+   * server. Returns a note for the reader, or needKey when the server wants one.
+   */
   async function pushOn(st, key) {
     const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
     if (permission !== 'granted') return { note: 'This browser refused permission to notify. Allow notifications for this site and try again.' };
@@ -932,6 +983,7 @@
     return { note: why ? `The server refused: ${why}.` : 'The server refused.' };
   }
 
+  /** Draw the "Also when this browser is closed" part of the Alerts tab for the state it is in. */
   async function fillPushRow(extra = {}) {
     const row = $('pushrow');
     if (!row) return;
@@ -1020,11 +1072,14 @@
     const slug = view?.system ? `${String(view.system).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-` : '';
     return { header, body, name: `solarlens-history-${slug}${group}-${new Date().toISOString().slice(0, 10)}.csv` };
   }
+  // ---------- formatting ----------
   // The same vendor in a colour that can be read as small bold type: axe
   // measured the brand orange at 3.42:1 against white, and 4.5 is the bar.
   const inkFor = (p) => ({ soliscloud: 'var(--solis-ink)', solarman: 'var(--solarman-ink)', local: 'var(--local-ink)' }[p] || 'var(--muted)');
   const providerName = (p) => p === 'soliscloud' ? 'SolisCloud' : p === 'solarman' ? 'SolarMan' : p;
 
+  // Watts as [number, unit] - "8.47", "kW" - so a view can set the unit
+  // smaller; fmtWs as one string; fmtKwh as energy. A missing figure is a dash.
   const fmtW = (w) => {
     if (w === null || w === undefined) return ['—', ''];
     const a = Math.abs(w);
@@ -1040,6 +1095,7 @@
   const share = (part, whole) => (part == null || whole == null || !(whole > 0))
     ? null : Math.min(100, Math.round((part / whole) * 100));
   const fmtDate = (s) => !s ? '—' : new Date(s * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  // How long ago an epoch-seconds time was, in the words the page uses.
   const ago = (s) => {
     if (!s) return 'never';
     const d = Math.max(0, Math.floor(Date.now() / 1000) - s);
@@ -1047,7 +1103,10 @@
     if (d < 3600) return `${Math.floor(d / 60)} min ago`;
     return `${Math.floor(d / 3600)} h ${Math.floor((d % 3600) / 60)} min ago`;
   };
+  // Every vendor string goes through esc() before it becomes HTML, so a plant
+  // name can never be markup.
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // ---------- time and days ----------
   const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000); };
   // Midnight where the panels are. A solar day ends when the sun sets on the
   // array, so a reader in another country was being shown two half-days glued
@@ -1098,6 +1157,7 @@
     const morning = first && first.tz_offset_sec != null ? first.tz_offset_sec : off;
     return [midnightNow + (off - morning), midnightNow + 86400];
   };
+  // JSON stored as text (metrics, raw) as an object, or null.
   const parse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
   // One fetch covers every system, and it opens at the earliest plant's
   // midnight - so a system further east is handed samples from its own
@@ -1109,6 +1169,7 @@
     return (pts || []).filter((p) => plantDay(p.ts, p.tz_offset_sec ?? off) === today);
   };
 
+  /** GET one /api route as JSON; a refusal becomes an 'unauthorized' error the router shows. */
   async function api(path) {
     const r = await fetch(path, { credentials: 'same-origin' });
     if (r.status === 401) throw new Error('unauthorized');
@@ -1126,6 +1187,7 @@
     return '—';
   };
 
+  // The hardware records that belong to one system.
   const plantIdOf = (inv) => inv.plant_id || String(inv.id || '').split(':').pop();
   const devicesFor = (inv) => state.devices.filter(
     (d) => d.provider === inv.provider && (!d.plant_id || d.plant_id === plantIdOf(inv)));
@@ -1144,6 +1206,8 @@
     const kwh = (bat.ratedCapacityAh * bat.nominalVoltageV) / 1000;
     return kwh > 0 ? kwh : null;
   };
+  // ---------- batteries ----------
+  // Equivalent full cycles: lifetime charge over the pack's usable capacity.
   const cycles = (m, bat) => {
     const kwh = packKwh(bat);
     return kwh && m?.battChargeTotalKwh != null ? m.battChargeTotalKwh / kwh : null;
@@ -1167,6 +1231,7 @@
     };
   }
 
+  // Grid and battery power in words: arrows for import and export, "idle" for drift.
   const gridText = (v) => v === null || v === undefined ? '—'
     : v >= 0 ? `↓ ${fmtWs(v)}` : `↑ ${fmtWs(-v)}`;
   // A few tens of watts either way is BMS/meter drift, not real charge or
@@ -1184,6 +1249,8 @@
     </svg>`;
   }
 
+  // ---------- charts ----------
+  /** A small line of today's power, for a card. */
   function sparkline(points, color) {
     const W = 300, H = 68, P = 3;
     if (points.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"></svg>`;
@@ -1435,6 +1502,11 @@
     return `<svg class="combined" viewBox="0 0 ${W} ${H}">${out}</svg>`;
   }
 
+  // ---------- power ----------
+  /**
+   * The Power tab: the shared chart of every system, then each system in full,
+   * one collapsible section each (see detailBlocks).
+   */
   function renderPower() {
     const invs = state.latest?.inverters ?? [];
     const byInv = {};
@@ -1472,7 +1544,6 @@
     bindRawFilters();
   }
 
-  // ---------- overview ----------
   // ---------- overview ----------
 
   /**
@@ -1731,6 +1802,10 @@
     return '<div class="ovnodes">' + parts.join('') + '</div>';
   }
 
+  /**
+   * The Overview tab: one column per system - its flow diagram, today's
+   * figures and its curve - sized to fit a laptop screen without scrolling.
+   */
   function renderOverview() {
     const invs = state.latest?.inverters ?? [];
     const byInv = {};
@@ -1850,6 +1925,7 @@
   const RELAY_QUIET_S = 7 * 86400;
   const RENEW_HOW = 'On that computer, double-click renew-solis-login.cmd in the SolarLens folder and log in.';
 
+  /** A relay's SolisCloud login: expired, how long it has left, and whether that is soon. */
   function relayLogin(r, now = Math.floor(Date.now() / 1000)) {
     const expired = r.state === 'login-expired' || (r.login_expires_at != null && r.login_expires_at <= now);
     const left = r.login_expires_at != null ? r.login_expires_at - now : null;
@@ -1860,6 +1936,7 @@
     : s < 48 * 3600 ? `in ${Math.round(s / 3600)} hours`
     : `in ${Math.round(s / 86400)} days`;
 
+  /** Alert rows for relay logins, shown under the SolisCloud system. */
   function relayAlerts() {
     const now = Math.floor(Date.now() / 1000);
     const relays = (state.health?.relays ?? []).filter((r) => now - r.last_seen <= RELAY_QUIET_S);
@@ -1889,6 +1966,12 @@
     return out;
   }
 
+  /**
+   * Everything wrong with one system right now, as rows of level, title,
+   * detail and source: the feed gone quiet, vendor alarms and flags, hardware,
+   * relay logins and failed polls. The Alerts tab, its badge and the
+   * notification switch all read from this one list.
+   */
   function alertsFor(inv) {
     const out = [];
     const st = statusOf(inv);
@@ -1992,6 +2075,7 @@
     return list;
   }
 
+  // The number on the Alerts tab.
   function alertCount() {
     return (state.latest?.inverters ?? []).reduce((a, i) => a + alertsFor(i).length, 0);
   }
@@ -2066,6 +2150,7 @@
       ${rows.length > FAULTS_SHOWN ? `<div class="ac-sub">Showing the newest ${FAULTS_SHOWN} of ${rows.length}.</div>` : ''}`;
   }
 
+  /** The Alerts tab: each system's current alerts, the notification switches, and fault history. */
   function renderAlerts() {
     const invs = state.latest?.inverters ?? [];
     if (!state.alarms || (!state.alarms.loading && Date.now() - state.alarms.at > ALARMS_STALE_MS)) loadAlarms();
@@ -2189,6 +2274,7 @@
     return new Date(Date.UTC(y, Number(k.slice(5, 7)), 0)).getUTCDate();
   }
 
+  /** Daily rows folded into months or years, summing energy and keeping the day's peak. */
   function rollup(rows, group) {
     const key = (d) => (group === 'month' ? d.slice(0, 7) : d.slice(0, 4));
     const span = (k) => periodSpan(k, group);
@@ -2243,6 +2329,7 @@
     return out.sort((a, b) => (a.day < b.day ? 1 : -1));
   }
 
+  // The vendors' own month and year totals, fetched once they are first needed.
   async function loadPeriods() {
     state.periods = { loading: true };
     try {
@@ -2253,6 +2340,7 @@
     if (location.hash === '#/history') renderHistory();
   }
 
+  // One row per system per day for the last `days` days.
   async function loadHistory(days) {
     state.historyDays = days;
     try {
@@ -2263,6 +2351,10 @@
     if (location.hash === '#/history') renderHistory();
   }
 
+  /**
+   * The Historical Data tab: the system switch, the grouping and range
+   * buttons, Download CSV, then each chosen system's bars, table and totals.
+   */
   function renderHistory() {
     const invs = state.latest?.inverters ?? [];
     if (!state.history) { loadHistory(state.historyDays ?? 30); }
@@ -2409,6 +2501,7 @@
     }
   }
 
+  // Wire the Historical Data buttons: which system, which grouping, which range.
   function bindRange() {
     for (const b of document.querySelectorAll('.sysbtn')) {
       b.onclick = () => {
@@ -2585,6 +2678,7 @@
     </div>`;
   }
 
+  /** The PV strings card: each MPPT string's power, voltage and current. */
   function stringsCard(invDev, accent, offline) {
     // strings === null means the vendor reports no per-string registers at all;
     // an empty array means it does, but none are producing (night). Only the
@@ -2618,6 +2712,7 @@
     return `<section class="card"><h3>PV strings · MPPT</h3><div class="body">${body}</div></section>`;
   }
 
+  /** The AC output card: each phase's voltage and current, frequency, power factor. */
   function acCard(invDev) {
     if (!invDev) return '';
     const phases = parse(invDev.ac_phases);
@@ -2635,6 +2730,7 @@
       <dl class="kv">${rows}${tail}</dl></div></section>`;
   }
 
+  /** Every figure the vendor sent, as a filterable table, for questions the page does not answer. */
   function rawCard(inv) {
     const raw = parse(inv.raw);
     if (!raw || typeof raw !== 'object') return '';
@@ -2691,6 +2787,11 @@
     return live === connected.length ? `${live} producing` : `${live} of ${connected.length}`;
   };
 
+  /**
+   * One system in full, as pieces a view assembles: its header, flow diagram,
+   * the cards (energy, grid, battery, strings, AC, device) and raw telemetry.
+   * Power shows these under each system; a system's own page shows one set.
+   */
   function detailBlocks(inv) {
     const m = parse(inv.metrics) ?? {};
     const st = statusOf(inv);
@@ -2832,6 +2933,7 @@
     }
   }
 
+  /** A system's own page (#/system/<id>), opened by tapping it on the Overview. */
   function renderSystem(id) {
     const inv = (state.latest?.inverters ?? []).find((i) => i.id === id);
     if (!inv) { $('view').innerHTML = `<a class="back" href="#/">← Overview</a><div class="card"><div class="empty">Unknown system.</div></div>`; return; }
@@ -3066,6 +3168,12 @@
     renderOverview();
   }
 
+  // ---------- loading data ----------
+  /**
+   * Fetch what the page shows and draw it again: the newest readings, today's
+   * samples, the hardware and the poll log, all four at once. Skipped while
+   * the tab is hidden unless forced; runs on a timer (see schedule).
+   */
   async function refresh(force = false) {
     // Nobody is reading a hidden tab. visibilitychange refreshes on return.
     if (document.hidden && !force) return;
@@ -3157,6 +3265,7 @@
   const THEME_ICON = { auto: '🖥️', light: '☀️', dark: '🌙' };
   let theme = 'auto';
   try { const t = localStorage.getItem('sl-theme'); if (THEMES.includes(t)) theme = t; } catch { /* private mode */ }
+  // Put the chosen theme on the page, and show which one on the button.
   function applyTheme() {
     if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', theme);
@@ -3215,6 +3324,7 @@
   let loadedVersion = null;
   let newVersionSeen = false;
 
+  /** The ETag of the page the server has now, asked for with a HEAD request. */
   async function serverVersion() {
     try {
       const res = await fetch('/', { method: 'HEAD', cache: 'no-store', credentials: 'same-origin' });
@@ -3241,6 +3351,7 @@
     }
   }
 
+  /** Compare the page on the server with the page on screen, and offer a reload when they differ. */
   async function checkForNewVersion() {
     if (newVersionSeen) return;
     const now = await serverVersion();

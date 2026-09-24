@@ -59,8 +59,10 @@ function stubFetch(routes: Array<[string, Route]>) {
   return calls;
 }
 
+// The JSON body a request was sent with.
 const jsonBody = (init?: RequestInit) => JSON.parse(String(init?.body ?? '{}'));
 
+/** A token store held in memory, standing in for the tokens table; optionally seeded with a valid token. */
 function memoryTokens(seed?: { accessToken: string; expiresAt: number }): TokenStore {
   const shelf = new Map<string, { accessToken: string; expiresAt: number }>();
   if (seed) shelf.set('solarman', seed);

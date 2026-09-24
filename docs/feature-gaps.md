@@ -7,7 +7,7 @@ throughout — an owner account cannot reach them.
 
 Observed on live owner accounts in September 2026: one on-grid plant on SolisCloud, one hybrid
 station on SolarMan. No account identifiers appear in this document. Last checked against the
-live database after 2.9.0.
+live database after 2.10.0.
 
 **Legend** — ● has it · ◐ partial · ○ does not have it
 
@@ -70,6 +70,7 @@ live database after 2.9.0.
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
 | Day / month / year / lifetime charts | ● | ● | ● by day, month and year; months and years use the vendor's own totals back to installation, each row saying whose figure it is |
+| One system's history on its own, or all together | ◐ one plant per page | ◐ one plant per page | ● a switch on Historical Data narrows charts, tables and CSV to one system, or shows every system at once |
 | Battery SOC history | ◐ | ● | ● today's charge curve with its low and high, on the system page |
 | Power-analysis view (generation vs consumption vs grid) | ◐ | ● | ○ out of scope |
 | CSV / data export | ● | ○ | ● Download CSV on the Historical Data tab: the rows on screen, by day, month or year (2.9) |
@@ -95,6 +96,9 @@ live database after 2.9.0.
 | Physical layout / site map | ● | ○ | ○ |
 | Large-screen / TV mode | ● | ○ | ● `#/tv`: no chrome, sized to the screen, keeps the display awake |
 | Native mobile app | ● | ● | ◐ installable web app — home screen, own window, offline shell; no native build |
+| Stays current after an update | ● app stores | ● app stores | ● an open dashboard offers *Reload* when a new version is out; a TV display reloads itself |
+| In-app guide to the features | ◐ help pages | ◐ help pages | ● the **?** on every page: what each tab holds, where to find things, what is new |
+| Fits a phone screen | ● native app | ● native app | ● every view held to the screen width by a test |
 | Remote control (charge schedules, export limit, firmware) | ● | ◐ | ○ **deliberately not** — read-only by design |
 | Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API, reads open, writes gated |
 

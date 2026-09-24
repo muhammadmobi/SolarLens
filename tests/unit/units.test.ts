@@ -1,3 +1,11 @@
+/**
+ * Unit conversion, the smallest and most quietly dangerous part of the project.
+ *
+ * Vendors send "1.01" with a unit string beside it - "kW", "W", "MWh" - and
+ * timestamps in seconds or milliseconds. A slip here does not crash anything; it
+ * shows a 12 kW array producing 9.47 MW, which has happened. Every conversion
+ * the providers rely on is pinned here.
+ */
 import { describe, expect, it } from 'vitest';
 import { num, pick, toEpochSeconds, toKwh, toWatts } from '../../src/providers/units';
 

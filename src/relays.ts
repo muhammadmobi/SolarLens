@@ -20,6 +20,11 @@ export interface RelayStatus {
 const STATES: readonly RelayState[] = ['ok', 'login-expired', 'error'];
 const DAY = 86400;
 
+/**
+ * Check a relay's report on itself and turn it into a RelayStatus, or say what
+ * is wrong with it. Deliberately strict: the id must be the relay's own random
+ * sixteen hex characters, never something that could be a computer's name.
+ */
 export function parseRelayStatus(body: unknown, now: number): RelayStatus | { error: string } {
   if (!body || typeof body !== 'object') return { error: 'body must be an object' };
   const b = body as Record<string, unknown>;

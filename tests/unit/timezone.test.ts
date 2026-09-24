@@ -1,3 +1,11 @@
+/**
+ * Where a plant's day begins.
+ *
+ * The vendors state a plant's time zone three different ways - SolisCloud in
+ * whole hours, SolarMan in seconds, and sometimes by name - and every daily
+ * figure is cut at the plant's own midnight, not the reader's. These check the
+ * offset is read correctly from each shape, and that midnight is computed from it.
+ */
 import { describe, expect, it } from 'vitest';
 import { tzOffsetSec } from '../../src/providers/units';
 import { dayStartSec } from '../../src/db';

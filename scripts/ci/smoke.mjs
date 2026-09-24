@@ -20,6 +20,7 @@ if (!BASE) {
 
 const FRESH_S = 90 * 60; // one feed this recent means readings are still arriving
 const checks = [];
+/** Note one check's result, and print it as it happens. */
 const record = (name, ok, detail = '') => {
   checks.push({ name, ok, detail });
   console.log(`${ok ? 'ok  ' : 'FAIL'}  ${name}${detail ? ` - ${detail}` : ''}`);

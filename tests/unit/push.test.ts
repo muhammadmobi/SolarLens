@@ -23,11 +23,13 @@ const API = 'api-token-for-tests';
 const FCM = 'https://fcm.googleapis.com/fcm/send/device-one';
 const NOW = 1_790_000_000;
 
+/** A new P-256 key pair's private half as a JWK string: what VAPID_KEY holds in production. */
 async function makeKey(): Promise<string> {
   const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
   return JSON.stringify(await crypto.subtle.exportKey('jwk', pair.privateKey));
 }
 
+// base64url back to bytes, to read the token and key the push header carries.
 const fromB64url = (s: string) =>
   Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
 
@@ -106,6 +108,7 @@ describe('what is worth waking a phone for', () => {
   beforeEach(() => { h = createHarness(); });
   afterEach(() => h.close());
 
+  // One system, and one reading from it at a given time and power.
   const plant = (over: Record<string, unknown> = {}) => upsertInverter(h.env.DB, testInverter(over) as never);
   const read = (ts: number, acPowerW: number, over: Record<string, unknown> = {}) =>
     insertReading(h.env.DB, testReading({ ts, acPowerW, ...over }) as never);
@@ -222,6 +225,7 @@ describe('announcing', () => {
   beforeEach(async () => { h = createHarness({ VAPID_KEY: await makeKey() }); });
   afterEach(() => h.close());
 
+  // A system that went quiet forty minutes ago while producing: one thing worth telling.
   async function trouble() {
     await upsertInverter(h.env.DB, testInverter() as never);
     await insertReading(h.env.DB, testReading({ ts: NOW - 40 * 60, acPowerW: 2400 }) as never);
