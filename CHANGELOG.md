@@ -44,6 +44,17 @@ checkout of any tag says which release it is.
   files say what they hold the code to, and the shared test helpers - SQLite
   behind D1, a Worker to send requests to, a stand-in push service and service
   worker - are explained where they are defined.
+- **Every CI job says how to reproduce it.** Each job in the workflows now opens
+  with what it proves and the command that runs the same check on your own
+  machine, so a red cross comes with its next step. The two tsconfig files say
+  what each type-checks and why there are two. Every test helper that builds
+  data or fakes an API has a line saying what it stands for, and one helper
+  nothing called is gone.
+- **Debugging, written down.** The README gains *Debugging a failing test* - one
+  test at a time, the browser visible, stepping through, and reading a trace -
+  and *Debugging the live system*: the Worker's live log, /api/health, a query
+  against production that reaches it in one piece, and watching a relay laptop
+  work, since a hidden relay writes no log.
 - **The documents match the code again.** Checked mechanically against it: the
   README's data model now has all eleven tables (it was missing alarms, vendor
   totals and relays), its end-to-end section describes all ten spec files rather

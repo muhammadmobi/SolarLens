@@ -11,11 +11,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const NOW = Math.floor(Date.UTC(2026, 8, 8, 9, 0, 0) / 1000);
+// One API answer with a JSON body, 200 unless a status is given.
 const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
 // A valid uncompressed P-256 point's shape: 65 bytes, the first of them 4.
 const PUBLIC_KEY = Buffer.from([4, ...Array(64).fill(7)]).toString('base64url');
 const ENDPOINT = 'https://fcm.googleapis.com/fcm/send/e2e-device';
 
+/** One system; every other data route answers empty, since only the Alerts tab matters here. */
 async function stubApi(page: Page) {
   await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters: [{
     id: 's1', name: 'On-grid Array', provider: 'soliscloud', serial: '••••1234', plant_name: 'On-grid Array',

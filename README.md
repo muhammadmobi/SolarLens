@@ -547,6 +547,31 @@ npm run test:e2e:ui         # playwright's inspector, for stepping through a fai
 
 **401 unit tests** and **364 end-to-end tests** (182 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
+### Debugging a failing test
+
+Each test's name is a sentence saying what it holds the code to, so a failure
+reads as the promise that broke. To look closer:
+
+```bash
+# One unit test file, or one test in it by part of its name
+npx vitest run tests/unit/push.test.ts
+npx vitest run tests/unit/push.test.ts -t "dusk"
+
+# One end-to-end spec, in one browser project, with the browser visible
+npx playwright test tests/e2e/guide.spec.ts --project=chrome --headed
+
+# Step through it line by line, or pick tests from a window
+npx playwright test tests/e2e/guide.spec.ts --project=chrome --debug
+npm run test:e2e:ui
+```
+
+A failed end-to-end test leaves a trace in `test-results/`. Open it with
+`npx playwright show-trace test-results/<test>/trace.zip`: it replays the test
+step by step, with the page, the network and the console at every step. On CI
+the same traces are in the run's `playwright-report` artifact. For coverage,
+`npm run test:unit:coverage` writes `coverage/index.html`, which shows the
+exact lines no test reaches.
+
 ### The frameworks, and why each
 
 | Layer | Tool | Runs against | Why not the other one |
@@ -1078,6 +1103,39 @@ is the quickest way to learn it. Three places to start:
   its sections in order; search for `---------- <name>` to jump to one.
 - **`docs/handoff.md`** - the system as a whole: how data flows, the file-by-file
   tour, the data model, and what has gone wrong before and why.
+
+## Debugging the live system
+
+- **What the Worker is doing**: `npm run cf -- tail` streams its log live -
+  every poll failure, and every failed phone notification as a line like
+  `{"push":"failed","host":"fcm.googleapis.com","status":503}`.
+- **What it last saw**: `/api/health` answers with the recent poll log, the
+  newest line per vendor feed, and every relay's state and login expiry. The
+  dashboard's footer and Devices tab show the same.
+- **What is in the database**: run a query against production with wrangler's
+  own entry point, so the statement reaches it in one piece (`npm run cf` goes
+  through a shell, which splits a statement at its spaces). Any `npm run cf`
+  command first writes the filled-in config it needs:
+
+  ```bash
+  node node_modules/wrangler/bin/wrangler.js d1 execute solar-lens --remote --json --config .wrangler.local.jsonc --command "SELECT provider, ok, detail FROM poll_log ORDER BY ts DESC LIMIT 10"
+  ```
+
+  Use `--command`, not `--file`, for a query: against the remote database a
+  file is run as an import, and answers with statistics instead of rows.
+- **What a relay laptop is doing**: the hidden relay writes no log - its output
+  goes nowhere, by design, so nothing appears on screen. Its state and last
+  report are on the Devices tab. To watch it work, stop the task and run one
+  cycle in a visible window, in PowerShell from the SolarLens folder:
+
+  ```powershell
+  Stop-ScheduledTask -TaskName 'SolarLens relay'
+  $env:RELAY_HEADLESS = '0'; $env:RELAY_ONCE = '1'; node agent\solis-relay.mjs
+  Start-ScheduledTask -TaskName 'SolarLens relay'
+  ```
+
+  It logs each step with the time, and exits 0 when a reading went through, 3
+  when SolisCloud wants a login, and 1 on anything else.
 
 ## Troubleshooting
 

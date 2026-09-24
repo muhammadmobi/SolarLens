@@ -10,8 +10,10 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const NOW = Math.floor(Date.UTC(2026, 8, 8, 9, 0, 0) / 1000);
+// One API answer: a 200 with a JSON body, for page.route to fulfil.
 const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
+// One system as /api/latest returns it; a test overrides what it is about.
 const inverter = (over: Record<string, unknown> = {}) => ({
   id: 's1', name: 'On-grid Array', provider: 'soliscloud', serial: '••••1234', plant_name: 'On-grid Array',
   capacity_w: 12_000, ts: NOW - 60, ac_power_w: 8470, dc_power_w: 8900, today_kwh: 34.1, total_kwh: 48_000,

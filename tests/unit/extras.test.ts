@@ -13,6 +13,7 @@ function fakeDb() {
   const kv = new Map<string, number>();
   const alarms: unknown[][] = [];
   const periods: unknown[][] = [];
+  // A D1 statement stand-in: remembers the SQL and arguments, and answers from the maps above.
   const stmt = (sql: string, args: unknown[] = []) => ({
     bind: (...a: unknown[]) => stmt(sql, a),
     first: async () => (sql.includes('FROM kv') && kv.has(String(args[0])) ? { expires_at: kv.get(String(args[0])) } : null),

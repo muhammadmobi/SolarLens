@@ -57,11 +57,6 @@ export function createTestD1(options: { migrationsDir?: string } = {}): TestD1 {
   const sqlite = new DatabaseSync(':memory:');
   const sql: string[] = [];
 
-  const bindValues = (stmt: ReturnType<DatabaseSync['prepare']>, numbered: boolean, values: unknown[]) => {
-    if (!numbered) return stmt as unknown as { all(...a: unknown[]): Row[] };
-    return stmt as unknown as { all(...a: unknown[]): Row[] };
-  };
-
   // Run one statement the way D1 would: ?1-style parameters, and the result
   // shaped as D1 shapes it - rows for all, one row for first, changes for run.
   const run = (text: string, values: unknown[], kind: 'all' | 'run' | 'get') => {

@@ -30,6 +30,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Asks Copilot, and the owner when the pull request is someone else's. If
+  # Copilot does not start a review after a push, request it again from the
+  # pull request's Reviewers menu - see the README's review section.
   request:
     name: Ask for a review
     if: github.event.pull_request.draft == false

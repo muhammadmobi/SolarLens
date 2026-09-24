@@ -10,8 +10,10 @@ import { readFileSync } from 'node:fs';
 
 const NOW = Math.floor(Date.UTC(2026, 8, 8, 9, 0, 0) / 1000);
 const VERSION = JSON.parse(readFileSync('package.json', 'utf8')).version as string;
+// One API answer: a 200 with a JSON body, for page.route to fulfil.
 const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
+/** Two systems, one with a battery, so the guide has something to name. */
 async function stubApi(page: Page) {
   await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters: [
     { id: 's1', name: 'On-grid Array', provider: 'soliscloud', capacity_w: 12_000, ts: NOW - 60, ac_power_w: 8470,

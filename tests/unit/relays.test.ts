@@ -54,6 +54,7 @@ describe('parseRelayStatus', () => {
 });
 
 describe('publicRelays', () => {
+  // A stored relay row, with only its id and nickname varied.
   const row = (id: string, name: string | null) => ({ id, name, state: 'ok', login_expires_at: NOW, first_seen: NOW, last_seen: NOW, last_ok_at: NOW });
 
   it('never lets a relay id out', () => {
@@ -82,6 +83,7 @@ describe('onceExitCode', () => {
 });
 
 describe('relay-status helpers', () => {
+  // A browser cookie as Playwright reports it: the portal's login token by default.
   const cookie = (over: Record<string, unknown> = {}) => ({ name: 'token', domain: '.soliscloud.com', expires: NOW + 7 * DAY + 0.5, ...over });
 
   it('reads the login expiry from the portal\'s token cookie', () => {

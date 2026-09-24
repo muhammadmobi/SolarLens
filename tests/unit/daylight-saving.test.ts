@@ -19,6 +19,7 @@ import { offsetOfZoneAt, tzNameOf, tzOffsetSec } from '../../src/providers/units
 const SUMMER = Math.floor(Date.UTC(2026, 6, 15, 12, 0, 0) / 1000);   // 15 July, midday UTC
 const WINTER = Math.floor(Date.UTC(2026, 10, 15, 12, 0, 0) / 1000);  // 15 November, midday UTC
 
+// A plant in Europe/London, whose clocks change twice a year.
 const london = (over: Record<string, unknown> = {}) => ({
   id: 'solarman:station:london', provider: 'solarman', vendorId: 'london', serial: null,
   name: 'London Plant', plantId: 'london', plantName: 'London Plant', capacityW: 4000,
@@ -26,6 +27,7 @@ const london = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+// One reading from it at a given moment.
 const reading = (ts: number, over: Record<string, unknown> = {}) => ({
   inverterId: 'solarman:station:london', ts, source: 'test', acPowerW: 500,
   dcPowerW: null, todayKwh: 10, totalKwh: null, batterySoc: null, batteryPowerW: null,

@@ -28,6 +28,7 @@ const INGEST = 'ingest-token-for-tests';
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('POST /api/ingest, the route a local agent uses', () => {
+  // A POST to /api/ingest with the relay's token.
   const push = (body: unknown) => ({
     method: 'POST',
     headers: { 'content-type': 'application/json', ...bearer(INGEST) },

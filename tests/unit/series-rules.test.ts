@@ -13,6 +13,7 @@ import { createTestD1 } from '../helpers/d1';
 import { dayStartSec, earliestDayStart, insertReading, nowSec, series, upsertInverter } from '../../src/db';
 import { aliasFor } from '../../src/public-view';
 
+// A system, and a reading from it, with only what a test cares about set.
 const inverter = (over: Record<string, unknown> = {}) => ({
   id: 'soliscloud:station:p1', provider: 'soliscloud', vendorId: 'p1', serial: null,
   name: 'Plant', plantId: 'p1', plantName: 'Plant', capacityW: 12_000, tzOffsetSec: 5 * 3600,

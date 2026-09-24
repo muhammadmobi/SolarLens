@@ -13,6 +13,7 @@ import { insertReading, upsertInverter } from '../../src/db';
 
 const INGEST = 'ingest-token-for-tests';
 const API = 'api-token-for-tests';
+// A POST with the relay's token, as the ingest routes expect.
 const post = (body: unknown) => ({
   method: 'POST',
   headers: { 'content-type': 'application/json', ...bearer(INGEST) },
@@ -329,6 +330,7 @@ describe('/api/ingest/alarms and /api/alarms', () => {
 });
 
 describe('/api/ingest/periods', () => {
+  // One point of a SolisCloud month chart, as the relay forwards it.
   const point = (over: Record<string, unknown> = {}) => ({ dateStr: '2026-09-01', energy: 34.1, energyStr: 'kWh', ...over });
 
   it('stores totals, and serves back the months and years the chart draws', async () => {
@@ -374,6 +376,7 @@ describe('/api/ingest/periods', () => {
 
 describe('/api/ingest/history', () => {
   const noon = Date.UTC(2026, 8, 8, 7, 0, 0);
+  // A day curve as the relay forwards it: times, and power in the stated unit.
   const chart = (over: Record<string, unknown> = {}) => ({
     time: [noon, noon + 300_000, noon + 600_000],
     power: [8.47, 9.17, 8.9],

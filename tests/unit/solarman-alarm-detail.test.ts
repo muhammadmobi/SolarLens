@@ -106,6 +106,7 @@ function stubFetch(routes: Array<[string, Route]>) {
   return calls;
 }
 
+/** A token store in memory, already holding a valid portal token, so no refresh is attempted. */
 function tokens(): TokenStore {
   const shelf = new Map([['solarman-web', { accessToken: 'T', expiresAt: Math.floor(Date.now() / 1000) + 3600 }]]);
   return {
