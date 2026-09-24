@@ -356,11 +356,20 @@ export async function earliestDayStart(
   fallbackOffsetSec: number,
 ): Promise<number> {
   const { results } = await db
-    .prepare('SELECT tz_offset_sec FROM inverters WHERE enabled = 1')
-    .all<{ tz_offset_sec: number | null }>();
-  const starts = (results ?? []).map((r) =>
-    dayStartSec(atSec, r.tz_offset_sec ?? fallbackOffsetSec),
-  );
+    .prepare('SELECT tz_name, tz_offset_sec FROM inverters WHERE enabled = 1')
+    .all<{ tz_name: string | null; tz_offset_sec: number | null }>();
+  const starts = (results ?? []).map((r) => {
+    const now = r.tz_offset_sec ?? fallbackOffsetSec;
+    const naive = dayStartSec(atSec, now);
+    if (!r.tz_name) return naive;
+    // On the morning after the clocks go back, the day began an hour before
+    // the offset now in force says it did, and a window that opens at the
+    // later of the two simply does not contain the first hour - which the
+    // page cannot then filter its way back to. Taking the earlier of the two
+    // costs one extra sample in the other direction, and loses nothing.
+    const atMidnight = offsetOfZoneAt(r.tz_name, naive) ?? now;
+    return Math.min(naive, dayStartSec(atSec, atMidnight));
+  });
   return starts.length ? Math.min(...starts) : dayStartSec(atSec, fallbackOffsetSec);
 }
 

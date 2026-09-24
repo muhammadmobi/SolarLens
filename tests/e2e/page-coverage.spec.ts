@@ -18,7 +18,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 /**
  * Set below what the walk-through achieves, with room for the code to grow.
  *
- * Measured at 67.5% when this was written, of 120 kB of script. It had been
+ * Measured at 67.3% when this was written, of 120 kB of script. It had been
  * 69.6% an hour earlier, and the difference was not the machine: this change
  * added the CSV writer and the notification switch, whose branches the
  * walk-through only partly reaches, so the same suite covers a larger page.
@@ -37,6 +37,10 @@ test.describe.configure({ mode: 'serial' });
 
 test('the end-to-end suite runs most of the dashboard script', async ({ page, browserName }, testInfo) => {
   test.skip(browserName !== 'chromium', 'V8 coverage is a Chromium facility');
+  // Both projects are Chromium, and both would write the same file: the number
+  // kept would be whichever finished last. The desktop walk is the one the
+  // README quotes, so it is the one that measures.
+  test.skip(testInfo.project.name !== 'chrome', 'measured once, on the desktop walk-through');
 
   const NOW = Math.floor(Date.UTC(2026, 8, 8, 9, 0, 0) / 1000);
   const json = (body: unknown) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
