@@ -150,12 +150,15 @@ quota, `/api/ingest/*` because they write.
 | `public/sw.js` | The service worker: network-first fetching for the installable app, and what a push shows. |
 | `scripts/` | Operational tooling: the wrangler wrapper and its shared config step (`wrangler-config.mjs`), the relay installer, login renewal, token rotation, the capture tool, the push key (`make-vapid-key.mjs`), the reading-offset backfill, and `scripts/ci/` (the guards). |
 
-Every one of these files starts with a comment saying what it is for, and each
-function worth explaining has one above it - so reading a file top down is the
-intended way in. The tests follow the same rule: each file says what it holds
-the code to, and the helpers it uses (a SQLite database behind D1's interface,
-a Worker to send requests to, a stand-in push service) are explained where they
-are defined in `tests/helpers/`.
+Every one of these files starts with a comment saying what it is for - except
+`public/index.html`, which opens with its HTML; its explanation is the map at
+the start of its script - and each function worth explaining has one above it,
+so reading a file top down is the intended way in. The tests follow the same
+rule: each file says what it holds the code to. The shared helpers - a SQLite
+database behind D1's interface, and a Worker to send requests to - are in
+`tests/helpers/`; the stand-ins for a push service and for a service worker's
+scope belong to one test each, and are explained where they are defined in
+`tests/unit/push.test.ts` and `tests/unit/service-worker.test.ts`.
 
 ## 5. The data model
 

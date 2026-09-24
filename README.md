@@ -1065,11 +1065,13 @@ solar-lens/
 ### Finding your way around the code
 
 Every source file starts with a comment saying what it is for and how it fits
-with the others, so opening a file is the quickest way to learn it. Three
-places to start:
+with the others - except the dashboard, `public/index.html`, which is HTML
+first: its explanation is the map at the start of its script. Opening a file
+is the quickest way to learn it. Three places to start:
 
 - **`src/index.ts`** - every route and the cron. Follow a route to the function
-  it calls in `src/db.ts` (all the SQL) or `src/push.ts` (notifications).
+  it calls in `src/db.ts` (most of the SQL) or `src/push.ts` (notifications,
+  with its own tables).
 - **`public/index.html`** - the whole dashboard. Its script opens with a map of
   its sections in order; search for `---------- <name>` to jump to one.
 - **`docs/handoff.md`** - the system as a whole: how data flows, the file-by-file
