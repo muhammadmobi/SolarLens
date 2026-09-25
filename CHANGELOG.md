@@ -84,10 +84,13 @@ checkout of any tag says which release it is.
 
 ### Changed
 
-- **Reads send `Cache-Control: private`** rather than `public`: an answer can
-  now depend on who is asking.
+- **Reads send `Cache-Control: no-store`** rather than a minute of public
+  caching: an answer now depends on who is asking, and no cache may go on
+  showing it after a sign-out.
 - **`/auth?t=<API_TOKEN>` signs the browser in with a proper session** instead
-  of leaving the token itself in a cookie. The 2.x cookie is still honoured.
+  of leaving the token itself in a cookie. That 2.x cookie is no longer
+  accepted, and is cleared when seen, since nothing could sign it out: a
+  browser that had it signs in once.
 - **The deploy's smoke test** reads freshness from `/api/status`, and on a
   private dashboard checks that a signed-out caller is asked to sign in.
 - **Replacing `API_TOKEN`** now keeps every signed-in device signed in, but the

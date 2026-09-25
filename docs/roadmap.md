@@ -3,9 +3,11 @@
 The plan for SolarLens 3.0, agreed in September 2026. Everything below lands on
 one branch, `roadmap`, as one pull request, and ships as one release: **3.0.0**.
 It is a major version because of the login: until 2.x anyone with the link could
-read the dashboard, and from 3.0 it is private by default. The owner signs in;
-anyone else sees it only through a view-only share link the owner chooses to
-make, and can take back.
+read the dashboard, and from 3.0 the owner can make it private. It stays open,
+as before, until the owner turns on "Require sign-in to view" in Settings, so
+nothing locks by surprise on the day it ships; from then on the owner signs in,
+and anyone else sees it only through a view-only share link the owner chooses
+to make, and can take back.
 
 ## How the work is done
 

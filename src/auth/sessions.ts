@@ -132,10 +132,11 @@ export async function startDevice(
   ];
 }
 
-/** Both cookies, cleared. */
+/** Both cookies, cleared - and the token cookie 2.x left, should one remain. */
 export const clearCookies = (): CookieOut[] => [
   { name: SESSION_COOKIE, value: '', maxAge: 0 },
   { name: REFRESH_COOKIE, value: '', maxAge: 0 },
+  { name: 'sl_token', value: '', maxAge: 0 },
 ];
 
 /** A device row that may still sign in: not revoked, not run out. */

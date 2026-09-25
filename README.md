@@ -1291,10 +1291,11 @@ Either way, what a read can carry is bounded:
   key: it takes that device's own push endpoint, which only it knows, and a
   gate there would only keep unwanted notifications coming. Endpoints are held
   to the push services browsers use and never served; at most ten devices.
-- Read endpoints send `Cache-Control: private, max-age=60`: a burst of
-  requests from one browser is answered from its cache instead of against D1 -
-  this project has exhausted the free tier's row budget twice - and, since an
-  answer can depend on who is asking, no shared cache may keep one.
+- Read endpoints send `Cache-Control: no-store`. An answer depends on who is
+  asking, and any cache - the browser's own included - would go on showing it
+  across a sign-out or the switch being turned on. (Until 3.0 they carried a
+  minute of public caching to spare D1; the page asks every ten minutes, so it
+  saved little.)
 - **A datalogger's network handles** - its operator and cell, or its MAC
   address - are served to the owner only, and are never on a public answer.
 
@@ -1312,8 +1313,9 @@ out takes effect at once; a year-long refresh token that renews on use and
 rotates each time, with the one before remembered so a copy is caught; both
 `HttpOnly`, `Secure` and `SameSite=Strict`. Every token is stored only as a
 hash. `/auth?t=<token>` now signs the browser in with such a session instead of
-leaving the token itself in a cookie, as 2.x did; the 2.x cookie is still
-honoured. Vendor payloads are stripped of the account holder's name, email and
+leaving the token itself in a cookie, as 2.x did. That 2.x cookie is no longer
+accepted, and is cleared when seen: it could not be signed out short of
+replacing the token. Vendor payloads are stripped of the account holder's name, email and
 the site's coordinates before storage, and every vendor-controlled string is
 escaped before it reaches the page.
 

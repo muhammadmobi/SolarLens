@@ -15,8 +15,7 @@
               password is keyed with it. Devices signed in with a session stay
               signed in, and passkeys keep working - but the password stops
               working until it is set again: Settings, "Forgot your
-              password?", with the new value as the setup code. A device still
-              on the 2.x cookie (the token itself) is signed out.
+              password?", with the new value as the setup code.
 
   Examples:
     .\scripts\rotate-tokens.ps1 -Ingest

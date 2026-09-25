@@ -51,8 +51,14 @@ import {
 } from './providers/soliscloud';
 import { stationReading as solarmanStationReading } from './providers/solarman';
 
-/** The cookie 2.x left on a device that opened /auth?t=: the API token itself. Still honoured. */
-const COOKIE = 'sl_token';
+/**
+ * The cookie 2.x left on a device that opened /auth?t=: the API token itself.
+ * No longer accepted. It could not be signed out - not by the device, not from
+ * Settings - short of replacing the token everywhere, which is exactly what a
+ * sign-in must not depend on. A browser that still has it is simply asked to
+ * sign in, and the cookie is cleared the first time it is seen.
+ */
+const LEGACY_COOKIE = 'sl_token';
 
 const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 
@@ -113,8 +119,8 @@ function bearer(header: string | undefined): string | null {
 /**
  * Who is asking, for every route that answers with data or signs in.
  *
- * The API token - as a header, or the sl_token cookie 2.x left - is the owner.
- * Otherwise the session and refresh cookies are read, and renewed on the way
+ * The API token as a header is the owner. Otherwise the session and refresh
+ * cookies are read, and renewed on the way
  * if the session has run out (./auth/sessions identify), so a signed-in
  * browser never has to sign in again. The static page is left alone: it has
  * no data in it, and its response cannot take cookies.
@@ -122,7 +128,8 @@ function bearer(header: string | undefined): string | null {
 const identifyCaller = async (c: Context<{ Bindings: Env; Variables: AuthVars }>, next: Next) => {
   const secret = c.env.API_TOKEN;
   let caller: Caller = { role: null, deviceId: null, via: 'none' };
-  const given = bearer(c.req.header('Authorization')) ?? getCookie(c, COOKIE);
+  if (getCookie(c, LEGACY_COOKIE) !== undefined) applyCookies(c, [{ name: LEGACY_COOKIE, value: '', maxAge: 0 }]);
+  const given = bearer(c.req.header('Authorization'));
   if (secret && given && timingSafeEqual(given, secret)) {
     caller = { role: 'owner', deviceId: null, via: 'token' };
   } else if (secret) {
@@ -197,16 +204,16 @@ app.use('/api/*', async (c, next) => {
 });
 
 /**
- * A minute of caching on the read endpoints, in the browser only.
+ * The read endpoints are not cached, by anyone.
  *
- * The data only moves when the cron does, so a second request inside the same
- * minute can be answered without touching D1 - which matters: the free tier's
- * row budget has been exhausted twice by this project already. `private`
- * rather than `public` since 3.0: an answer can now depend on who is asking
- * (the owner sees a logger's network handles; a signed-out browser may be
- * refused), so no shared cache between here and the browser may keep one.
+ * Until 3.0 they carried `public, max-age=60`, which spared D1 a repeat request
+ * inside the same minute. An answer now depends on who is asking - the owner
+ * sees a logger's network handles, and once the dashboard is private a
+ * signed-out browser is refused - and any cache, even the browser's own, would
+ * go on showing the last answer across a sign-out or the switch being turned
+ * on. The page asks every ten minutes, so the minute of caching saved little.
  */
-const CACHE = 'private, max-age=60';
+const CACHE = 'no-store';
 
 app.get('/api/latest', async (c) => {
   const rows = await latest(c.env.DB);
