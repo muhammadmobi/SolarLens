@@ -167,6 +167,8 @@ describe('vendorSignals', () => {
     expect(vendorSignals({ generationPower: 278 }).alarm_count).toBeNull();
     expect(vendorSignals({ alarmCount: '' }).alarm_count).toBeNull();
     expect(vendorSignals({ alarmCount: 'n/a' }).alarm_count).toBeNull();
+    // Number('  ') is 0: a blank counter must still read as not reported.
+    expect(vendorSignals({ alarmCount: '  ' }).alarm_count).toBeNull();
   });
 
   it("reads SolarMan's flags and datalogger link as they are sent", () => {
@@ -194,59 +196,49 @@ describe('vendorSignals', () => {
 });
 
 /**
- * The payload as a table of measurements. Built by allowing rather than
- * stripping, so an identifier under a name nobody has seen yet is still left
- * out - these cases are the spellings the two vendors use today, and the
- * shapes a new one would most likely take.
+ * The payload as a table of measurements. An allow-list of reviewed fields:
+ * the cases below are the fields the live payloads really carry beside the
+ * measurements - ids, notes, codes, a logo link, a zone name - and names that
+ * look harmless or sensitive but have never been reviewed.
  */
 describe('safeTelemetry', () => {
   const table = (raw: unknown) => JSON.parse(safeTelemetry(raw) ?? '{}') as Record<string, unknown>;
 
-  it('keeps measurements, units, status words and booleans', () => {
-    const t = table({ power: 5.08, powerStr: 'kW', state: 1, batteryStatus: 'STATIC', online: true, temperature: null });
-    expect(t).toEqual({ power: 5.08, powerStr: 'kW', state: 1, batteryStatus: 'STATIC', online: true, temperature: null });
+  it('keeps reviewed measurements, their units, status words and booleans', () => {
+    const t = table({ power: 5.08, powerStr: 'kW', state: 1, batteryStatus: 'STATIC', temperature: null, dayEnergy: 12, dayEnergyUnit: 'kWh' });
+    expect(t).toEqual({ power: 5.08, powerStr: 'kW', state: 1, batteryStatus: 'STATIC', temperature: null, dayEnergy: 12, dayEnergyUnit: 'kWh' });
   });
 
-  it('drops ids and serials in every spelling the vendors use', () => {
-    const t = table({
-      id: '1000000000000000001', sno: 'DEMO01', systemId: 1234, stationId: 5, deviceSn: 'X', collectorSn: 'Y',
-      inverterSN: 'Z', serialNumber: 'Q', inverterNo: 'R', inverterId: 7, id_code: 1, deviceIds: '1,2',
-      power: 1,
-    });
+  it('drops the ids and serials both vendors send', () => {
+    const t = table({ id: 'x', sno: 'DEMO01', systemId: 1234, stationId: 5, inverterId: 'y', inverterSn: 'z', firstOldBatterySn: 'q', power: 1 });
     expect(t).toEqual({ power: 1 });
   });
 
-  it('keeps words that only look like ids', () => {
-    // "idle" starts with "id", "snapshot" with "sn"; neither is an identifier.
-    expect(table({ idle: 0, snapshotPower: 12 })).toEqual({ idle: 0, snapshotPower: 12 });
+  it('drops the non-measurements a live SolisCloud plant record carries', () => {
+    const t = table({
+      remark1: 'a note', remark2: 'x', extraInfo: 'y', thirdPlatformCode: 'z', screenLogoUrl: '/logo.png',
+      picName: 'roof.jpg', timeZoneName: '(UTC+00:00) Some City', orgRstationList: '', priceGroupId: '1',
+      money: 'GBP', price: 0.3, stationName: 'Home', power: 2,
+    });
+    expect(t).toEqual({ power: 2 });
   });
 
-  it('drops names, people, places, network handles and links', () => {
-    const t = table({
-      stationName: 'Home', userName: 'u', ownerEmail: 'e', phone: 'p', addr: 'a', latitude: 1, lng: 2,
-      cityStr: 'c', countryName: 'x', regionCode: 'r', mac: 'm', ip: '10.0.0.1', ssid: 's', imei: 'i',
-      iccid: 'c', picUrl: 'u', token: 't', password: 'p', energy: 3,
-    });
-    expect(t).toEqual({ energy: 3 });
+  it('drops any field nobody has reviewed, however it is named', () => {
+    // Regression for a deny-list: names no identifier rule would catch.
+    const t = table({ secret: 'x', apiKey: 'k', siteCode: 'c', idle: 0, somethingNew: 42, power: 3 });
+    expect(t).toEqual({ power: 3 });
   });
 
-  it('drops a long run of digits unless the name says it is a time or an energy total', () => {
-    // Built rather than written out, so no id-shaped literal sits in the repo.
-    const idLike = 7 * 10 ** 7 + 1;
-    const epoch = 1.7e9;
-    const t = table({
-      belongsTo: idLike, plantRef: String(idLike),
-      lastUpdateTime: epoch, dataTimestamp: String(epoch * 1000), generationTotal: 12_345_678, power: 123456,
-    });
-    expect(t).toEqual({ lastUpdateTime: epoch, dataTimestamp: String(epoch * 1000), generationTotal: 12_345_678, power: 123456 });
+  it('allows a unit only beside a reviewed field', () => {
+    expect(table({ powerStr: 'kW', remarkStr: 'x', secretUnit: 'y' })).toEqual({ powerStr: 'kW' });
   });
 
-  it('drops long strings, addresses, links, nested objects and private keys', () => {
+  it('drops a reviewed field whose value is a note, an address, a link or an object', () => {
     const t = table({
-      note: 'x'.repeat(41), contact: 'someone@example.com', site: 'https://example.com', web: 'www.example.com',
-      nested: { a: 1 }, list: [1, 2], _internal: 1, nan: Number.NaN, kept: 'ok',
+      weather: 'x'.repeat(41), windDir: 'someone@example.com', condTxtD: 'https://example.com', condTxtN: 'www.example.com',
+      generationValue: { nested: 1 }, useValue: [1, 2], power: Number.NaN, state: 1,
     });
-    expect(t).toEqual({ kept: 'ok' });
+    expect(t).toEqual({ state: 1 });
   });
 
   it('answers null when nothing survives, or there was nothing to read', () => {
