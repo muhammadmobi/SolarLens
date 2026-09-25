@@ -7,143 +7,10 @@ import { expect, test, type Page } from '@playwright/test';
  * per-system detail view, the hardware inventory, staleness and the auth gate.
  */
 
-const NOW = Math.floor(Date.now() / 1000);
-const SOLIS = 'soliscloud:station:1';
-const HYBRID = 'solarman:station:62000000';
-
-// The API sends metrics as a JSON string, so the fixtures do too.
-const metrics = (o: Record<string, unknown>) => JSON.stringify(o);
+import { HYBRID, NOW, SOLIS, deviceHistory, devices, historyRows, inverters, metrics, series } from '../fixtures/dashboard-api';
 
 /**
- * The two systems, as /api/latest returns them: an on-grid SolisCloud plant with
- * no battery, and a SolarMan hybrid with one. A test changes one of them by
- * passing overrides for 'solis' or 'solarman'.
- */
-function inverters(overrides: Partial<Record<'solis' | 'solarman', Record<string, unknown>>> = {}) {
-  return [
-    {
-      id: SOLIS, provider: 'soliscloud', serial: 'DEMO01', name: 'Demo Solis Plant',
-      plant_id: '1', plant_name: 'Demo Solis Plant', capacity_w: 12000, display_order: 0,
-      ts: NOW - 120, source: 'soliscloud-relay', ac_power_w: 5080, dc_power_w: null, today_kwh: 49, total_kwh: 48852,
-      // An on-grid plant has no battery at all - not a battery sitting at 0%.
-      battery_soc: null, battery_power_w: null, grid_power_w: -5080, load_power_w: null, temp_c: null, status: 'online',
-      metrics: metrics({ genMonthKwh: 185, genYearKwh: 13677, genTotalKwh: 48852, loadTodayKwh: 49, loadTotalKwh: 48852,
-        gridImportTodayKwh: 0, gridExportTodayKwh: 0, gridImportTotalKwh: 0, gridExportTotalKwh: 0,
-        battChargeTodayKwh: null, battDischargeTodayKwh: null, battChargeTotalKwh: null, battDischargeTotalKwh: null,
-        selfUseTodayKwh: null, fullLoadHours: 4.94, batteryStatus: null, gridStatus: null,
-        weatherText: 'Clear', tempMinC: 24, tempMaxC: 31, sunrise: '05:45', sunset: '18:25' }),
-      raw: JSON.stringify({ power: 5.08, powerStr: 'kW', state: 1, sno: 'ABC123', fullHour: 4.94 }),
-      ...(overrides.solis ?? {}),
-    },
-    {
-      id: HYBRID, provider: 'solarman', serial: null, name: 'Demo Hybrid',
-      plant_id: '62000000', plant_name: 'Demo Hybrid', capacity_w: 3500, display_order: 0,
-      ts: NOW - 200, source: 'solarman-web', ac_power_w: 278, dc_power_w: null, today_kwh: 13.7, total_kwh: 7450.8,
-      battery_soc: 100, battery_power_w: -24, grid_power_w: 91, load_power_w: 307, temp_c: null, status: 'online',
-      metrics: metrics({ genMonthKwh: 70.9, genYearKwh: 4002.1, genTotalKwh: 7450.8, loadTodayKwh: 4.8, loadTotalKwh: 6691.7,
-        gridImportTodayKwh: 2.4, gridExportTodayKwh: 10.7, gridImportTotalKwh: 4699.2, gridExportTotalKwh: 4686.7,
-        battChargeTodayKwh: 0.6, battDischargeTodayKwh: 0, battChargeTotalKwh: 1100.1, battDischargeTotalKwh: 354.3,
-        selfUseTodayKwh: 3, fullLoadHours: 4.94, batteryStatus: 'STATIC', gridStatus: 'PURCHASE' }),
-      raw: JSON.stringify({ generationPower: 278, usePower: 307, batterySoc: 100, networkStatus: 'NORMAL' }),
-      ...(overrides.solarman ?? {}),
-    },
-  ];
-}
-
-/** The hardware behind them, as /api/devices returns it: inverters and dataloggers. */
-function devices() {
-  return [
-    {
-      id: 'soliscloud:inverter:DEMO01', provider: 'soliscloud', plant_id: '1', kind: 'inverter',
-      sn: 'DEMO01', name: 'Demo Solis Inverter', model: 'S5-GR3P10K', firmware: '87003E',
-      rated_power_w: 10000, status: 'online', signal_dbm: null, upload_cycle_s: null,
-      commissioned_at: 1709121876, warranty_until: 1866816000, last_seen: NOW - 120,
-      strings: JSON.stringify([
-        { index: 1, powerW: 33.58, voltageV: 167.9, currentA: 0.2 },
-        { index: 2, powerW: 30.94, voltageV: 154.7, currentA: 0.2 },
-      ]),
-      ac_phases: JSON.stringify([
-        { index: 1, voltageV: 228.4, currentA: 0.1 },
-        { index: 2, voltageV: 228.3, currentA: 0.1 },
-        { index: 3, voltageV: 232, currentA: 0.1 },
-      ]),
-      frequency_hz: 49.64, power_factor: 0.99, temp_c: 40.6, dc_bus_v: 589.9,
-      updated_at: NOW, raw: null,
-    },
-    {
-      id: 'soliscloud:datalogger:LOG01', provider: 'soliscloud', plant_id: '1', kind: 'datalogger',
-      sn: 'LOG01', name: 'S3-WIFI-ST', model: 'S3-WIFI-ST', firmware: '10186',
-      rated_power_w: null, status: 'online', signal_dbm: -58, upload_cycle_s: 300,
-      commissioned_at: null, warranty_until: null, last_seen: NOW - 120,
-      strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
-      temp_c: null, dc_bus_v: null, updated_at: NOW, raw: null,
-    },
-    {
-      id: 'solarman:inverter:HYB01', provider: 'solarman', plant_id: '62000000', kind: 'inverter',
-      sn: 'HYB01', name: 'Demo Hybrid Inverter', model: 'Single phase LV Hybrid', firmware: 'V1.0 / V2.0',
-      rated_power_w: 3500, status: 'online', signal_dbm: null, signal_pct: 84, upload_cycle_s: null,
-      commissioned_at: null, warranty_until: null, last_seen: NOW - 200,
-      strings: JSON.stringify([{ index: 1, powerW: 120, voltageV: 24.2, currentA: 5 }]),
-      ac_phases: JSON.stringify([{ index: 1, voltageV: 233.3, currentA: 0.2 }]),
-      frequency_hz: 50.01, power_factor: null,
-      temp_c: 49.4, dc_bus_v: null,
-      battery: JSON.stringify({
-        tempC: 32.5, voltageV: 27.29, currentA: -0.93,
-        bmsTempC: 32.5, bmsVoltageV: 26.98, bmsCurrentA: 0,
-        chargeLimitA: 0, dischargeLimitA: 130,
-        ratedCapacityAh: 100, nominalVoltageV: 24, chemistry: 'lithium', status: 'Static',
-        bmsSocPct: 100, bmsChargeVoltageV: 28.5, bmsDischargeVoltageV: 0,
-      }),
-      updated_at: NOW, raw: null,
-    },
-    {
-      id: 'solarman:datalogger:LOG02', provider: 'solarman', plant_id: '62000000', kind: 'datalogger',
-      sn: 'LOG02', name: 'Datalogger', model: 'LSW-3', firmware: 'MW3_15U_5406_1.20',
-      rated_power_w: null, status: 'online', signal_dbm: null, signal_pct: 84, upload_cycle_s: 300,
-      commissioned_at: null, warranty_until: null, last_seen: NOW - 200,
-      strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
-      temp_c: null, dc_bus_v: null, updated_at: NOW, raw: null,
-    },
-  ];
-}
-
-/** Today's samples for both systems, from local midnight, as /api/series returns them. */
-function series() {
-  const start = new Date(); start.setHours(0, 0, 0, 0);
-  const t0 = Math.floor(start.getTime() / 1000);
-  const points: unknown[] = [];
-  for (let h = 6; h <= 18; h++) {
-    const ts = t0 + h * 3600;
-    const bell = Math.max(0, Math.sin(((h - 6) / 12) * Math.PI));
-    points.push({ inverter_id: SOLIS, ts, ac_power_w: Math.round(10_000 * bell), today_kwh: null, battery_soc: null, grid_power_w: null });
-    points.push({ inverter_id: HYBRID, ts, ac_power_w: Math.round(3_000 * bell), today_kwh: null, battery_soc: null, grid_power_w: null });
-  }
-  return points;
-}
-
-/** Four days of daily rows: the on-grid plant has no meter, the hybrid has. */
-function historyRows() {
-  const day = (n: number) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10);
-  const rows: unknown[] = [];
-  for (let n = 0; n < 4; n++) {
-    rows.push({
-      inverter_id: SOLIS, day: day(n), yield_kwh: 44.7 - n, peak_w: 9470,
-      load_kwh: null, import_kwh: null, export_kwh: null,
-      batt_charge_kwh: null, batt_discharge_kwh: null,
-      samples: 111, first_ts: NOW - 86400, last_ts: NOW,
-    });
-    rows.push({
-      inverter_id: HYBRID, day: day(n), yield_kwh: 13.2 - n, peak_w: 2850,
-      load_kwh: 5.3, import_kwh: 2.2, export_kwh: 9.4,
-      batt_charge_kwh: 0.9, batt_discharge_kwh: 0.2,
-      samples: 140, first_ts: NOW - 86400, last_ts: NOW,
-    });
-  }
-  return rows;
-}
-
-/**
- * Answer every /api route the page calls from the fixtures above, so the
+ * Answer every /api route the page calls from the shared fixtures, so the
  * dashboard runs with no Worker, no database and no vendor. Options change one
  * answer at a time - different inverters, a failed poll, an error status.
  */
@@ -155,6 +22,7 @@ async function stubApi(page: Page, opts: {
   periods?: unknown[];
   relays?: unknown[];
   feeds?: { ts: number; ok: number; detail: string; provider: string }[];
+  linkHistory?: unknown | 'error';
 } = {}) {
   const status = opts.status ?? 200;
   const invs = opts.invs ?? inverters();
@@ -165,6 +33,9 @@ async function stubApi(page: Page, opts: {
   await page.route('**/api/latest', (r) => r.fulfill(json(status === 200 ? { now: NOW, inverters: invs } : { error: 'unauthorized' })));
   await page.route('**/api/series**', (r) => r.fulfill(json(status === 200 ? { from: 0, to: NOW, points } : { error: 'unauthorized' })));
   await page.route('**/api/devices', (r) => r.fulfill(json(status === 200 ? { now: NOW, devices: devs } : { error: 'unauthorized' })));
+  await page.route('**/api/devices/history**', (r) => (opts.linkHistory === 'error'
+    ? r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) })
+    : r.fulfill(json(opts.linkHistory ?? deviceHistory()))));
   await page.route('**/api/history**', (r) => r.fulfill(json({ now: NOW, days: 30, rows: opts.history ?? historyRows() })));
   await page.route('**/api/alarms**', (r) => (opts.alarms === 'error'
     ? r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) })
@@ -389,7 +260,7 @@ test.describe('Alerts', () => {
 
   test("raises the vendor's own alarm counter, and says which vendor", async ({ page }) => {
     const invs = inverters({
-      solis: { raw: JSON.stringify({ power: 5.08, powerStr: 'kW', state: 3, alarmCount: 2, alarmLevel: 2 }) },
+      solis: { alarm_count: 2, alarm_level: 2 },
     });
     await stubApi(page, { invs });
     await page.goto('/#/alerts');
@@ -401,7 +272,7 @@ test.describe('Alerts', () => {
 
   test("reads SolarMan's NORMAL/abnormal flags", async ({ page }) => {
     const invs = inverters({
-      solarman: { raw: JSON.stringify({ generationPower: 278, warningStatus: 'ABNORMAL', networkStatus: 'OFFLINE' }) },
+      solarman: { warning_status: 'ABNORMAL', network_status: 'OFFLINE' },
     });
     await stubApi(page, { invs });
     await page.goto('/#/alerts');
@@ -409,6 +280,27 @@ test.describe('Alerts', () => {
     await expect(sec).toContainText('Inverter warning');
     await expect(sec).toContainText('Datalogger link');
     await expect(sec).toContainText('abnormal');
+  });
+
+  test('a SolisCloud plant reporting no alarms raises nothing', async ({ page }) => {
+    // 0 is "SolisCloud says none", which must not become "0 active alarms".
+    await stubApi(page, { invs: inverters({ solis: { alarm_count: 0, alarm_level: 0 } }) });
+    await page.goto('/#/alerts');
+    const sec = page.locator('details.syssec').nth(0);
+    await expect(sec).toContainText('Nothing reported');
+    await expect(sec).not.toContainText('active alarm');
+  });
+
+  test("raises a device's own alert count, and ignores SolarMan's -1", async ({ page }) => {
+    const devs = devices().map((d) => (d.id === 's2-inverter-1' ? { ...d, alert_status: 3 }
+      : d.id === 's2-datalogger-1' ? { ...d, alert_status: -1 } : d));
+    await stubApi(page, { devs });
+    await page.goto('/#/alerts');
+    const sec = page.locator('details.syssec').nth(1);
+    await expect(sec).toContainText('3 alerts');
+    await expect(sec).toContainText('Raised on the device record');
+    await expect(sec).not.toContainText('OG02:');
+    await expect(sec).not.toContainText('-1 alert');
   });
 
   test('every alert carries the moment it is describing', async ({ page }) => {
@@ -986,6 +878,78 @@ test.describe('AC output page', () => {
   });
 });
 
+test.describe('Dataloggers', () => {
+  test('each logger gets a card saying everything its vendor reports about it', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/devices');
+    const cards = page.locator('.loggers section.logger');
+    await expect(cards).toHaveCount(2);
+    const solis = cards.nth(0);
+    await expect(solis.locator('h3')).toContainText('Demo Solis Plant');
+    await expect(solis).toContainText('Wi-Fi');
+    await expect(solis).toContainText('-58 dBm');
+    await expect(solis).toContainText('Running since restart');
+    await expect(solis).toContainText('2 h 5 min');
+    await expect(solis).toContainText('Working in total');
+    await expect(solis).toContainText('Made');
+    await expect(solis).toContainText('5 min');   // uploads every 300 s
+    // SolarMan says less about its logger, and nothing is invented for it.
+    const sm = cards.nth(1);
+    await expect(sm).toContainText('84%');
+    await expect(sm).not.toContainText('Running since restart');
+  });
+
+  test('draws the week: online, the one drop, and how long it lasted', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/devices');
+    const solis = page.locator('.loggers section.logger').nth(0);
+    const head = solis.locator('.linkhist .lh-head').first();
+    await expect(head).toContainText('offline once, longest 2 h 0 min');
+    await expect(head).toContainText('online 9');
+    await expect(solis.locator('.lstrip i.off')).toHaveCount(1);
+    await expect(solis.locator('.lstrip')).toHaveAttribute('aria-label', /offline once/);
+    // The signal line, on a fixed dBm scale.
+    await expect(solis.locator('svg.sig-chart')).toBeVisible();
+    await expect(solis).toContainText('weakest -58 dBm');
+  });
+
+  test("shows SolarMan's evening sag on its percentage scale", async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/devices');
+    const sm = page.locator('.loggers section.logger').nth(1);
+    await expect(sm).toContainText('never reported offline');
+    await expect(sm).toContainText('weakest 41%');
+    await expect(sm).toContainText('strongest 84%');
+  });
+
+  test('a logger nobody heard from is grey, not green', async ({ page }) => {
+    // The relay was off for the last day: the last row is a day old.
+    const h = deviceHistory();
+    h.samples = h.samples.filter((r) => r.ts < NOW - 86400);
+    await stubApi(page, { linkHistory: h });
+    await page.goto('/#/devices');
+    const solis = page.locator('.loggers section.logger').nth(0);
+    await expect(solis.locator('.linkhist .lh-head').first()).toContainText('not heard from for');
+    await expect(solis.locator('.lstrip i.none').last()).toBeVisible();
+  });
+
+  test('a history that fails to load says so, and the rest of the tab still draws', async ({ page }) => {
+    await stubApi(page, { linkHistory: 'error' });
+    await page.goto('/#/devices');
+    await expect(page.locator('.loggers section.logger').first()).toContainText('could not be loaded');
+    await expect(page.locator('table.devices tbody tr')).toHaveCount(4);
+  });
+
+  test("the system page's link card names the link and the restart", async ({ page }) => {
+    await stubApi(page);
+    await page.goto(`/#/system/${SOLIS}`);
+    const card = page.locator('section.card', { hasText: 'Datalogger & link' });
+    await expect(card).toContainText('Wi-Fi');
+    await expect(card).toContainText('Running since restart');
+    await expect(card).toContainText('Devices tab');
+  });
+});
+
 test.describe('Devices', () => {
   test('lists the inverter and the datalogger with signal strength', async ({ page }) => {
     await stubApi(page);
@@ -993,7 +957,7 @@ test.describe('Devices', () => {
     const rows = page.locator('table.devices tbody tr');
     await expect(rows).toHaveCount(4);
     await expect(rows.nth(0)).toContainText('S5-GR3P10K');
-    await expect(rows.nth(0)).toContainText('DEMO01');
+    await expect(rows.nth(0)).toContainText('••••MO01');
     await expect(rows.nth(0)).toContainText('10.00 kW');
     await expect(rows.nth(0)).toContainText('2 producing');
     // The datalogger's RSSI is the field that names a silent outage.
@@ -1332,7 +1296,7 @@ test.describe('PV strings on an offline inverter', () => {
   // view counted those as strings producing now, on a system the header
   // correctly called offline.
   const offlineSolis = () => inverters({ solis: { ts: NOW - 19 * 3600, status: 'offline' } });
-  const staleDevices = () => devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+  const staleDevices = () => devices().map((d) => d.id === 's1-inverter-1'
     ? { ...d, status: 'offline', last_seen: NOW - 19 * 3600 }
     : d);
 
@@ -1377,7 +1341,7 @@ test.describe('PV strings: counting what is connected', () => {
   test('an empty MPPT socket is not counted as a string that is not producing', async ({ page }) => {
     // One array on input 1, nothing on input 2: that is one string, producing.
     // "1 of 2" would read as a fault that does not exist.
-    const devs = devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+    const devs = devices().map((d) => d.id === 's1-inverter-1'
       ? { ...d, strings: JSON.stringify([
           { index: 1, powerW: 2289, voltageV: 253.6, currentA: 9.2 },
           { index: 2, powerW: 0, voltageV: 0.5, currentA: 0 },
@@ -1395,7 +1359,7 @@ test.describe('PV strings: counting what is connected', () => {
   });
 
   test('a connected string reading zero in daylight is reported as a shortfall', async ({ page }) => {
-    const devs = devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+    const devs = devices().map((d) => d.id === 's1-inverter-1'
       ? { ...d, strings: JSON.stringify([
           { index: 1, powerW: 4100, voltageV: 480, currentA: 8.5 },
           { index: 2, powerW: 0, voltageV: 310, currentA: 0 },

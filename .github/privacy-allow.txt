@@ -24,3 +24,4 @@
 9876543210            # counting digits, tests/unit/public-view
 0123456789            # counting digits, tests/unit/relays
 99999999              # all nines, tests/unit/public-view
+32840119              # a datalogger's working-time counter in seconds - a measurement, not an id - in the patch of commit 83f5863, before the tests were given invented values

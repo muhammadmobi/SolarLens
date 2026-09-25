@@ -14,6 +14,7 @@ import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './type
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
+import { linkOf, loggerDetail, loggerNetwork } from './logger';
 
 export interface SolarmanCredentials {
   appId: string;
@@ -182,6 +183,10 @@ export function deviceFromRecord(d: Rec, plantId: string | null = null): Device 
     strings: null,
     acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null,
     battery: null,
+    // The device list says little else about a logger: its link, read from the
+    // model name, and its MAC address, which is kept for the owner only.
+    logger: kind === 'datalogger' ? loggerDetail({ link: linkOf(firmware ? firmware.split('_')[0] : null) }) : null,
+    network: kind === 'datalogger' ? loggerNetwork({ mac: pick(feature, 'MDU_MAC_ADD1') }) : null,
     raw: { ...d, featureData: feature },
   };
 }

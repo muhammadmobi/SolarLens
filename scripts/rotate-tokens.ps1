@@ -11,9 +11,11 @@
     -Ingest   The relay stops being able to push until it is restarted with
               the new value. This script restarts it for you.
 
-    -Api      Every browser that has the dashboard unlocked is signed out,
-              because the cookie is the token. Each device needs
-              /auth?t=<new value> opened once more.
+    -Api      API_TOKEN is also the sign-in setup code, and the owner's
+              password is keyed with it. Devices signed in with a session stay
+              signed in, and passkeys keep working - but the password stops
+              working until it is set again: Settings, "Forgot your
+              password?", with the new value as the setup code.
 
   Examples:
     .\scripts\rotate-tokens.ps1 -Ingest
@@ -125,7 +127,9 @@ try {
     # repository is public, and a deployment URL is as personal as a token.
     $token = (Get-Content $devVars | Where-Object { $_ -like 'API_TOKEN=*' }) -replace '^API_TOKEN=', ''
     $url   = ((Get-Content $devVars | Where-Object { $_ -like 'SOLARLENS_URL=*' }) -replace '^SOLARLENS_URL=', '').TrimEnd('/')
-    Write-Host "`nEvery device is now signed out. To unlock one, open this on it once:" -ForegroundColor Cyan
+    Write-Host "`nSigned-in devices and passkeys keep working. The password does not:" -ForegroundColor Cyan
+    Write-Host "  set it again in Settings -> 'Forgot your password?', with the new API_TOKEN as the setup code." -ForegroundColor Cyan
+    Write-Host "To sign a device in without a password, open this on it once:" -ForegroundColor Cyan
     Write-Host "  $url/auth?t=$token" -ForegroundColor Yellow
     Write-Host '  (the link contains the token - do not post it anywhere)'
   }

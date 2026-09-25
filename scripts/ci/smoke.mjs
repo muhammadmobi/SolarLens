@@ -7,10 +7,16 @@
  * caller without a token, and - the one this project cares about most - the
  * public responses still carry no vendor identifiers.
  *
+ * Since 3.0 the owner can make the dashboard private. Then a caller with no
+ * sign-in is refused the readings - which is correct, and is checked as such -
+ * and freshness is read from /api/status, which stays open for exactly this.
+ * Given SOLARLENS_API_TOKEN, the readings are read as the owner and checked in
+ * full either way.
+ *
  * The address is read from SOLARLENS_URL rather than written down, because the
  * deployment's hostname is not in this repository.
  *
- * Usage: SOLARLENS_URL=https://... node scripts/ci/smoke.mjs
+ * Usage: SOLARLENS_URL=https://... [SOLARLENS_API_TOKEN=...] node scripts/ci/smoke.mjs
  */
 const BASE = (process.env.SOLARLENS_URL ?? '').replace(/\/+$/, '');
 if (!BASE) {
@@ -18,6 +24,7 @@ if (!BASE) {
   process.exit(2);
 }
 
+const TOKEN = process.env.SOLARLENS_API_TOKEN ?? '';
 const FRESH_S = 90 * 60; // one feed this recent means readings are still arriving
 const checks = [];
 /** Note one check's result, and print it as it happens. */
@@ -32,7 +39,7 @@ async function get(path, { tries = 4 } = {}) {
   for (let i = 0; i < tries; i++) {
     try {
       const res = await fetch(`${BASE}${path}${path.includes('?') ? '&' : '?'}smoke=${Date.now()}`, {
-        headers: { 'cache-control': 'no-cache' },
+        headers: { 'cache-control': 'no-cache', ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}) },
         signal: AbortSignal.timeout(20_000),
       });
       if (res.status < 500) return res;
@@ -51,11 +58,12 @@ const html = await page.text();
 record('the dashboard page loads', page.ok, `HTTP ${page.status}`);
 record('the page still carries its security policy', !!page.headers.get('content-security-policy'));
 
-// 2. the health endpoint, and whether readings are arriving
-const healthRes = await get('/api/health');
-record('/api/health answers', healthRes.ok, `HTTP ${healthRes.status}`);
-const health = healthRes.ok ? await healthRes.json() : {};
-const feeds = health.feeds ?? [];
+// 2. whether readings are arriving: /api/status, which is open whether or not
+// the dashboard is private
+const statusRes = await get('/api/status');
+record('/api/status answers', statusRes.ok, `HTTP ${statusRes.status}`);
+const status = statusRes.ok ? await statusRes.json() : {};
+const feeds = status.feeds ?? [];
 const now = Math.floor(Date.now() / 1000);
 const freshest = feeds.reduce((best, f) => Math.max(best, f.ts ?? 0), 0);
 record(
@@ -64,21 +72,31 @@ record(
   freshest ? `newest reading ${Math.round((now - freshest) / 60)} min old` : 'no feed at all',
 );
 
-// 3. the readings the dashboard draws
+// 3. the readings the dashboard draws - or, on a private dashboard read with no
+// token, the refusal that says to sign in
 const latestRes = await get('/api/latest');
-record('/api/latest answers', latestRes.ok, `HTTP ${latestRes.status}`);
+const healthRes = await get('/api/health');
 const latestText = latestRes.ok ? await latestRes.text() : '';
-let latest = [];
-try { latest = JSON.parse(latestText); } catch { /* handled by the check below */ }
-const rows = Array.isArray(latest) ? latest : (latest.inverters ?? latest.rows ?? []);
-record('at least one inverter is served', rows.length > 0, `${rows.length} row(s)`);
+const privateNow = latestRes.status === 401 && !TOKEN && (await latestRes.clone().json().catch(() => ({}))).error === 'signin';
+if (privateNow) {
+  record('the private dashboard asks a signed-out caller to sign in', true, 'HTTP 401 signin');
+  record('/api/health is private too', healthRes.status === 401, `HTTP ${healthRes.status}`);
+} else {
+  record('/api/latest answers', latestRes.ok, `HTTP ${latestRes.status}`);
+  record('/api/health answers', healthRes.ok, `HTTP ${healthRes.status}`);
+  let latest = [];
+  try { latest = JSON.parse(latestText); } catch { /* handled by the check below */ }
+  const rows = Array.isArray(latest) ? latest : (latest.inverters ?? latest.rows ?? []);
+  record('at least one inverter is served', rows.length > 0, `${rows.length} row(s)`);
+}
+const health = healthRes.ok ? await healthRes.json() : {};
 
 // 4. what the public responses must never contain
 // An identifier arrives as a string - "62000000", or a plant_id field - while a
 // reading is a bare number. Measurements in watt-hours run to eight digits of
 // their own, so only quoted values and id-shaped fields are read as identifiers;
 // treating every long number as one would roll a healthy deploy back at dusk.
-const bodies = [latestText, healthRes.ok ? JSON.stringify(health) : ''];
+const bodies = [latestText, healthRes.ok ? JSON.stringify(health) : '', JSON.stringify(status)];
 const leaks = [];
 for (const body of bodies) {
   if (/"raw"\s*:/.test(body)) leaks.push('a raw vendor payload');
@@ -95,6 +113,7 @@ for (const [path, init] of [
   ['/api/poll', { method: 'POST' }],
   ['/api/ingest/relay', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }],
 ]) {
+  // Deliberately without the token: these must refuse a caller who has none.
   const res = await fetch(`${BASE}${path}`, { ...init, signal: AbortSignal.timeout(20_000) });
   record(`${path} refuses a caller with no token`, res.status === 401, `HTTP ${res.status}`);
 }

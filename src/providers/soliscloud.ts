@@ -15,6 +15,7 @@ import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './type
 import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
+import { linkOf, loggerDetail, loggerNetwork } from './logger';
 
 export interface SolisCredentials {
   keyId: string;
@@ -403,6 +404,10 @@ export function deviceFromInverter(d: Rec, plantId: string | null = null): Devic
 /** A record from `collector/listV2` (the datalogger stick) -> Device. */
 export function deviceFromCollector(d: Rec, plantId: string | null = null): Device {
   const sn = (pick(d, 'sn') as string | null) ?? null;
+  const model = (pick(d, 'machine') as string | null) ?? (pick(d, 'model') as string | null);
+  // factoryTime arrives as epoch seconds in a string; msToSec is for the
+  // millisecond fields, so it is converted here instead.
+  const made = num(pick(d, 'factoryTime'));
   return {
     id: `soliscloud:datalogger:${sn ?? String(pick(d, 'id') ?? 'unknown')}`,
     provider: 'soliscloud',
@@ -410,7 +415,7 @@ export function deviceFromCollector(d: Rec, plantId: string | null = null): Devi
     kind: 'datalogger',
     sn,
     name: (pick(d, 'machine', 'model') as string | null) ?? null,
-    model: (pick(d, 'machine') as string | null) ?? (pick(d, 'model') as string | null),
+    model,
     firmware: (pick(d, 'version') as string | null) ?? null,
     ratedPowerW: null,
     status: mapState(pick(d, 'state')),
@@ -418,11 +423,25 @@ export function deviceFromCollector(d: Rec, plantId: string | null = null): Devi
     signalPct: null,
     uploadCycleS: num(pick(d, 'dataUploadCycle')),
     commissionedAt: msToSec(pick(d, 'collectorActiveDate')),
-    warrantyUntil: msToSec(pick(d, 'updateShelfEndTime')),
+    // The extended warranty where there is one, the original otherwise.
+    warrantyUntil: msToSec(pick(d, 'updateShelfEndTime', 'shelfEndTime')),
     lastSeen: msToSec(pick(d, 'dataTimestamp')),
     strings: null,
     acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null,
     battery: null,
+    // currentWorkingTime counts from the last restart and totalWorkingTime
+    // across all of them (runingTime is the same figure again), in seconds.
+    logger: loggerDetail({
+      link: linkOf(model),
+      signalLevel: num(pick(d, 'rssiLevel')),
+      uptimeS: num(pick(d, 'currentWorkingTime')),
+      workingS: num(pick(d, 'totalWorkingTime', 'runingTime')),
+      manufacturedAt: made && made > 0 ? (made > 1e11 ? Math.floor(made / 1000) : Math.floor(made)) : null,
+    }),
+    // A cellular logger's operator and mast. stripPii keeps them in `raw`, as
+    // they are not personal details; they are still a location, so they are
+    // stored apart and never published.
+    network: loggerNetwork({ operator: pick(d, 'connectionOperator'), cellArea: pick(d, 'lac'), cellId: pick(d, 'ci') }),
     raw: stripPii(d),
   };
 }

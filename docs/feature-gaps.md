@@ -46,13 +46,24 @@ live database after 2.10.0.
 | Inverter firmware version | ● | ● | ● both |
 | Commissioning date, warranty expiry | ● | ○ | ● Solis |
 | **Datalogger status, model, firmware, signal** | ● | ● | ● both — Solis in dBm, SolarMan in percent |
+| Everything else the datalogger reports: link type, signal bars, time since restart and in total, make date | ● | ◐ | ● a card per logger on the Devices tab — SolarMan's list says less, and nothing is invented for it |
+| A datalogger's link over time: online, offline, signal | ○ | ○ | ● the last seven days as a strip, a summary and a signal line — neither app keeps this |
+
+### Access
+
+| Feature | SolisCloud | SolarMan | SolarLens |
+|---|:--:|:--:|---|
+| Sign-in to see your plant | ● | ● | ● optional, the owner's choice; passkeys and a password |
+| Stay signed in | ◐ SolisCloud asks again weekly | ● | ● a year, renewed on every use |
+| See and sign out your devices | ○ | ○ | ● |
+| Share a view-only link | ◐ visitor accounts | ◐ shared plants need an account | ● a link, no account, for as long as you say |
 | Per-MPPT-string DC power | ● | ● | ● both |
 | Per-string voltage & current | ● | ● | ● both |
 | Per-phase AC voltage, current, frequency | ● | ● | ● both (Solis adds power factor and DC bus) |
 | Inverter temperature | ● | ● | ● both |
 | Device types beyond the inverter (battery, meter, EPM, weather station) | ● | ◐ | ○ not available for these plants: SolarMan lists only an inverter and a datalogger, and the battery exists only inside the inverter's data |
 | BMS detail (pack voltage, current, temperature, charge limits) | ○ | ● | ● all five on the system page |
-| Raw register / telemetry dump | ○ | ○ | ◐ a searchable table is built, but the live API never sends the raw payload it reads, so it does not appear on the live site - see gap 5 |
+| Raw register / telemetry dump | ○ | ○ | ● searchable table of every measurement the vendor sent, ids and places left out — neither app offers this |
 
 ### Alarms and events
 
@@ -126,7 +137,7 @@ live database after 2.10.0.
 ## 3. What SolarLens does that neither app does
 
 1. **Both vendors on one screen**, normalised to a single reading shape.
-2. **A searchable raw-telemetry table** — every field the vendor returned, per sample. Built, but not yet seen on the live site: the payload it reads is withheld from public answers (gap 5).
+2. **A searchable raw-telemetry table** — every measurement the vendor returned for the newest sample. The Worker builds it from a reviewed list of measurement fields, so anything else the vendor sends - ids, notes, codes, a zone name, a field added tomorrow - is left out.
 3. **Full sample retention in your own database**, including the untouched vendor payload.
 4. **Honest staleness** — a panel says when its number was last updated and turns amber when a
    feed goes quiet, instead of showing a confidently stale zero.
@@ -159,7 +170,7 @@ close - see section 6. What remains:
 | 2 | ~~An automated test for the Worker itself~~ | **Closed in 2.7.** Every route, the auth middleware, the SQL and the cron fan-out now run in the unit suite against a real database: `tests/helpers/d1.ts` puts SQLite behind the D1 interface with the project's own migrations applied. All of `src/` measures 97% of statements, where the Worker's own files measured nothing. What a unit test still cannot reach is workerd itself - `crypto.subtle`'s MD5, the asset binding, real network - covered by `npm run probe:solis`, the end-to-end suite and the deploy's smoke test | done |
 | 3 | ~~SolarMan alarm detail~~ | **Closed.** The portal's detail panel calls `alert/detail` for advice and `alert/timeline` for the moments a fault was active; SolarLens now calls both for the newest alerts each hour, giving every occurrence an end and bringing back the occurrences the list folds away. SolarMan has no advice for most faults, and says so by returning none | done |
 | 4 | ~~Notifications that reach a closed browser~~ | **Closed.** Web Push, with the push itself empty and the words fetched by the woken device. Needs `node scripts/make-vapid-key.mjs` once, then a tap per device | done |
-| 5 | The dashboard reads a payload the server never sends | Found in September 2026 by checking the code's comments against the live API. For privacy, `src/public-view.ts` drops each vendor's raw payload from every public answer. Three parts of the page still read it, so none of them ever shows on the live site: the **Raw telemetry** table under each system (which the guide points people to), the alerts built from the payload's own fields - SolisCloud's alarm count and alarm level, SolarMan's warning flags and datalogger link - and a device's own alert count. The tests missed it because their fixtures include the payload. Two ways to close it: have the Worker send the handful of fields the alerts need as named columns, which is safe, and either drop the raw table and its guide row or serve a stripped copy of the payload; or remove all three from the page | M |
+| 5 | ~~The dashboard reads a payload the server never sends~~ | **Closed in 3.0.** Found in September 2026 by checking the code's comments against the live API: the Raw telemetry table, the alerts built from vendor flags and a device's own alert count all read the raw payload, which the public view never sends. The Worker now sends what they need instead (`src/public-view.ts`): the alert fields as named columns (`alarm_count`, `alarm_level`, `warning_status`, `business_warning_status`, `consumer_warning_status`, `network_status`, and `alert_status` on a device), and `telemetry`, the payload's fields that are on a reviewed list of measurements. The tests had missed it because their fixtures carried the payload; `tests/unit/fixture-contract.test.ts` now runs the real Worker and fails if the end-to-end fixtures carry a field it does not send, or lack one it does | M |
 
 ## 4b. What the pipeline checks, so this list stays honest
 

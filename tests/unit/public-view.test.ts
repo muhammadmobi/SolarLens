@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aliasFor, maskSerial, publicDevices, publicInverters, publicRows, publicAlarms } from '../../src/public-view';
+import { aliasFor, maskSerial, publicDevices, publicInverters, publicRows, publicAlarms, safeTelemetry, vendorSignals } from '../../src/public-view';
 
 /**
  * The dashboard is served to anyone with the link, so these functions are the
@@ -148,5 +148,123 @@ describe('publicAlarms', () => {
   it('names the system by alias and keeps the fault itself', () => {
     const [a] = publicAlarms(rows, aliasFor(['soliscloud:station:1000000000000000001']));
     expect(a).toEqual({ inverter_id: 's1', code: '1015', message: 'NO-Grid', begin_ts: 1784359680 });
+  });
+});
+
+/**
+ * The payload's alert fields, as named columns. The dashboard's alerts read
+ * these; until 3.0 they read the raw payload, which was never sent.
+ */
+describe('vendorSignals', () => {
+  it("reads SolisCloud's alarm counter and level, from stored JSON text", () => {
+    const s = vendorSignals(JSON.stringify({ alarmCount: '2', alarmLevel: 1 }));
+    expect(s.alarm_count).toBe(2);
+    expect(s.alarm_level).toBe(1);
+  });
+
+  it("keeps SolisCloud's zero apart from a vendor that sends no counter", () => {
+    expect(vendorSignals({ alarmCount: 0 }).alarm_count).toBe(0);
+    expect(vendorSignals({ generationPower: 278 }).alarm_count).toBeNull();
+    expect(vendorSignals({ alarmCount: '' }).alarm_count).toBeNull();
+    expect(vendorSignals({ alarmCount: 'n/a' }).alarm_count).toBeNull();
+    // Number('  ') is 0: a blank counter must still read as not reported.
+    expect(vendorSignals({ alarmCount: '  ' }).alarm_count).toBeNull();
+  });
+
+  it("reads SolarMan's flags and datalogger link as they are sent", () => {
+    const s = vendorSignals({
+      warningStatus: 'ABNORMAL', businessWarningStatus: 'NORMAL',
+      consumerWarningStatus: 'NORMAL', networkStatus: 'OFFLINE',
+    });
+    expect(s).toMatchObject({
+      warning_status: 'ABNORMAL', business_warning_status: 'NORMAL',
+      consumer_warning_status: 'NORMAL', network_status: 'OFFLINE',
+    });
+  });
+
+  it('refuses anything that is not a short status word', () => {
+    expect(vendorSignals({ warningStatus: 'x'.repeat(33) }).warning_status).toBeNull();
+    expect(vendorSignals({ warningStatus: { nested: 1 } }).warning_status).toBeNull();
+    expect(vendorSignals({ warningStatus: '  ' }).warning_status).toBeNull();
+  });
+
+  it('answers all nulls for a missing or unreadable payload', () => {
+    for (const raw of [null, undefined, '', 'not json', '[1,2]', 42]) {
+      expect(Object.values(vendorSignals(raw)).every((v) => v === null), String(raw)).toBe(true);
+    }
+  });
+});
+
+/**
+ * The payload as a table of measurements. An allow-list of reviewed fields:
+ * the cases below are the fields the live payloads really carry beside the
+ * measurements - ids, notes, codes, a logo link, a zone name - and names that
+ * look harmless or sensitive but have never been reviewed.
+ */
+describe('safeTelemetry', () => {
+  const table = (raw: unknown) => JSON.parse(safeTelemetry(raw) ?? '{}') as Record<string, unknown>;
+
+  it('keeps reviewed measurements, their units, status words and booleans', () => {
+    const t = table({ power: 5.08, powerStr: 'kW', state: 1, batteryStatus: 'STATIC', temperature: null, dayEnergy: 12, dayEnergyUnit: 'kWh' });
+    expect(t).toEqual({ power: 5.08, powerStr: 'kW', state: 1, batteryStatus: 'STATIC', temperature: null, dayEnergy: 12, dayEnergyUnit: 'kWh' });
+  });
+
+  it('drops the ids and serials both vendors send', () => {
+    const t = table({ id: 'x', sno: 'DEMO01', systemId: 1234, stationId: 5, inverterId: 'y', inverterSn: 'z', firstOldBatterySn: 'q', power: 1 });
+    expect(t).toEqual({ power: 1 });
+  });
+
+  it('drops the non-measurements a live SolisCloud plant record carries', () => {
+    const t = table({
+      remark1: 'a note', remark2: 'x', extraInfo: 'y', thirdPlatformCode: 'z', screenLogoUrl: '/logo.png',
+      picName: 'roof.jpg', timeZoneName: '(UTC+00:00) Some City', orgRstationList: '', priceGroupId: '1',
+      money: 'GBP', price: 0.3, stationName: 'Home', power: 2,
+    });
+    expect(t).toEqual({ power: 2 });
+  });
+
+  it('drops any field nobody has reviewed, however it is named', () => {
+    // Regression for a deny-list: names no identifier rule would catch.
+    const t = table({ secret: 'x', apiKey: 'k', siteCode: 'c', idle: 0, somethingNew: 42, power: 3 });
+    expect(t).toEqual({ power: 3 });
+  });
+
+  it('allows a unit only beside a reviewed field', () => {
+    expect(table({ powerStr: 'kW', remarkStr: 'x', secretUnit: 'y' })).toEqual({ powerStr: 'kW' });
+  });
+
+  it('drops a reviewed field whose value is a note, an address, a link or an object', () => {
+    const t = table({
+      weather: 'x'.repeat(41), windDir: 'someone@example.com', condTxtD: 'https://example.com', condTxtN: 'www.example.com',
+      generationValue: { nested: 1 }, useValue: [1, 2], power: Number.NaN, state: 1,
+    });
+    expect(t).toEqual({ state: 1 });
+  });
+
+  it('answers null when nothing survives, or there was nothing to read', () => {
+    expect(safeTelemetry({ id: 1, sno: 'x' })).toBeNull();
+    expect(safeTelemetry(null)).toBeNull();
+    expect(safeTelemetry('not json')).toBeNull();
+    expect(safeTelemetry([1, 2])).toBeNull();
+  });
+
+  it('is what publicInverters sends in place of raw', () => {
+    const [out] = publicInverters([{ id: 'a', raw: JSON.stringify({ sno: 'SN', power: 2, alarmCount: 1 }) }], aliasFor(['a'])) as Record<string, unknown>[];
+    expect(out.raw).toBeUndefined();
+    expect(JSON.parse(String(out.telemetry))).toEqual({ power: 2, alarmCount: 1 });
+    expect(out.alarm_count).toBe(1);
+  });
+});
+
+describe("a device's own alert count", () => {
+  const alias = aliasFor(['solarman:station:1']);
+  it('comes across as alert_status, and nothing else of the payload does', () => {
+    const [out] = publicDevices([{ id: 'd', plant_id: '1', raw: JSON.stringify({ alertStatus: 3, addr: 'x' }) }], alias) as Record<string, unknown>[];
+    expect(out.alert_status).toBe(3);
+    expect(JSON.stringify(out)).not.toContain('addr');
+  });
+  it("is null when the payload does not say, which is not SolarMan's -1", () => {
+    expect((publicDevices([{ id: 'd', raw: null }], alias)[0] as Record<string, unknown>).alert_status).toBeNull();
+    expect((publicDevices([{ id: 'd', raw: { alertStatus: -1 } }], alias)[0] as Record<string, unknown>).alert_status).toBe(-1);
   });
 });

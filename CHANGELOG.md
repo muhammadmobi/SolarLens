@@ -18,6 +18,50 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **An owner login, and a dashboard that can be private.** Set up once under
+  Settings (the new gear in the header) with the setup code - `API_TOKEN` - and
+  a password, and add passkeys on your phones and computers. Then turn on
+  **Require sign-in to view**: the readings need a sign-in from then on. It is
+  off until you turn it on, and cannot be turned on before there is a way to
+  sign in.
+- **Signed in once, signed in for good.** A one-hour session and a year-long
+  refresh token; the Worker renews both on the way through whenever the hour is
+  up, so the dashboard, the TV and the service worker never see the sign-in
+  page again. The refresh token rotates at every renewal and the one before is
+  remembered: a copy used later signs the device out. Two tabs renewing at once
+  do not. Only hashes are stored.
+- **Passkeys**, verified in the Worker itself (ES256 and RS256, no library),
+  and never locked out.
+- **Settings**: every signed-in device with sign-out for one or all others,
+  taking effect at once; the password changed or removed; and **Share to
+  view** - a view-only link for a day, a week, a month or until taken back.
+- **A lockout**: five wrong tries from one address lock it for fifteen
+  minutes; thirty from everywhere in an hour pause password sign-in for an
+  hour.
+- **`GET /api/status`**: how fresh each feed is and nothing else, open even on
+  a private dashboard, for a monitor and the deploy's smoke test.
+- **Everything each datalogger reports, and its week.** The Devices tab opens
+  with a card per datalogger: how it connects, its signal and signal bars, how
+  often it uploads, its last contact, how long it has run since its last
+  restart and in total, its model, firmware, make date, first connection and
+  warranty - whatever its vendor reports, and nothing invented where it does
+  not. Beneath, its last seven days: a strip of online, offline and not heard
+  from, how often and how long it dropped, and its signal as a line on a fixed
+  scale. The system page's link card names the link and the last restart.
+- **Link history, kept small.** Each device's status and signal are recorded
+  in a new `device_samples` table when either changes, or hourly while
+  nothing does - a steady logger writes 24 rows a day rather than 288 - and
+  kept 90 days. `GET /api/devices/history` serves the last 1 to 30 days.
+- **A datalogger's network handles are kept, and kept back.** Its mobile
+  operator and cell, or its MAC address, are stored for the owner and never
+  part of a public answer: either can place a logger on a map. They live in a
+  table of their own, so even a Worker rolled back to 2.10 - which serves
+  every column of the devices table it does not know to strip - cannot serve
+  them.
+- **A roadmap to 3.0.** `docs/roadmap.md` sets out the twelve phases of the
+  next release - the owner login, any number of inverters, a public demo,
+  weather and expected output with a site map, savings, questions answered in
+  the app and an MCP server - and what was left out on purpose.
 - **A proper icon for the guide.** The header's "?" is now an open book with
   the word *Guide* beside it - drawn in the text colour, so it follows the theme
   and inverts while the guide is open - and the book alone on a phone, where the
@@ -40,6 +84,17 @@ checkout of any tag says which release it is.
 
 ### Changed
 
+- **Reads send `Cache-Control: no-store`** rather than a minute of public
+  caching: an answer now depends on who is asking, and no cache may go on
+  showing it after a sign-out.
+- **`/auth?t=<API_TOKEN>` signs the browser in with a proper session** instead
+  of leaving the token itself in a cookie. That 2.x cookie is no longer
+  accepted, and is cleared when seen, since nothing could sign it out: a
+  browser that had it signs in once.
+- **The deploy's smoke test** reads freshness from `/api/status`, and on a
+  private dashboard checks that a signed-out caller is asked to sign in.
+- **Replacing `API_TOKEN`** now keeps every signed-in device signed in, but the
+  password must be set again, since it is keyed with the token.
 - **The code explains itself.** Every source file now opens with what it is for
   and how it fits with the others - the Worker's routes and cron, the database
   layer, each vendor's client, the relay agent, the scripts - and each function
@@ -82,6 +137,24 @@ checkout of any tag says which release it is.
 
 ### Fixed
 
+- **The Raw telemetry table, the vendor-flag alerts and a device's own alert
+  count now appear on the live site.** All three read the vendor's raw payload,
+  which the public view has never sent, so none of them had ever shown outside
+  the tests (gap 5). The Worker now sends the fields the alerts need as named
+  columns, and `telemetry`: the payload's fields that are on a reviewed list
+  of measurements, and nothing else - so the ids, the owner's notes, the
+  platform codes and the zone name a live plant record carries stay out, and so
+  does any field nobody has reviewed. A SolisCloud plant reporting zero alarms
+  stays silent; a vendor that sends no counter, or a blank one, is no longer
+  read as zero.
+- **Each device has a public name of its own.** Every device went out as
+  "unknown", since its real id carries its serial; each is now named by its
+  system and place ("s1-datalogger-1"), so the page can tell them apart.
+- **The end-to-end fixtures can no longer drift from the Worker.** They moved to
+  `tests/fixtures/dashboard-api.ts`, and a unit test runs the real Worker on
+  the vendor fixtures and fails if a fixture row carries a field the Worker does
+  not send - the raw payload was one - or lacks one it does. The rows also use
+  the aliases the Worker really publishes (`s1`, `s2`) rather than vendor ids.
 - **The page is no wider than a phone.** The tab bar could not shrink, and on a
   phone it made every page wider than the screen - "Devices" was cut off at the
   edge and "Historical Data" broke over two lines - while the overview's

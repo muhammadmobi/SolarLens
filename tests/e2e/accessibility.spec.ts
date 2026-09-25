@@ -45,7 +45,18 @@ async function stubApi(page: Page) {
       id: 'd1', provider: 'soliscloud', plant_id: 's1', kind: 'inverter', sn: '••••1234', name: 'Inverter',
       model: 'S5-GR3P10K', firmware: '1.0.78', status: 'online', signal_dbm: -63, strings: [{ index: 1, powerW: 4200 }],
       ac_phases: null, temp_c: 41, last_seen: NOW - 60,
+    }, {
+      // A datalogger, so the Devices tab draws its card, its week and its signal.
+      id: 'd2', provider: 'soliscloud', plant_id: 's1', kind: 'datalogger', sn: '••••7777', name: 'Datalogger',
+      model: 'S3-WIFI-ST', firmware: '10186', status: 'online', signal_dbm: -63, upload_cycle_s: 300, last_seen: NOW - 60,
+      logger: JSON.stringify({ link: 'Wi-Fi', signalLevel: 3, uptimeS: 7200, workingS: 86_400, manufacturedAt: NOW - 86_400 * 400 }),
     }],
+  })));
+  await page.route('**/api/devices/history**', (r) => r.fulfill(json({
+    now: NOW, days: 7, from: NOW - 7 * 86_400,
+    samples: [0, 1, 2, 3].map((i) => ({
+      device_id: 'd2', ts: NOW - 7 * 86_400 + i * 2 * 86_400, status: i === 2 ? 'offline' : 'online', signal_dbm: -60 - i, signal_pct: null,
+    })),
   })));
   await page.route('**/api/history**', (r) => r.fulfill(json({
     now: NOW, days: 30,
@@ -69,6 +80,17 @@ async function stubApi(page: Page) {
     feeds: [{ ts: NOW - 30, provider: 'soliscloud', ok: 1, detail: 'plants=1 inverters=1 new=1' }],
     relays: [{ name: 'Relay 1', state: 'ok', login_expires_at: NOW + 5 * 86_400, last_seen: NOW - 60, first_seen: NOW - 86_400, last_ok_at: NOW - 60 }],
   })));
+  // Settings as the owner sees it: every form, list and switch it can draw.
+  await page.route('**/auth/status', (r) => r.fulfill(json({ configured: true, password: true, passkeys: 1, required: false, role: 'owner', device: 'd1' })));
+  await page.route('**/auth/settings', (r) => r.fulfill(json({
+    password: true, required: false,
+    passkeys: [{ id: 'k1', name: 'Phone', created_at: NOW - 86_400, last_used_at: NOW - 60 }],
+    devices: [
+      { id: 'd1', role: 'owner', label: 'Chrome on Windows', created_at: NOW - 86_400, last_seen_at: NOW - 60, expires_at: NOW + 86_400, shared: false, this: true },
+      { id: 'd2', role: 'viewer', label: 'Safari on iPad', created_at: NOW - 86_400, last_seen_at: NOW - 600, expires_at: NOW + 86_400, shared: true, this: false },
+    ],
+    shares: [{ id: 'sh1', name: 'Family', created_at: NOW - 86_400, expires_at: null, revoked_at: null, devices: 1 }],
+  })));
 }
 
 /** Serious and critical only: see the note at the top of this file. */
@@ -87,6 +109,7 @@ const views = [
   ['Devices', '#/devices'],
   ['TV mode', '#/tv'],
   ['Guide', '#/guide'],
+  ['Settings', '#/settings'],
 ] as const;
 
 for (const [name, hash] of views) {
@@ -94,6 +117,8 @@ for (const [name, hash] of views) {
     await stubApi(page);
     await page.goto(`/${hash}`);
     await expect(page.locator('#view')).not.toBeEmpty();
+    // Settings draws in two steps; check what it settles on, not its loading line.
+    if (hash === '#/settings') await expect(page.locator('.settings')).toBeVisible();
     expect(await seriousViolations(page)).toEqual([]);
   });
 }

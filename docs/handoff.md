@@ -40,9 +40,9 @@ git clone https://github.com/muhammadmobi/SolarLens
 cd SolarLens
 npm ci
 npm run typecheck             # types for src/ and tests/
-npm run test:unit             # ~275 tests, a few seconds
+npm run test:unit             # ~530 tests, a few seconds
 npm run test:unit:coverage    # the same, with the coverage thresholds applied
-npm run test:e2e              # ~265 tests, about three minutes, needs Chrome
+npm run test:e2e              # ~420 tests, a few minutes, needs Chrome
 ```
 
 All of that runs with no Cloudflare account, no database and no vendor
@@ -123,8 +123,11 @@ GET /api/series      → power over a window, for the chart
 GET /api/health      → poll log, newest line per feed, relay list
 ```
 
-Reads are public. Writes need a token - `/api/poll` because it spends vendor
-quota, `/api/ingest/*` because they write.
+Reads are open until the owner turns on *Require sign-in to view* in Settings;
+then they need the owner or a share link (`src/auth/`). Writes need the owner -
+`/api/poll` because it spends vendor quota - and `/api/ingest/*` needs
+`INGEST_TOKEN`, which the relays carry. `/api/status` (feed freshness only)
+stays open for monitoring.
 
 ## 4. The code, file by file
 
@@ -133,7 +136,11 @@ quota, `/api/ingest/*` because they write.
 | `src/index.ts` | Every route, the auth middleware, the security headers, the cron entry point. Hono. |
 | `src/db.ts` | All SQL. Upserts, the latest-per-inverter query, series, daily rollups, the poll log, alarms, period totals, relays, a token store. |
 | `src/poll.ts` | The cron fan-out: which providers to call, in what order, what to do when one fails. |
-| `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, drops raw payloads. |
+| `src/auth/sessions.ts` | Who is asking: the signed session, the silent refresh and its rotation, signed-in devices, share links, the lockout. Its header explains the design. |
+| `src/auth/routes.ts` | The sign-in routes under `/auth`, Settings, and share links at `/s/`. |
+| `src/auth/webauthn.ts` | Passkeys: the CBOR, the keys and the two ceremonies, verified with WebCrypto. |
+| `src/auth/crypto.ts` | Tokens, hashes, HMAC and the password, all WebCrypto. |
+| `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, and sends the raw payload only as its alert fields and a cleaned `telemetry` copy. |
 | `src/relays.ts` | Validates a relay's report on itself into a narrow shape. |
 | `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. |
 | `src/providers/types.ts` | The `Provider` interface every adapter implements, plus shared shapes. |
@@ -168,7 +175,9 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 |---|---|---|
 | `inverters` | monitored unit | `id` is `{provider}:{vendor_id}`, or `{provider}:station:{plant_id}` when the plant is the unit. `tz_name` is the zone's name where the vendor states one - SolarMan's `regionTimezone`, SolisCloud's `timeZoneStandardId` - which the SolarMan plant here does and the SolisCloud plant here, as its relay forwards it, does not; `tz_offset_sec` the offset in force now |
 | `readings` | sample | Keyed `(inverter_id, ts, source)`. Holds the normalised columns **and** `raw`, the untouched vendor JSON, which is never served. `tz_offset_sec` is the offset in force *when it was read*, so a day keeps its boundary after the clocks change; every row in production carries it since the 2.9 backfill |
-| `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC |
+| `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC. A logger's `logger` (link, signal bars, uptime, make date) is public |
+| `device_network` | datalogger | Its operator and cell, or MAC address. Owner only, never served - and a table of its own, because a Worker rolled back to 2.10 would serve any new column on `devices` |
+| `device_samples` | change in a device's status or signal | The link history on the Devices tab. Written on a change, or hourly while nothing changes; kept 90 days |
 | `alarms` | vendor fault | Severity, raised, cleared, readable name |
 | `vendor_periods` | vendor period total | Day, month and year totals per plant, from the vendor itself, back to installation |
 | `poll_log` | poll attempt | The health endpoint and the footer read this; pruned after a week |
@@ -234,15 +243,35 @@ secret are set, and the relay disappears entirely.
 
 ## 8. Privacy: what is public and what is stripped
 
-The dashboard is public **on purpose** - a per-device unlock was removed
-because it cost a step on every new device and locked people out when the local
-copy was lost. What holds the line instead is `src/public-view.ts`:
+**Who can read** is the owner's choice since 3.0. Open, as in 2.x, until
+*Require sign-in to view* is turned on in Settings; then the owner (signed in
+once per device, renewed silently, never asked again) and anyone holding a
+share link. The 2.x per-device unlock was removed because it cost a step on
+every device and locked people out when the local copy was lost; the 3.0 login
+avoids both - a passkey or password once, and a year-long refresh token that
+renews itself. `src/auth/sessions.ts` has the design and its reasons.
+
+**What a read can carry** is the same either way, and `src/public-view.ts`
+decides it:
 
 - **Station and plant ids become positional aliases** - `s1`, `s2`. Positional,
   not hashed, because a SolarMan station id is eight digits and a hash of one is
   reversible by trying all hundred million.
 - **Serials are masked** to the last four characters.
-- **`raw`, the stored vendor payload, is never served.**
+- **`raw`, the stored vendor payload, is never served as it is.** Its alert
+  fields go out as named columns, and its measurements as `telemetry`: only
+  the fields on the reviewed list in `src/public-view.ts` (TELEMETRY_KEYS),
+  and only with a plain value. **A new vendor field shows in the Raw telemetry
+  table only once someone has read it and added it to that list** - that is the
+  point, since the plant records carry notes, codes and a zone name beside the
+  measurements. A device's own alert count goes out as `alert_status`, and a
+  device is named by a positional alias ("s1-datalogger-1"), not its serial.
+- **A datalogger's network handles are never served.** Its mobile operator
+  and cell, or its MAC address, are stored in `device_network` for the owner,
+  never on the devices row: a cell id or a MAC address can place a logger on a
+  map or tie it to one household, and a Worker rolled back to 2.10 would serve
+  any column on `devices` it did not know to strip. **Keep anything sensitive
+  that a new version adds out of the tables an older version selects `*` from.**
 - **A relay's id never leaves the database**; the page names relays by nickname
   or as "Relay 1", "Relay 2". The id is random and never the computer's name,
   because a Windows machine name often carries a company and a person's name.
@@ -254,7 +283,8 @@ copy was lost. What holds the line instead is `src/public-view.ts`:
 |---|---|---|
 | Cloudflare account login | The owner's password manager | Only the owner can recover it |
 | Cloudflare API token, for deploying | GitHub → environment `production` → `CLOUDFLARE_API_TOKEN` | Roll it in Cloudflare and update the secret; it is shown once |
-| `API_TOKEN` (guards `/api/poll`) | Cloudflare secret + local `.dev.vars` | `scripts/rotate-tokens.ps1 -Api` |
+| `API_TOKEN` (the owner's key: sign-in setup code, session signing, password pepper, write gate) | Cloudflare secret + local `.dev.vars` | `scripts/rotate-tokens.ps1 -Api`. Devices and passkeys keep working; **the password must be set again** (Settings → Forgot your password?, with the new token as the setup code) |
+| The owner's password and passkeys | The owner; the database holds a keyed hash and public keys only | *Forgot your password?* with the setup code; a passkey needs only its own device |
 | `INGEST_TOKEN` (lets a relay push) | Cloudflare secret + `.dev.vars` on each relay laptop | `scripts/rotate-tokens.ps1 -Ingest`, then re-run the installer on each laptop |
 | SolarMan session tokens | `.dev.vars`, refreshed automatically | Re-capture from the portal; `README.md` has the steps |
 | SolisCloud portal login | The `.relay-profile` browser profile beside the relay | `renew-solis-login.cmd` |
@@ -382,7 +412,8 @@ The short history a newcomer would otherwise repeat.
 
 ## 14. What is still missing
 
-`docs/feature-gaps.md` is the honest list. SolarMan alarm detail and notifications to a closed browser, both listed here before, are built. What is left:
+`docs/roadmap.md` is the plan for 3.0, phase by phase, and what was left out on
+purpose. `docs/feature-gaps.md` is the honest list. SolarMan alarm detail and notifications to a closed browser, both listed here before, are built. What is left:
 
 - ~~The Worker's own routes have no test that runs them before a merge.~~
   **Closed in 2.7**: `tests/helpers/d1.ts` puts SQLite behind the D1 interface,
@@ -392,14 +423,14 @@ The short history a newcomer would otherwise repeat.
   and the deploy's smoke test cover.
 - **SolisCloud's official API key** would remove the weekly login, the laptop
   and the relay entirely.
-- **The page reads a raw vendor payload the server never sends.** For privacy,
-  `src/public-view.ts` drops each vendor's raw payload from every public
-  answer, but three parts of the dashboard still read it: the Raw telemetry
-  table, the alerts built from the payload's own fields (SolisCloud's alarm
-  count and level, SolarMan's warning flags and datalogger link), and a device's
-  own alert count. None of them shows on the live site, and the guide still
-  points people to the raw table. The tests use fixtures that include the
-  payload, so they pass. `docs/feature-gaps.md` gap 5 has the two ways to close it.
+- ~~The page reads a raw vendor payload the server never sends.~~ **Closed in
+  3.0.** The Worker sends the alert fields as named columns and a cleaned
+  `telemetry` copy for the Raw telemetry table (`src/public-view.ts`). The
+  end-to-end fixtures now live in `tests/fixtures/dashboard-api.ts`, and
+  `tests/unit/fixture-contract.test.ts` holds them to what the real Worker
+  sends, field by field. **When you add a column to `/api/latest` or
+  `/api/devices`, add it to those fixtures too** - the contract test will
+  say so if you forget.
 - **Push is set up once per server and once per device.** Until
   `node scripts/make-vapid-key.mjs` has run, the Alerts tab says notifications to
   a closed browser are not set up - which is the state to check first when a
