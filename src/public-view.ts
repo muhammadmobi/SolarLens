@@ -129,7 +129,7 @@ const IDENT_KEY = new RegExp([
 ].join('|'));
 
 /** Field names under which a long run of digits is a time or an energy total, not an id. */
-const LONG_NUMBER_OK = /time|date|stamp|energy|total|power|value|month|year|day|kwh|wh$/i;
+const LONG_NUMBER_OK = /time|date|stamp|energy|total|power|value|month|year|day|wh/i;
 
 /**
  * The payload as a table of measurements, for the Raw telemetry table.
