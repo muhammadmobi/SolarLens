@@ -98,7 +98,7 @@ test('sends you only to pages that exist', async ({ page }) => {
   await stubApi(page);
   await page.goto('/#/guide');
   const hrefs = await page.locator('.guide a[href^="#/"]').evaluateAll((as) => [...new Set(as.map((a) => a.getAttribute('href')))]);
-  expect(hrefs.sort()).toEqual(['#/', '#/alerts', '#/devices', '#/history', '#/power', '#/tv']);
+  expect(hrefs.sort()).toEqual(['#/', '#/alerts', '#/devices', '#/history', '#/power', '#/settings', '#/tv']);
 
   // Follow one from the table the way a person would.
   await page.locator('table.find a[href="#/history"]').first().click();

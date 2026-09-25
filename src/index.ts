@@ -3,29 +3,38 @@
  *
  * Requests arrive here from three kinds of caller:
  *
- * - The dashboard (public/index.html), which reads the GET /api/* routes. Those
- *   are open to anyone, and every answer carrying plant data goes through
- *   ./public-view first so no vendor identifier leaves the Worker. The two push
- *   reads are the exceptions: /api/push/key serves only a public key, and
- *   /api/push/recent answers only a device that is signed up.
+ * - The dashboard (public/index.html), which reads the GET /api/* routes.
+ *   Who is asking is worked out first (./auth/sessions identify): the owner,
+ *   someone who opened a share link, or nobody. Reads are open to nobody too
+ *   until the owner turns "require sign-in to view" on in Settings; every
+ *   answer carrying plant data goes through ./public-view either way, so no
+ *   vendor identifier leaves the Worker. /api/status (freshness only),
+ *   /api/push/key (a public key) and /api/push/recent (only for a device that
+ *   is signed up) stay open regardless.
  * - The relay laptops, which push what SolisCloud's portal shows them to
- *   POST /api/ingest/*, each request carrying INGEST_TOKEN.
- * - Anyone else writing: signing a phone up for notifications, or forcing a
- *   poll. Those need API_TOKEN, as a header or as the cookie /auth leaves -
- *   except turning a phone's notifications off, which needs only that phone's
- *   own push address (see the middleware below).
+ *   POST /api/ingest/*, each request carrying INGEST_TOKEN. The login does not
+ *   touch them.
+ * - The owner writing: signing a phone up for notifications, or forcing a
+ *   poll. Those need the owner signed in, or API_TOKEN as a header - except
+ *   turning a phone's notifications off, which needs only that phone's own
+ *   push address (see the middleware below).
+ * - The sign-in routes under /auth (./auth/routes), and share links at /s/.
  *
  * Anything else is the dashboard itself, served from public/ by the
- * static-assets binding at the bottom of this file - apart from /auth, which
- * sets the sign-in cookie and sends the browser back to the dashboard.
+ * static-assets binding at the bottom of this file. The page holds no data of
+ * its own - it is the same file as in the public repository - so it is served
+ * to anyone, and asks for a sign-in when the API says one is needed.
  *
  * The cron (scheduled, at the very end) polls every vendor the secrets allow,
  * then decides whether anything is worth a phone notification.
  */
-import { Hono } from 'hono';
-import { getCookie, setCookie } from 'hono/cookie';
+import { Hono, type Context, type Next } from 'hono';
+import { getCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { daily, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
+import { auth, applyCookies, openShareLink, type AuthVars } from './auth/routes';
+import { REFRESH_COOKIE, SESSION_COOKIE, type Caller, deviceLabel, identify, owner, startDevice } from './auth/sessions';
+import { timingSafeEqual } from './auth/crypto';
+import { daily, deviceNetworks, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
 import { tzNameOf, tzOffsetSec } from './providers/units';
 import { aliasFor, deviceAliasFor, publicAlarms, publicDeviceSamples, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
@@ -42,9 +51,10 @@ import {
 } from './providers/soliscloud';
 import { stationReading as solarmanStationReading } from './providers/solarman';
 
+/** The cookie 2.x left on a device that opened /auth?t=: the API token itself. Still honoured. */
 const COOKIE = 'sl_token';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 
 /**
  * Security headers on every response.
@@ -93,17 +103,6 @@ app.use('*', async (c, next) => {
   c.res = res;
 });
 
-/**
- * Compare two tokens without leaking, through how long the comparison took, how
- * many leading characters were right.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 /** The token from an "Authorization: Bearer <token>" header, or null. */
 function bearer(header: string | undefined): string | null {
   if (!header) return null;
@@ -112,61 +111,102 @@ function bearer(header: string | undefined): string | null {
 }
 
 /**
- * /auth?t=<API_TOKEN> drops an HttpOnly cookie so the browser UI can call
- * /api/* without embedding the token in the page. Bookmark the URL once and
- * the dashboard "just opens" on that device afterwards.
+ * Who is asking, for every route that answers with data or signs in.
+ *
+ * The API token - as a header, or the sl_token cookie 2.x left - is the owner.
+ * Otherwise the session and refresh cookies are read, and renewed on the way
+ * if the session has run out (./auth/sessions identify), so a signed-in
+ * browser never has to sign in again. The static page is left alone: it has
+ * no data in it, and its response cannot take cookies.
  */
-app.get('/auth', (c) => {
+const identifyCaller = async (c: Context<{ Bindings: Env; Variables: AuthVars }>, next: Next) => {
+  const secret = c.env.API_TOKEN;
+  let caller: Caller = { role: null, deviceId: null, via: 'none' };
+  const given = bearer(c.req.header('Authorization')) ?? getCookie(c, COOKIE);
+  if (secret && given && timingSafeEqual(given, secret)) {
+    caller = { role: 'owner', deviceId: null, via: 'token' };
+  } else if (secret) {
+    const session = getCookie(c, SESSION_COOKIE);
+    const refresh = getCookie(c, REFRESH_COOKIE);
+    if (session || refresh) {
+      const found = await identify(c.env.DB, secret, { session, refresh }, nowSec());
+      caller = found.caller;
+      applyCookies(c, found.set);
+    }
+  }
+  c.set('caller', caller);
+  return next();
+};
+for (const path of ['/api/*', '/auth', '/auth/*', '/s/*']) app.use(path, identifyCaller);
+
+/**
+ * /auth?t=<API_TOKEN>: the 2.x way to unlock a device, kept as a back door
+ * that needs no password. It now signs the browser in as the owner with a
+ * proper session, rather than leaving the token itself in a cookie as 2.x did.
+ */
+app.get('/auth', async (c) => {
   const token = c.env.API_TOKEN;
   const given = c.req.query('t') ?? '';
   if (!token || !timingSafeEqual(given, token)) return c.text('forbidden', 403);
-  setCookie(c, COOKIE, given, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'Lax',
-    path: '/',
-    maxAge: 365 * 24 * 3600,
-  });
+  applyCookies(c, await startDevice(c.env.DB, token, 'owner', deviceLabel(c.req.header('user-agent')), nowSec()));
   return c.redirect('/');
 });
 
+app.route('/auth', auth);
+app.get('/s/:link', openShareLink);
+
 /**
- * Reads are open; writes are not.
+ * Who may read, and who may write.
  *
- * The dashboard is meant to be opened on a phone, a work laptop or a relative's
- * tablet without anybody copying a token first, so GET /api/* answers everyone.
- * What that costs is bounded deliberately: the payloads go through
- * ./public-view, which strips the vendor identifiers, and nothing here can
- * change data or spend quota. /api/poll can - it makes live vendor calls - so
- * it keeps the API_TOKEN gate, and /api/ingest/* keeps its own INGEST_TOKEN.
+ * Reads: anyone, until the owner turns "require sign-in to view" on in
+ * Settings - then the owner and anyone they shared a link with. Until 3.0 the
+ * dashboard was always open, which is still the default, so nothing locks by
+ * surprise on the day this ships; see docs/roadmap.md phase 3.
+ *
+ * Writes need the owner: signed in, or with API_TOKEN as a header. A share
+ * link can read and never write. /api/ingest/* keeps its own INGEST_TOKEN,
+ * which the relays carry.
+ *
+ * Open whatever the setting: /api/status says only how fresh each feed is, for
+ * a monitor; /api/push/key is a public key; /api/push/recent answers only a
+ * device that is signed up, and the service worker asking has no session to
+ * show once its hour is up.
  */
+const ALWAYS_OPEN = new Set(['/api/status', '/api/push/key', '/api/push/recent', '/api/push/unsubscribe']);
 app.use('/api/*', async (c, next) => {
   if (c.req.path === '/api/ingest' || c.req.path.startsWith('/api/ingest/')) return next();
-  if (c.req.method === 'GET') return next();
   // Turning notifications off for a device takes that device's own push
   // endpoint, which only it knows; it can do no harm to anyone else, and asking
-  // for the key to stop notifications would only keep unwanted ones coming.
-  if (c.req.path === '/api/push/unsubscribe') return next();
+  // for a sign-in to stop notifications would only keep unwanted ones coming.
+  if (ALWAYS_OPEN.has(c.req.path)) return next();
+  const caller = c.get('caller');
 
-  const token = c.env.API_TOKEN;
-  if (!token) {
+  if (c.req.method === 'GET') {
+    if (caller.role) return next();
+    const o = await owner(c.env.DB);
+    if (o?.require_sign_in) return c.json({ error: 'signin' }, 401);
+    return next();
+  }
+
+  if (!c.env.API_TOKEN) {
     console.warn('API_TOKEN is not set: the write endpoints under /api/* are unauthenticated');
     return next();
   }
-  const given = bearer(c.req.header('Authorization')) ?? getCookie(c, COOKIE) ?? '';
-  if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
-  return next();
+  if (caller.role === 'owner') return next();
+  return c.json({ error: 'unauthorized' }, 401);
 });
 
 /**
- * A minute of edge caching on the read endpoints.
+ * A minute of caching on the read endpoints, in the browser only.
  *
  * The data only moves when the cron does, so a second request inside the same
- * minute can be answered without touching D1. That is not a nicety: the free
- * tier's row budget has been exhausted twice by this project already, and a
- * public URL can be requested by anything at any rate.
+ * minute can be answered without touching D1 - which matters: the free tier's
+ * row budget has been exhausted twice by this project already. `private`
+ * rather than `public` since 3.0: an answer can now depend on who is asking
+ * (the owner sees a logger's network handles; a signed-out browser may be
+ * refused), so no shared cache between here and the browser may keep one.
  */
-const CACHE = 'public, max-age=60';
+const CACHE = 'private, max-age=60';
 
 app.get('/api/latest', async (c) => {
   const rows = await latest(c.env.DB);
@@ -261,6 +301,17 @@ app.get('/api/push/recent', async (c) => {
   const found = await recentMessages(c.env.DB, audience);
   if (!found) return c.json({ error: 'not a device signed up for notifications' }, 404);
   return c.json({ now: nowSec(), ...found });
+});
+
+/**
+ * How fresh each feed is, and nothing else: open to anyone even when sign-in is
+ * required, so an uptime monitor - and the deploy's own smoke test - can tell
+ * that readings are arriving without being able to read them.
+ */
+app.get('/api/status', async (c) => {
+  const feeds = latestPerProvider(await recentPolls(c.env.DB, 200)).map((f) => ({ provider: f.provider, ok: f.ok, ts: f.ts }));
+  c.header('Cache-Control', 'public, max-age=60');
+  return c.json({ now: nowSec(), feeds });
 });
 
 app.get('/api/health', async (c) => {
@@ -386,10 +437,22 @@ app.post('/api/ingest/devices', async (c) => {
   return c.json({ stored: devices.length, ids: devices.map((d) => d.id) });
 });
 
+/**
+ * The hardware. The owner also gets each datalogger's network handles - its
+ * operator and cell, or its MAC address - which nobody else ever does: they
+ * are joined in here, after the public view has made each row safe.
+ */
 app.get('/api/devices', async (c) => {
-  const [devices, ids] = await Promise.all([listDevices(c.env.DB), inverterIds(c.env.DB)]);
+  const isOwner = c.get('caller').role === 'owner';
+  const [devices, ids, networks] = await Promise.all([
+    listDevices(c.env.DB), inverterIds(c.env.DB), isOwner ? deviceNetworks(c.env.DB) : Promise.resolve(null),
+  ]);
+  const rows = publicDevices(devices, aliasFor(ids)).map((row, i) => {
+    const network = networks?.get(devices[i].id);
+    return network ? { ...row, network } : row;
+  });
   c.header('Cache-Control', CACHE);
-  return c.json({ now: nowSec(), devices: publicDevices(devices, aliasFor(ids)) });
+  return c.json({ now: nowSec(), devices: rows });
 });
 
 /**
