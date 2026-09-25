@@ -23,8 +23,8 @@
  * - the handful of fields the dashboard's alerts read (SolisCloud's alarm
  *   count and level, SolarMan's warning flags and datalogger link), as named
  *   columns - see vendorSignals;
- * - the rest as `telemetry`, a copy holding measurements only, for the Raw
- *   telemetry table - see safeTelemetry.
+ * - its reviewed measurement fields as `telemetry`, for the Raw telemetry
+ *   table - see safeTelemetry.
  *
  * Until 3.0 the page read `raw` directly, and since `raw` was never sent, none
  * of those three things ever showed on the live site (feature-gaps gap 5).
@@ -79,7 +79,9 @@ function asRecord(raw: unknown): Rec | null {
 
 /** A number, or null for anything that is not one - "", null, "n/a". */
 function numOrNull(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null;
+  // Number('  ') is 0, so a blank must be caught before it is converted: a
+  // blank alarm counter is "not reported", not SolisCloud saying zero.
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -111,37 +113,69 @@ export function vendorSignals(raw: unknown) {
 }
 
 /**
- * Field names that identify rather than measure: ids and serials in every
- * spelling the two vendors use (id, sno, systemId, collectorSn, inverterNo),
- * network handles, names, places, contact details and links. Matched at a word
- * boundary or a camelCase one, so "idle" and "snapshot" are not caught while
- * "stationId" and "deviceSn" are.
+ * The payload fields the Raw telemetry table may show, reviewed one by one.
+ *
+ * An allow-list, because the payloads carry far more than measurements. The
+ * SolisCloud plant record alone has over four hundred fields, and among the
+ * ids and serials sit things no name-based rule would catch: the owner's own
+ * notes (remark1-3), free-text extras, third-party platform codes, a logo URL,
+ * the plant's time-zone name - which names its city. A field reaches the page
+ * only if it is named here; a vendor adding one tomorrow adds nothing to the
+ * page until someone reads it and adds it to this list.
+ *
+ * Each name also allows its unit companion - "power" allows "powerStr" and
+ * "powerUnit" - since a figure without its unit reads wrong.
  */
-const IDENT_KEY = new RegExp([
-  '^ids?$', '^id[A-Z_]', 'Ids?$', 'IDs?$', '_ids?$', 'Ids?[A-Z_]',
-  '^sno$', 'Sno$', '^sn$', 'Sn$', 'SN$', '[Ss]erial', 'No$', '[Nn]umber$',
-  '[Mm]ac$', '[Mm]ac[A-Z]', '^ip$', 'Ip$', 'IP$', '[Ss]sid', '[Ii]mei', '[Ii]ccid', '[Ii]msi',
-  '[Nn]ame$', '[Nn]ame[A-Z]', '[Uu]ser', '[Oo]wner', '[Aa]ccount', '[Tt]oken', '[Pp]ass',
-  '[Ee]mail', '[Pp]hone', '[Mm]obile', '[Aa]ddr', '[Pp]osition', '[Ll]ocation',
-  '[Ll]at$', '[Ll]atitude', '[Ll]ng$', '[Ll]on$', '[Ll]ongitude',
-  '[Cc]ity', '[Cc]ounty', '[Cc]ountry', '[Rr]egion', '[Pp]rovince', '[Zz]ip', '[Pp]ostal',
-  '[Uu]rl$', '[Uu]rl[A-Z]', '[Pp]ic', '[Ll]ogo', '[Ii]mage',
-].join('|'));
+const TELEMETRY_KEYS = new Set([
+  // SolisCloud plant record: power, energy by period, and the plant's own counts.
+  'power', 'psum', 'state', 'fullHour', 'capacity', 'capacityPercent', 'dip', 'azimuth',
+  'dayEnergy', 'monthEnergy', 'yearEnergy', 'allEnergy',
+  'alarmCount', 'alarmLevel', 'inverterCount', 'inverterOnlineCount', 'generateDays', 'dataTimestamp',
+  'monthCarbonDioxide', 'powerStationAvoidedCo2', 'powerStationAvoidedTce', 'powerStationNumTree',
+  'batteryPower', 'batteryPercent', 'batteryCapacitySoc2', 'storageBatteryVoltage', 'batteryCapacityEnergy',
+  'batteryChargeEnergy', 'batteryDischargeEnergy', 'batteryTodayChargeEnergy', 'batteryTodayDischargeEnergy',
+  'batteryChargeMonthEnergy', 'batteryDischargeMonthEnergy', 'batteryChargeYearEnergy', 'batteryDischargeYearEnergy',
+  'batteryChargeTotalEnergy', 'batteryDischargeTotalEnergy', 'batteryTotalChargeEnergy', 'batteryTotalDischargeEnergy',
+  'familyLoadPower', 'familyLoadPercent', 'totalLoadPower', 'bypassLoadPower',
+  'homeLoadEnergy', 'homeLoadTodayEnergy', 'homeLoadMonthEnergy', 'homeLoadYearEnergy', 'homeLoadTotalEnergy',
+  'gridPurchasedEnergy', 'gridPurchasedDayEnergy', 'gridPurchasedMonthEnergy', 'gridPurchasedYearEnergy', 'gridPurchasedTotalEnergy',
+  'gridSellEnergy', 'gridSellDayEnergy', 'gridSellMonthEnergy', 'gridSellYearEnergy', 'gridSellTotalEnergy',
+  'homeGridTodayEnergy', 'homeGridMonthEnergy', 'homeGridYearEnergy', 'homeGridTotalEnergy',
+  'backupTodayEnergy', 'backupMonthEnergy', 'backupYearEnergy', 'backupTotalEnergy',
+  // SolisCloud's weather for the plant: conditions, not a place.
+  'weather', 'condTxtD', 'condTxtN', 'sr', 'ss', 'tmpMax', 'tmpMin', 'hum', 'pcpn', 'pres',
+  'windSpd', 'windDir', 'windSpeed', 'windDirection', 'humidity', 'temp', 'rainfall', 'airPressure',
+  // SolarMan station snapshot: power, energy by period, ratios and flags.
+  'generationPower', 'usePower', 'wirePower', 'buyPower', 'gridPower', 'chargePower', 'dischargePower',
+  'batterySoc', 'batteryStatus', 'wireStatus', 'temperature', 'lastUpdateTime', 'generationCapacity',
+  'generationValue', 'useValue', 'gridValue', 'buyValue', 'chargeValue', 'dischargeValue',
+  'generationMonth', 'useMonth', 'gridMonth', 'buyMonth', 'chargeMonth', 'dischargeMonth',
+  'generationYear', 'useYear', 'gridYear', 'buyYear', 'chargeYear', 'dischargeYear',
+  'generationTotal', 'generationUploadTotal', 'useTotal', 'gridTotal', 'buyTotal', 'chargeTotal', 'dischargeTotal',
+  'useUploadTotal', 'gridUploadTotal', 'buyUploadTotal', 'chargeUploadTotal', 'dischargeUploadTotal',
+  'selfGenAndUseValue', 'selfSufficiencyValue', 'absorbedUseValue', 'genForGrid', 'useFromBuy',
+  'generationRatio', 'useRatio', 'gridRatio', 'buyRatio', 'chargeRatio', 'useDischargeRatio',
+  'generationRatioMonth', 'useRatioMonth', 'gridRatioMonth', 'buyRatioMonth',
+  'generationRatioYear', 'useRatioYear', 'gridRatioYear', 'buyRatioYear',
+  'fullPowerHoursDay', 'fullPowerHoursTotal', 'fullPowerYesterdayHours',
+  'networkStatus', 'warningStatus', 'businessWarningStatus', 'consumerWarningStatus',
+]);
 
-/** Field names under which a long run of digits is a time or an energy total, not an id. */
-const LONG_NUMBER_OK = /time|date|stamp|energy|total|power|value|month|year|day|wh/i;
+/** "powerStr" and "powerUnit" belong to "power"; anything else is its own field. */
+function telemetryKeyAllowed(k: string): boolean {
+  if (TELEMETRY_KEYS.has(k)) return true;
+  const base = k.replace(/(?:Str|Unit)$/, '');
+  return base !== k && TELEMETRY_KEYS.has(base);
+}
 
 /**
  * The payload as a table of measurements, for the Raw telemetry table.
  *
- * Built by allowing, not by stripping: a field is kept only if its name is not
- * an identifier (IDENT_KEY) and its value is a plain number, a boolean, or a
- * short string with no long run of digits in it. A long whole number is kept
- * only under a name that says it is a time or an energy figure. So a vendor
- * that adds a new id field tomorrow, under any name, has it dropped unless the
- * name happens to say "total" - and the ids the two vendors send today are all
- * caught by name as well. Nested objects are left out: the page's detail cards
- * already show the ones worth showing, and each would need the same review.
+ * A field is kept only if it is on the reviewed list above, and then only if
+ * its value is a plain number, a boolean or a short string - no nested
+ * objects, no text long enough to be a note, nothing that looks like an
+ * address or a link. The value checks are a second line: a reviewed field
+ * that one day carries something odd is still dropped.
  *
  * Returned as JSON text, like `metrics`, or null when nothing survives.
  */
@@ -150,19 +184,14 @@ export function safeTelemetry(raw: unknown): string | null {
   if (!r) return null;
   const out: Rec = {};
   for (const [k, v] of Object.entries(r)) {
-    if (k.startsWith('_') || IDENT_KEY.test(k)) continue;
+    if (!telemetryKeyAllowed(k)) continue;
     if (v === null || typeof v === 'boolean') { out[k] = v; continue; }
     if (typeof v === 'number') {
-      if (!Number.isFinite(v)) continue;
-      const digits = String(Math.trunc(Math.abs(v))).length;
-      if (digits >= 7 && !LONG_NUMBER_OK.test(k)) continue;
-      out[k] = v;
+      if (Number.isFinite(v)) out[k] = v;
       continue;
     }
     if (typeof v === 'string') {
-      if (v.length > 40) continue;
-      if (/\d{7,}/.test(v) && !LONG_NUMBER_OK.test(k)) continue;
-      if (/@|https?:|www\./i.test(v)) continue;
+      if (v.length > 40 || /@|https?:|www\./i.test(v)) continue;
       out[k] = v;
     }
   }
@@ -188,22 +217,51 @@ export function publicInverters<T extends { id: string; serial?: string | null; 
 }
 
 /**
+ * A public id for each device: its system's alias, its kind and its place
+ * among that system's devices of that kind - "s1-datalogger-1".
+ *
+ * A device's own id carries its serial ("soliscloud:datalogger:<sn>"), so it
+ * cannot go out, and until 3.0 every device went out as "unknown": harmless
+ * while nothing joined on it, but a public answer that does not say which
+ * device is which is one the page cannot build on. So each device gets a
+ * positional alias the same way systems do. The rows must come in a
+ * stable order - listDevices sorts them - for the alias to stay put between
+ * calls.
+ */
+export function deviceAliasFor<T extends { id: string; kind?: string | null; plant_id?: string | null }>(
+  rows: T[],
+  alias: Alias,
+): Alias {
+  const map = new Map<string, string>();
+  const seen = new Map<string, number>();
+  for (const r of rows) {
+    const group = `${alias(r.plant_id) ?? 'unknown'}-${r.kind ?? 'device'}`;
+    const n = (seen.get(group) ?? 0) + 1;
+    seen.set(group, n);
+    map.set(r.id, `${group}-${n}`);
+  }
+  return (id) => (id == null ? null : (map.get(id) ?? 'unknown'));
+}
+
+/**
  * Device rows for a public response, stripped and aliased the same way. The one
  * payload field the page reads - SolarMan's own alert count on a device record,
  * where -1 means "nothing to report" - comes across as `alert_status`.
  */
-export function publicDevices<T extends { id: string; sn?: string | null; plant_id?: string | null; raw?: unknown }>(
+export function publicDevices<T extends { id: string; kind?: string | null; sn?: string | null; plant_id?: string | null; raw?: unknown }>(
   rows: T[],
   alias: Alias,
 ) {
+  const deviceAlias = deviceAliasFor(rows, alias);
   return rows.map((r) => ({
     ...omit(r, ['raw', 'sn', 'plant_id']),
-    id: alias(r.id),
+    id: deviceAlias(r.id),
     plant_id: alias(r.plant_id),
     sn: maskSerial(r.sn),
     alert_status: numOrNull(asRecord(r.raw)?.alertStatus),
   }));
 }
+
 
 /** Series and daily rows carry only an inverter_id worth hiding. */
 export function publicRows<T extends { inverter_id: string }>(rows: T[], alias: Alias) {

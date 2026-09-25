@@ -66,8 +66,8 @@ export function inverters(overrides: Partial<Record<'solis' | 'solarman', Record
 export function devices() {
   return [
     {
-      id: 'soliscloud:inverter:DEMO01', provider: 'soliscloud', plant_id: SOLIS, kind: 'inverter',
-      sn: 'DEMO01', name: 'Demo Solis Inverter', model: 'S5-GR3P10K', firmware: '87003E',
+      id: 's1-inverter-1', provider: 'soliscloud', plant_id: SOLIS, kind: 'inverter',
+      sn: '••••MO01', name: 'Demo Solis Inverter', model: 'S5-GR3P10K', firmware: '87003E',
       rated_power_w: 10000, status: 'online', signal_dbm: null, signal_pct: null, upload_cycle_s: null,
       commissioned_at: 1709121876, warranty_until: 1866816000, last_seen: NOW - 120,
       strings: JSON.stringify([
@@ -83,16 +83,17 @@ export function devices() {
       battery: null, updated_at: NOW, alert_status: null,
     },
     {
-      id: 'soliscloud:datalogger:LOG01', provider: 'soliscloud', plant_id: SOLIS, kind: 'datalogger',
-      sn: 'LOG01', name: 'S3-WIFI-ST', model: 'S3-WIFI-ST', firmware: '10186',
+      id: 's1-datalogger-1', provider: 'soliscloud', plant_id: SOLIS, kind: 'datalogger',
+      sn: '••••OG01', name: 'S3-WIFI-ST', model: 'S3-WIFI-ST', firmware: '10186',
       rated_power_w: null, status: 'online', signal_dbm: -58, signal_pct: null, upload_cycle_s: 300,
       commissioned_at: null, warranty_until: null, last_seen: NOW - 120,
       strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
-      temp_c: null, dc_bus_v: null, battery: null, updated_at: NOW, alert_status: null,
+      temp_c: null, dc_bus_v: null, battery: null,
+      updated_at: NOW, alert_status: null,
     },
     {
-      id: 'solarman:inverter:HYB01', provider: 'solarman', plant_id: HYBRID, kind: 'inverter',
-      sn: 'HYB01', name: 'Demo Hybrid Inverter', model: 'Single phase LV Hybrid', firmware: 'V1.0 / V2.0',
+      id: 's2-inverter-1', provider: 'solarman', plant_id: HYBRID, kind: 'inverter',
+      sn: '••••YB01', name: 'Demo Hybrid Inverter', model: 'Single phase LV Hybrid', firmware: 'V1.0 / V2.0',
       rated_power_w: 3500, status: 'online', signal_dbm: null, signal_pct: 84, upload_cycle_s: null,
       commissioned_at: null, warranty_until: null, last_seen: NOW - 200,
       strings: JSON.stringify([{ index: 1, powerW: 120, voltageV: 24.2, currentA: 5 }]),
@@ -109,12 +110,13 @@ export function devices() {
       updated_at: NOW, alert_status: null,
     },
     {
-      id: 'solarman:datalogger:LOG02', provider: 'solarman', plant_id: HYBRID, kind: 'datalogger',
-      sn: 'LOG02', name: 'Datalogger', model: 'LSW-3', firmware: 'MW3_15U_5406_1.20',
+      id: 's2-datalogger-1', provider: 'solarman', plant_id: HYBRID, kind: 'datalogger',
+      sn: '••••OG02', name: 'Datalogger', model: 'LSW-3', firmware: 'MW3_15U_5406_1.20',
       rated_power_w: null, status: 'online', signal_dbm: null, signal_pct: 84, upload_cycle_s: 300,
       commissioned_at: null, warranty_until: null, last_seen: NOW - 200,
       strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
-      temp_c: null, dc_bus_v: null, battery: null, updated_at: NOW, alert_status: null,
+      temp_c: null, dc_bus_v: null, battery: null,
+      updated_at: NOW, alert_status: null,
     },
   ];
 }
