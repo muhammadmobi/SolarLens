@@ -34,7 +34,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 3. [Quick start (≈10 minutes)](#quick-start-10-minutes)
 4. [Getting credentials](#getting-credentials) — [SolisCloud](#soliscloud-official-api-key) · [SolarMan](#solarman-official-business-api) · [SolarMan fallback](#solarman-browser-session-fallback)
 5. [SolisCloud relay agent](#soliscloud-relay-agent) — [one command on Windows](#one-command-on-windows) · [more than one machine](#running-it-on-more-than-one-machine) · [replacing a token](#replacing-a-token)
-6. [Notifications on your phone](#notifications-on-your-phone)
+6. [Notifications on your phone](#notifications-on-your-phone) · [Signing in, and making it private](#signing-in-and-making-it-private)
 7. [Configuration reference](#configuration-reference)
 8. [Local development](#local-development)
 9. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request) · [where the reports are](#where-the-reports-are)
@@ -145,7 +145,7 @@ npm run cf -- d1 info solar-lens  # the general escape hatch
 **2. Set your secrets** — each command prompts for the value; nothing is stored in the repo.
 
 ```bash
-npm run cf -- secret put API_TOKEN       # gates the routes that write or spend quota
+npm run cf -- secret put API_TOKEN       # the owner's key: the sign-in setup code, and the gate on writes
 npm run cf -- secret put INGEST_TOKEN    # gates the push endpoints used by local agents
 ```
 
@@ -198,11 +198,12 @@ The first deploy asks you to register a `workers.dev` subdomain (a one-time name
 **4. Open the dashboard**
 
 Open `https://solar-lens.<your-subdomain>.workers.dev`. That is all — on any
-phone, tablet or laptop, with nothing to copy first. Readings are public by
-design, with vendor identifiers stripped from every response; see
-[Reads are public; writes are not](#reads-are-public-writes-are-not) for exactly
-what that publishes and how to put a login in front of it if your site needs
-one.
+phone, tablet or laptop, with nothing to copy first. Until you choose
+otherwise the readings are open to anyone with the address, with vendor
+identifiers stripped from every response; to make the dashboard private, set up
+sign-in (below) and turn on **Require sign-in to view** in Settings. See
+[Who can read, and who can write](#who-can-read-and-who-can-write) for exactly
+what each choice publishes.
 
 The first data arrives on the next 5-minute cron tick, or immediately with:
 
@@ -429,10 +430,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\rotate-tokens.ps1 -I
 ```
 
 `-Ingest` sets a new `INGEST_TOKEN` in Cloudflare, writes it to `.dev.vars` and
-restarts the relay. `-Api` does the same for `API_TOKEN` and prints the fresh
-`/auth?t=…` link — note that it signs out every device, since the cookie *is*
-the token. Cloudflare is updated first, so a failure leaves the old token
-working everywhere rather than half-changed.
+restarts the relay. `-Api` does the same for `API_TOKEN`. Signed-in devices and
+passkeys keep working through it, but **the password does not**: it is keyed
+with `API_TOKEN`, so set it again afterwards - Settings, *Forgot your
+password?*, with the new token as the setup code. Cloudflare is updated first,
+so a failure leaves the old token working everywhere rather than half-changed.
 
 Elsewhere, do the same three steps by hand: `npm run cf -- secret put <NAME>`,
 update `.dev.vars`, restart the relay.
@@ -449,7 +451,7 @@ The Alerts tab has two switches. **Tell me when something changes** works while 
 
    It makes the key and stores it as the Worker secret `VAPID_KEY` straight away; the private half is never printed or saved to a file. Run it again and it changes nothing; `--replace` makes a new key, after which every device has to turn notifications on again.
 
-2. **On each phone or computer**, open the dashboard, go to the Alerts tab and press **Turn on for this device**. Signing a device up is a write, so it needs the key: a device you have opened the `/auth?t=<API_TOKEN>` link on is already signed in, and any other asks for it once and does not keep it. On an iPhone or iPad, add the dashboard to the home screen first and turn this on from there; Safari allows web notifications only there.
+2. **On each phone or computer**, open the dashboard, go to the Alerts tab and press **Turn on for this device**. Signing a device up is a write, so it needs the owner: a device you have signed in on (Settings) is ready, and any other asks for the key once and does not keep it. On an iPhone or iPad, add the dashboard to the home screen first and turn this on from there; Safari allows web notifications only there.
 
 A device that turns this on gets one message at once, so you can see the whole path work, and a **Send a test** button afterwards. Turning it off needs no key.
 
@@ -464,6 +466,46 @@ A device that turns this on gets one message at once, so you can see the whole p
 
 Each is told once - however long it lasts - and again only if it clears and returns. The push carries no text: it only wakes the device, which then asks `/api/push/recent` what to show, so what a notification says never passes through Google, Apple, Mozilla or Microsoft.
 
+## Signing in, and making it private
+
+SolarLens 3.0 has an owner login. It changes nothing until you use it: the
+dashboard stays open to anyone with its address until you switch that off.
+
+1. **Set up.** Open the dashboard, press the **gear** (Settings), and use
+   *Set up sign-in*: the setup code is your `API_TOKEN`, and a password of at
+   least twelve characters - or none, if you will use passkeys only.
+2. **Add a passkey** (recommended) under Settings → Passkeys, on each phone or
+   computer you use: a fingerprint, a face or the device PIN, and nothing that
+   could sign anyone in is kept on the server. A passkey is never locked out.
+3. **Turn on _Require sign-in to view_** in Settings. From then on the readings
+   need a sign-in. It cannot be turned on before a password or a passkey exists,
+   so you cannot lock yourself out.
+
+**You sign in once per device.** The browser gets a one-hour session and a
+refresh token good for a year; when the hour is up, the next request renews
+both on the way, so the dashboard, the TV screen and the service worker never
+see a sign-in page again. Opening SolarLens at least once a year keeps a device
+in. A copied refresh token is caught - the real one moves on at every renewal,
+and the old one turning up later signs that device out - and only hashes of
+tokens are stored.
+
+**Settings also has:** every signed-in device, with *Sign out* for one or for
+all but this one, taking effect at once; changing or removing the password; and
+**Share to view** - a link that lets someone see the dashboard and change
+nothing, for a day, a week, a month or until you take it back. Taking it back
+signs out everyone who used it.
+
+**What keeps working without a sign-in:** the relay laptops (they carry
+`INGEST_TOKEN`), phone notifications (a device signed up for them is known by
+its own push address), and `/api/status`, which says only how fresh each feed
+is, for a monitor.
+
+**Locked out?** *Forgot your password?* on the sign-in page takes the setup code
+(`API_TOKEN`) and a new password, and signs every other device out. Five wrong
+tries from one address lock it out for a quarter of an hour, and thirty from
+everywhere in an hour pause password sign-in for an hour; passkeys still work
+through both.
+
 ## Configuration reference
 
 Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars` (local, gitignored — copy from `.dev.vars.example`).
@@ -472,7 +514,7 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 
 | Name | Required | Purpose |
 |---|---|---|
-| `API_TOKEN` | for `POST /api/poll` | Gates the routes that write or spend vendor quota. Reads are public by design. |
+| `API_TOKEN` | for sign-in and writes | The owner's key. It is the setup code for sign-in, the key the session cookies are signed with and the password is keyed with, and a bearer token for the write routes. Replacing it keeps devices signed in, but the password must be set again. |
 | `INGEST_TOKEN` | for agents | Gates `/api/ingest`, `/api/ingest/station` and `/api/ingest/history`. |
 | `VAPID_KEY` | for notifications to a closed browser | The Web Push signing key, a private P-256 JWK. Made and stored by `node scripts/make-vapid-key.mjs`; never typed by hand. Unset, the Alerts tab says notifications to a closed browser are not set up. |
 | `SOLIS_KEY_ID`, `SOLIS_KEY_SECRET` | Solis official | From SolisCloud API Management. Present = the Worker polls Solis directly and the relay becomes optional. |
@@ -545,7 +587,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**448 unit tests** and **382 end-to-end tests** (191 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**526 unit tests** and **422 end-to-end tests** (211 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -582,10 +624,11 @@ exact lines no test reaches.
 
 ### Unit tests — `tests/unit/`
 
-Twenty-seven files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; ten drive the Worker or its database layer against a real database, through the two helpers in `tests/helpers/`:
+Twenty-nine files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; eleven drive the Worker or its database layer against a real database, through the helpers in `tests/helpers/`:
 
 - **`helpers/d1.ts`** — SQLite behind the D1 interface, with the project's own migrations applied. D1 *is* SQLite and Node ships one, so the SQL a test exercises is the SQL that runs in production. It also refuses a bound value D1 would refuse, which is how a `undefined` reaches a test rather than a deploy.
 - **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about.
+- **`helpers/passkey.ts`** — a pretend authenticator with real P-256 and RSA keys: it makes passkeys and signs challenges the way a phone or a security key does, so the Worker's verification is tested against genuine signatures.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
 - **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
@@ -595,6 +638,8 @@ Twenty-seven files, one concern each. Most are pure-function tests against fixtu
 - **`clients.test.ts`** — all three vendor HTTP clients against a stubbed `fetch`: SolisCloud request signing, SolarMan token acquisition and refresh-and-retry, the browser-session refresh flow, the alert and period reads, error envelopes and HTTP failures.
 - **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id. Also the two things made from the raw payload: the alert fields as named columns (a SolisCloud zero kept apart from a vendor that sends no counter), and the telemetry table, which keeps only fields on a reviewed list of measurements - so the ids, the owner's notes, the platform codes and the zone name a live plant record carries are all left out, and so is any field nobody has reviewed, whatever it is called. Device rows are named by a positional alias ("s1-datalogger-1") rather than their serial.
 - **`datalogger.test.ts`** — everything a datalogger reports: its link read from the model name (and left unknown rather than guessed), SolisCloud's signal bars, restart and working time and make date, the operator, cell and MAC address kept apart and never published; and the link history - a row the first time, on each change of status, on a signal move beyond its jitter (3 dBm, 5 points), and hourly otherwise, the window opened by the row before it, and 90 days kept.
+- **`auth.test.ts`** — the owner login through the Worker, with a cookie jar and a moving clock: setup with the setup code, the password and its lockout (per caller and for everyone), the session renewed silently when its hour is up and a device kept in across a year of occasional use, two tabs renewing at once without signing either out, a copied refresh token signing the device out, sign-out at once for one device or all others, the *require sign-in* switch and what stays open with it on (the relays, `/api/status`, the notification reader), share links that read and never write and are taken back with their viewers, passkeys through the routes, a logger's network handles for the owner only, and `private` caching.
+- **`webauthn.test.ts`** — passkey verification against real signatures: CBOR, DER and COSE, both ES256 and RS256, and each refusal an attacker would try - another challenge, another origin, another site, no touch, a replayed registration, a key that is not the passkey's, a counter that went backwards.
 - **`fixture-contract.test.ts`** — the end-to-end fixtures held to the real Worker. It runs the Worker on the vendor fixtures and fails if a row in `tests/fixtures/dashboard-api.ts` carries a field `/api/latest` or `/api/devices` does not send, or lacks one they do, and if any spec serves a raw payload. This is the test that would have caught gap 5.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
@@ -617,7 +662,7 @@ Twenty-seven files, one concern each. Most are pure-function tests against fixtu
 
 ### End-to-end tests — `tests/e2e/`
 
-Ten spec files, **182 tests**, each run twice: **chrome** (Desktop Chrome) and
+Eleven spec files, **211 tests**, each run twice: **chrome** (Desktop Chrome) and
 **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/`, and every
 `/api/*` route is answered from fixtures in the spec, so the suite needs no
 Worker, database or vendor. They assert what a person sees and what the page
@@ -627,6 +672,7 @@ sends:
 |---|---|
 | `dashboard.spec.ts` | The bulk, 141 tests: the overview and its layout at both widths, the theme, the header figures, each system's page, charts, alerts, history, devices, each datalogger's card and week, relays, TV mode, freshness and the auth gate |
 | `accessibility.spec.ts` | axe-core's WCAG 2 A and AA rules on every view, a keyboard walk-through, and a full keyboard lap of each view showing focus |
+| `signin.spec.ts` | Signing in and Settings: a private dashboard asks for a sign-in instead of showing an error and comes back without a reload; setup with the setup code; the switch, devices, share links and password in Settings; a visitor's and a stranger's Settings; and a real passkey - made and used by Chrome's virtual authenticator, checked with the Worker's own verifier |
 | `guide.spec.ts` | The guide: one tap from anywhere, opens with no data or a refused request, names the systems, links only to real pages |
 | `history-systems.spec.ts` | Historical Data's system switch: narrows charts, tables, count and CSV; remembered; falls back when a system is gone |
 | `new-version.spec.ts` | The reload notice: silent when nothing changed, offered after a release, "Later" respected, TV reloads itself, a release caught even in the moment after load |
@@ -676,8 +722,9 @@ while charts keep the brighter ones.
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **98.2%** | **92.2%** | **97.8%** | **99.5%** |
-| &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 97% | 91% | 91% | **100%** |
+| **All of `src/`** — everything the Worker ships | **98.1%** | **92.0%** | **97.5%** | **99.4%** |
+| &nbsp;&nbsp;`index.ts` — routes, who is asking, headers, cron | 97% | 92% | 89% | **100%** |
+| &nbsp;&nbsp;`auth/` — the owner login | 98% | 91% | 98% | 99% |
 | &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 92% | **100%** | **100%** |
 | &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |
 | &nbsp;&nbsp;`push.ts` — phone notifications | **100%** | 99% | **100%** | **100%** |
@@ -909,13 +956,18 @@ node scripts/ci/check-privacy.mjs     # the guard, over the working tree
 
 ## Data model
 
-Thirteen tables in D1, made by the files in `migrations/`, applied in order:
+Nineteen tables in D1, made by the files in `migrations/`, applied in order:
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
 - **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. A datalogger also has `logger` - how it connects, signal bars, seconds since restart and in total, when it was made - Its network handles - mobile operator and cell, or MAC address - are **not** on this row: see `device_network`. Filled by the relay agent and the cron; the vendor payload is stripped of address, coordinates and account identifiers before storage.
 - **`device_network`** — a datalogger's network handles: its mobile operator and cell, or its MAC address, as JSON. **Kept for the owner and never part of a public answer**, since either can place a logger. A table of its own rather than a column on `devices` on purpose: a Worker rolled back to 2.10 serves `SELECT * FROM devices` minus the columns it knew about, so a new column there would reach anyone; a table it has never heard of cannot.
 - **`device_samples`** — each device's status and signal over time, for its link history: a row when either changes, or at least hourly while nothing does, so a steady logger writes 24 rows a day rather than 288. Kept 90 days; pruned by the cron.
+- **`auth_owner`** — the one owner: the password's stored form (PBKDF2, then keyed with a value derived from `API_TOKEN`), or null for passkeys only, and `require_sign_in`, the switch in Settings.
+- **`auth_passkeys`** — each passkey's public key and signature counter; nothing that signs anyone in by itself.
+- **`auth_devices`** — every signed-in browser: its role (`owner` / `viewer`), a name like "Chrome on Android", the hash of its refresh token and of the one before (to catch a copy), when it last renewed, and when it runs out or was signed out. A viewer carries the share link it came through.
+- **`auth_shares`** — view-only links: a hash of the secret, a name, and when it runs out or was taken back.
+- **`auth_challenges`** — passkey challenges in flight, used once, good for five minutes. **`auth_attempts`** — failed sign-ins per caller (a hash of its address) and across everyone, for the lockout.
 - **`alarms`** — each vendor fault: `code`, `message`, `severity` (`info` / `warning` / `fault`), the vendor's own `vendor_level`, `advice`, `begin_ts`, `end_ts` (null while active, or where the vendor never says), and `state` (`active` / `recovered` / `unknown`). Its `id` contains the vendor's plant id and is never served.
 - **`vendor_periods`** — each vendor's own totals per `period` (`day` / `month` / `year`) and `key` (`2026-09`, `2026`): generation, load, grid both ways, battery both ways and full-load hours. These reach back to installation, which SolarLens's own readings cannot.
 - **`relays`** — each SolisCloud relay's report on itself: a random `id` (never a computer name, never served), an optional `name`, `state` (`ok` / `login-expired` / `error`), `login_expires_at` from the portal's own login cookie, and when it was first and last heard from.
@@ -950,7 +1002,8 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `GET /api/devices/history?days=7` | open | each device's status and signal over the last 1-30 days, oldest first, with the row before the window so the week opens in a known state |
 | `GET /api/alarms?days=` | open | fault history, newest first (default 730 days). An alarm's internal id is never returned, since it contains the vendor's plant id |
 | `GET /api/periods` | open | each vendor's own month and year totals, back to installation |
-| `POST /api/poll` | API_TOKEN | poll all providers now — makes live vendor calls, so it spends quota |
+| `GET /api/status` | always open | how fresh each feed is: `{now, feeds: [{provider, ok, ts}]}` and nothing else, for a monitor and the deploy's smoke test |
+| `POST /api/poll` | owner | poll all providers now — makes live vendor calls, so it spends quota |
 | `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |
 | `POST /api/ingest/devices` | INGEST_TOKEN | push raw vendor device records (`{provider, plantId, inverters[], collectors[]}`); normalised server-side |
@@ -959,15 +1012,26 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `POST /api/ingest/alarms` | INGEST_TOKEN | raw SolisCloud alarm records (`{provider, plantId, records[]}`), normalised and stripped of owner fields in the Worker |
 | `POST /api/ingest/periods` | INGEST_TOKEN | raw SolisCloud chart totals (`{provider, plantId, which: month\|year\|all, points[]}`); rejects a total the nameplate could not produce |
 | `GET /api/push/key` | open | the public half of the Web Push signing key; 404 when none is set |
-| `POST /api/push/subscribe` | API_TOKEN or the `/auth` cookie | sign this device up (`{endpoint}`); records what is already wrong without announcing it, and sends the device a first message |
-| `POST /api/push/test` | API_TOKEN or the `/auth` cookie | send one test notification to one signed-up device (`{endpoint}`) |
+| `POST /api/push/subscribe` | owner | sign this device up (`{endpoint}`); records what is already wrong without announcing it, and sends the device a first message |
+| `POST /api/push/test` | owner | send one test notification to one signed-up device (`{endpoint}`) |
 | `POST /api/push/unsubscribe` | open | turn a device off (`{endpoint}`). Needs no key: only that device knows its endpoint |
 | `GET /api/push/recent?for=` | a signed-up device | what a woken device shows: the last day's messages - as long as a push service holds a wake-up - for every device and for the one whose hash is `for`, newest first, at most 20, with `more` when there were others. 404 for any hash that is not a signed-up device. Never cached |
-| `GET /auth?t=` | — | set the cookie the write routes accept |
+| `GET /auth?t=` | API_TOKEN in the query | sign this browser in as the owner - the 2.x unlock link, kept as a way in that needs no password |
+| `GET /auth/status` | open | whether sign-in is set up and required, and who this browser is |
+| `POST /auth/setup` | the setup code | `{code, password \| null}`: first set-up, or a forgotten password; signs this browser in and every other device out |
+| `POST /auth/login` | — | `{password}`; five wrong tries lock the caller out for 15 minutes |
+| `POST /auth/passkey/options` | open, or owner to register | `{purpose: register \| login}`: the WebAuthn options, with a challenge good for five minutes |
+| `POST /auth/passkey/register` · `/auth/passkey/login` | owner · — | keep a new passkey; sign in with one |
+| `POST /auth/logout` | a signed-in browser | sign this browser out |
+| `GET /auth/settings` | owner | passkeys, signed-in devices, share links, and the switches |
+| `POST /auth/settings/required` · `/password` · `/passkeys/remove` · `/devices/revoke` · `/shares` · `/shares/revoke` | owner | what Settings changes |
+| `GET /s/<link>` | the link | open a share link: signs the browser in to view, then sends it to the dashboard |
 
-**Every `GET` answers anyone**, with vendor identifiers stripped — see
-[Reads are public; writes are not](#reads-are-public-writes-are-not). Writes take
-a bearer header (`Authorization: Bearer …`) or the cookie set by `/auth`.
+**Every `GET /api/*` answers anyone until the owner turns on _Require sign-in to
+view_**; then it answers the owner and anyone they shared a link with, and a
+signed-out caller gets `401 {"error":"signin"}`. Identifiers are stripped
+either way — see [Who can read, and who can write](#who-can-read-and-who-can-write).
+"Owner" means signed in as the owner, or `Authorization: Bearer <API_TOKEN>`.
 
 ## Project layout
 
@@ -990,7 +1054,9 @@ solar-lens/
 ├── playwright.config.ts      two browser projects, static server, retries
 ├── migrations/               D1 schema, applied with `wrangler d1 migrations apply`
 │                             (0012 zone names, and the offset each reading was taken under
-│                              0013 push subscriptions and the messages they are woken for)
+│                              0013 push subscriptions and the messages they are woken for
+│                              0014 datalogger detail, network handles and link history
+│                              0015 the owner login: owner, passkeys, devices, shares)
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log
@@ -1003,6 +1069,11 @@ solar-lens/
 │   │                         hourly alarms and daily period totals
 │   ├── db.ts                 D1 queries and the Env type
 │   ├── public-view.ts        strips vendor identifiers from public responses
+│   ├── auth/                 the owner login
+│   │   ├── sessions.ts       sessions, silent refresh and rotation, devices, share links, lockout
+│   │   ├── routes.ts         /auth/* and /s/<link>
+│   │   ├── webauthn.ts       passkeys: CBOR, COSE, the two ceremonies
+│   │   └── crypto.ts         tokens, hashes, HMAC, the password
 │   ├── push.ts               Web Push: signing, who is signed up, what is worth announcing
 │   ├── relays.ts             validates a relay's report on itself
 │   └── providers/
@@ -1065,6 +1136,9 @@ solar-lens/
 │   ├── unit/sparse.test.ts      a vendor that sends almost nothing
 │   ├── unit/device-shapes.test.ts  each shape a device record arrives in
 │   ├── unit/datalogger.test.ts  what a logger reports, its network kept back, its link history
+│   ├── unit/auth.test.ts        the owner login, end to end through the Worker
+│   ├── unit/webauthn.test.ts    passkey verification against real signatures
+│   ├── helpers/passkey.ts       a pretend authenticator with real keys
 │   ├── unit/fallbacks.test.ts   the fallback branches nothing else reached
 │   ├── unit/series-rules.test.ts   live beats backfilled; where "today" opens
 │   ├── unit/daylight-saving.test.ts  history that keeps its day across a clock change
@@ -1082,6 +1156,7 @@ solar-lens/
 │   ├── fixtures/dashboard-api.ts  what the API answers, as the end-to-end suite serves it
 │   ├── unit/release-version.test.ts  the guide's release is the package's
 │   ├── e2e/push.spec.ts         turning notifications to a closed browser on and off
+│   ├── e2e/signin.spec.ts       signing in, Settings, and a real passkey
 │   ├── e2e/guide.spec.ts        the guide page and its button
 │   ├── e2e/history-systems.spec.ts  Historical Data, one system or all
 │   ├── e2e/new-version.spec.ts  the reload notice after a release
@@ -1150,7 +1225,9 @@ is the quickest way to learn it. Three places to start:
 
 | Symptom | Cause / fix |
 |---|---|
-| Dashboard says *unauthorized* | Reads are public, so this means the deployment is older than that change. Run `npm run deploy`. |
+| Dashboard shows *Sign in* | The owner has made it private. Sign in, or ask the owner for a share link. |
+| Dashboard says *unauthorized* | A refusal other than "sign in": usually a deployment older than the page. Run `npm run deploy`. |
+| The password stopped working after replacing `API_TOKEN` | Expected: the password is keyed with it. Sign in with a passkey, or use *Forgot your password?* with the new token as the setup code. |
 | Footer: *no provider credentials configured* | No provider secrets present. Set at least one route's secrets and redeploy or `POST /api/poll`. |
 | `soliscloud: HTTP 408` | Your clock is > 15 min off SolisCloud's. Fix the system clock (Workers are fine; this affects local probes/agents). |
 | `soliscloud: HTTP 403/401` on official API | Key not activated, or API access not enabled on the account. Check Basic Settings → API Management. |
@@ -1179,14 +1256,16 @@ Headers on every response: a Content-Security-Policy that is strict about where 
 
 Vendor errors are stripped of query strings before they reach `poll_log` — SolarMan's token endpoint takes the account's `appId` in the URL, and that log is kept for a week, served by `/api/health` and printed in the footer. No credential should travel that far because a DNS lookup failed.
 
-### Reads are public; writes are not
+### Who can read, and who can write
 
-`GET /api/*` answers anybody. That is a deliberate choice, not an oversight:
-the dashboard is meant to be opened on a phone, a work laptop or a relative's
-tablet without first copying a token onto each one, and a per-device unlock step
-is a tax that gets paid every time and forgotten exactly when it matters.
+Until the owner turns on **Require sign-in to view**, `GET /api/*` answers
+anybody, as it did in 2.x: the dashboard is meant to open on a phone, a work
+laptop or a relative's tablet without first copying a token onto each one. Once
+it is on, reads answer the owner and anyone holding a share link - and the
+owner signs in once per device, never again, so privacy costs no more than the
+open dashboard did. See [Signing in, and making it private](#signing-in-and-making-it-private).
 
-What that choice costs is bounded rather than accepted:
+Either way, what a read can carry is bounded:
 
 - **Vendor identifiers never leave the Worker.** `src/public-view.ts` strips
   them from every response. Station and plant ids become positional aliases
@@ -1203,32 +1282,40 @@ What that choice costs is bounded rather than accepted:
   id is eight digits, so a hash of one can be reversed by trying all hundred
   million of them.
 - **Nothing readable can spend money or change data.** `POST /api/poll` makes
-  live vendor calls, so it keeps the `API_TOKEN` gate; `/api/ingest/*` keeps its
-  own `INGEST_TOKEN`. An agent key still cannot read, and a reader still cannot
-  write.
-- **Signing a phone up for notifications is a write**, so it needs the key too,
+  live vendor calls, so it needs the owner; `/api/ingest/*` keeps its own
+  `INGEST_TOKEN`. A share link can read and never write, an agent key still
+  cannot read, and a reader still cannot write.
+- **Signing a phone up for notifications is a write**, so it needs the owner too,
   and a stranger who can read the dashboard cannot have their own phone told
   about your systems. Turning a device *off* is the one write that needs no
   key: it takes that device's own push endpoint, which only it knows, and a
   gate there would only keep unwanted notifications coming. Endpoints are held
   to the push services browsers use and never served; at most ten devices.
-- Read endpoints send `Cache-Control: public, max-age=60`, so a burst of
-  requests is answered at the edge instead of against D1. A public URL can be
-  requested by anything at any rate, and this project has exhausted the free
-  tier's row budget twice already.
+- Read endpoints send `Cache-Control: private, max-age=60`: a burst of
+  requests from one browser is answered from its cache instead of against D1 -
+  this project has exhausted the free tier's row budget twice - and, since an
+  answer can depend on who is asking, no shared cache may keep one.
+- **A datalogger's network handles** - its operator and cell, or its MAC
+  address - are served to the owner only, and are never on a public answer.
 
-What it does *not* protect is the measurements themselves. **Anyone with the URL
-can see your generation and consumption**, and a consumption curve says when a
-building is occupied. If that matters for your site, put
-[Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
-in front of the Worker — it covers the `workers.dev` URL, needs no code change
-here, and gives a normal sign-in page instead of a token to copy.
+What the open setting does *not* protect is the measurements themselves.
+**With sign-in not required, anyone with the URL can see your generation and
+consumption**, and a consumption curve says when a building is occupied. That
+is what the switch is for.
 
-`API_TOKEN` still exists for the write routes, and `/auth?t=<token>` still sets
-the `HttpOnly`, `Secure`, `SameSite=Lax` cookie those routes accept. Vendor
-payloads are stripped of the account holder's name, email and the site's
-coordinates before storage, and every vendor-controlled string is escaped before
-it reaches the page.
+**How the sign-in is built** (`src/auth/`): passkeys (WebAuthn, ES256 and
+RS256, verified in the Worker with no library) and a password (PBKDF2, then
+keyed with a value derived from `API_TOKEN` that the database never holds, so
+a copy of the database cannot be attacked offline). A one-hour session cookie,
+signed and checked against its device on every request, so signing a device
+out takes effect at once; a year-long refresh token that renews on use and
+rotates each time, with the one before remembered so a copy is caught; both
+`HttpOnly`, `Secure` and `SameSite=Strict`. Every token is stored only as a
+hash. `/auth?t=<token>` now signs the browser in with such a session instead of
+leaving the token itself in a cookie, as 2.x did; the 2.x cookie is still
+honoured. Vendor payloads are stripped of the account holder's name, email and
+the site's coordinates before storage, and every vendor-controlled string is
+escaped before it reaches the page.
 
 > **Plant names are still published.** They are what the dashboard labels each
 > system with, so they are the one identifying string deliberately left in. If
@@ -1237,7 +1324,7 @@ it reaches the page.
 One third-party request remains: the page loads its web font from Google, which sees the viewer's IP. Self-hosting it (Manrope is OFL-licensed) or dropping to the system font stack removes that.
 
 - Nothing identifying belongs in the repo: credentials, tokens and plant ids live only in `wrangler secret`, the Cloudflare dashboard, or the gitignored `.dev.vars`. `captures/`, `.capture-profile/` and `.relay-profile/` (browser sessions) are gitignored too.
-- The `workers.dev` URL serves readings to anyone who opens it, with vendor identifiers stripped. `INGEST_TOKEN` and `API_TOKEN` gate the routes that write or spend quota.
+- The `workers.dev` URL serves readings to anyone who opens it until the owner turns on *Require sign-in to view*; vendor identifiers are stripped either way. `INGEST_TOKEN` and the owner's sign-in (or `API_TOKEN`) gate the routes that write or spend quota.
 - The SolarMan portal login sends your password in clear text in the form body. The capture helper redacts it, but never paste DevTools request bodies anywhere.
 - Unofficial routes reuse *your* browser session against *your* data only. Vendor terms may restrict automation; the official APIs are the durable path and everything here prefers them when their secrets are present.
 
@@ -1259,6 +1346,8 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] An automated test for the Worker's own routes against a real D1 in CI — SQLite behind the D1 interface, since 2.7
 - [x] SolarMan alarm detail: when each fault cleared, its advice, and the occurrences the alert list folds away
 - [x] Notifications that reach a closed browser (Web Push)
+- [x] An owner login with passkeys, a private dashboard on the owner's say-so, signed-in devices and view-only share links (3.0)
+- [x] Everything each datalogger reports, and its link over the week (3.0)
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed

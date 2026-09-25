@@ -41,6 +41,8 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   // kept would be whichever finished last. The desktop walk is the one the
   // README quotes, so it is the one that measures.
   test.skip(testInfo.project.name !== 'chrome', 'measured once, on the desktop walk-through');
+  // Every view, both roles and signed out: longer than one test's usual 20 s.
+  test.setTimeout(90_000);
 
   const NOW = Math.floor(Date.UTC(2026, 8, 8, 9, 0, 0) / 1000);
   // One API answer: a 200 with a JSON body, for page.route to fulfil.
@@ -66,7 +68,23 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     { inverter_id: 's2', ts: NOW - i * 300, ac_power_w: 1200 - i * 10 },
   ]).flat();
 
-  await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters })));
+  // Signed in as the owner for most of the walk; signed out, on a private
+  // dashboard, for the last part of it, so the sign-in page is walked too.
+  const who = { role: 'owner' as string | null };
+  await page.route('**/api/latest', (r) => r.fulfill(who.role ? json({ now: NOW, inverters }) : { status: 401, contentType: 'application/json', body: '{"error":"signin"}' }));
+  await page.route('**/auth/status', (r) => r.fulfill(json({ configured: true, password: true, passkeys: 1, required: !who.role, role: who.role, device: who.role ? 'd-this' : null })));
+  await page.route('**/auth/settings', (r) => r.fulfill(json({
+    password: true, required: false,
+    passkeys: [{ id: 'k1', name: 'Phone', created_at: NOW - 86_400, last_used_at: NOW - 60 }],
+    devices: [
+      { id: 'd-this', role: 'owner', label: 'Chrome on Windows', created_at: NOW - 86_400, last_seen_at: NOW - 60, expires_at: NOW + 86_400, shared: false, this: true },
+      { id: 'd-tv', role: 'viewer', label: 'Chrome on Android', created_at: NOW - 86_400, last_seen_at: NOW - 600, expires_at: NOW + 86_400, shared: true, this: false },
+    ],
+    shares: [{ id: 'sh1', name: 'Family', created_at: NOW - 86_400, expires_at: null, revoked_at: null, devices: 1 }],
+  })));
+  await page.route('**/auth/**', (r) => (r.request().method() === 'POST'
+    ? r.fulfill(json({ ok: true, required: true, signedOut: 1, url: 'https://dashboard.example/s/x.y', id: 'sh2' }))
+    : r.fallback()));
   await page.route('**/api/series**', (r) => r.fulfill(json({ from: NOW - 12_000, to: NOW, points })));
   await page.route('**/api/devices', (r) => r.fulfill(json({
     now: NOW,
@@ -185,6 +203,25 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   if (await rows.count()) await rows.first().click({ timeout: 2000 }).catch(() => {});
   await page.waitForTimeout(150);
 
+  // Settings, as the owner: the switch, a link made and taken back, a device
+  // signed out, the password changed.
+  await page.goto('/#/settings');
+  await expect(page.locator('.settings')).toBeVisible();
+  await page.locator('#req').check().catch(() => {});
+  await page.waitForTimeout(150);
+  await page.locator('#share-name').fill('Walk');
+  await page.getByRole('button', { name: 'Make a link' }).click().catch(() => {});
+  await page.waitForTimeout(150);
+  await page.locator('#share-copy').click({ timeout: 2000 }).catch(() => {});
+  for (const sel of ['[data-unshare]', '[data-revoke]', '[data-unkey]', '#revoke-others']) {
+    await page.locator(sel).first().click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(120);
+  }
+  await page.locator('#pw-cur').fill('a current password');
+  await page.locator('#pw-new').fill('a new long password');
+  await page.getByRole('button', { name: 'Change password' }).click().catch(() => {});
+  await page.waitForTimeout(150);
+
   // Notifications: turn them on for this device, send a test, turn them off.
   await page.goto('/#/alerts');
   await expect(page.locator('#view')).not.toBeEmpty();
@@ -193,13 +230,34 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     await page.waitForTimeout(120);
   }
 
+  // Signed out, on a private dashboard: Settings as a stranger sees it, then
+  // the sign-in page. Within the same load, not by reloading: a reload is a
+  // new copy of the script, and V8 drops the old copy's counts with it.
+  who.role = null;
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await expect(page.locator('.authcard')).toBeVisible();
+  await page.locator('.authmore summary').click().catch(() => {});
+  await page.locator('#setup-code').fill('a code');
+  await page.getByRole('button', { name: 'Set a new password' }).click().catch(() => {});
+  await page.waitForTimeout(150);
+  who.role = null;
+  // Coming back to the tab refreshes, and this refresh is refused: sign in.
+  await page.evaluate(() => { location.hash = '#/'; document.dispatchEvent(new Event('visibilitychange')); });
+  await expect(page.locator('.authcard h2')).toHaveText('Sign in');
+  await page.locator('#pw').fill('a password');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click().catch(() => {});
+  await page.waitForTimeout(150);
+
   const entries = await page.coverage.stopJSCoverage();
 
   // The dashboard is one inline script inside the document, so its coverage
   // arrives under the page's own URL rather than a .js file.
   const pageEntries = entries.filter((e) => e.url.includes('127.0.0.1') || e.url.endsWith('/') || e.url.endsWith('index.html'));
-  let total = 0;
-  let covered = 0;
+  // Should an entry for the same script arrive more than once - a frame, a
+  // second load - the copies are merged: a byte counts as run if any copy ran
+  // it, and each byte of script is counted once. (V8 keeps no counts for a
+  // copy a reload has replaced, which is why the walk above never reloads.)
+  const merged = new Map<string, Int8Array>();   // per source text: -1 markup, 0 not run, 1 run
   for (const entry of pageEntries) {
     const source = entry.source ?? '';
     if (source.length < 5000) continue;   // a stub or an empty document, not the dashboard
@@ -214,10 +272,20 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
         for (let i = r.startOffset; i < end; i++) counts[i] = r.count;
       }
     }
-    for (const c of counts) {
+    const into = merged.get(source) ?? new Int8Array(source.length).fill(-1);
+    for (let i = 0; i < counts.length; i++) {
+      if (counts[i] === -1) continue;
+      into[i] = counts[i] > 0 || into[i] === 1 ? 1 : 0;
+    }
+    merged.set(source, into);
+  }
+  let total = 0;
+  let covered = 0;
+  for (const bytes of merged.values()) {
+    for (const c of bytes) {
       if (c === -1) continue;   // markup, not script
       total++;
-      if (c > 0) covered++;
+      if (c === 1) covered++;
     }
   }
 

@@ -80,6 +80,17 @@ async function stubApi(page: Page) {
     feeds: [{ ts: NOW - 30, provider: 'soliscloud', ok: 1, detail: 'plants=1 inverters=1 new=1' }],
     relays: [{ name: 'Relay 1', state: 'ok', login_expires_at: NOW + 5 * 86_400, last_seen: NOW - 60, first_seen: NOW - 86_400, last_ok_at: NOW - 60 }],
   })));
+  // Settings as the owner sees it: every form, list and switch it can draw.
+  await page.route('**/auth/status', (r) => r.fulfill(json({ configured: true, password: true, passkeys: 1, required: false, role: 'owner', device: 'd1' })));
+  await page.route('**/auth/settings', (r) => r.fulfill(json({
+    password: true, required: false,
+    passkeys: [{ id: 'k1', name: 'Phone', created_at: NOW - 86_400, last_used_at: NOW - 60 }],
+    devices: [
+      { id: 'd1', role: 'owner', label: 'Chrome on Windows', created_at: NOW - 86_400, last_seen_at: NOW - 60, expires_at: NOW + 86_400, shared: false, this: true },
+      { id: 'd2', role: 'viewer', label: 'Safari on iPad', created_at: NOW - 86_400, last_seen_at: NOW - 600, expires_at: NOW + 86_400, shared: true, this: false },
+    ],
+    shares: [{ id: 'sh1', name: 'Family', created_at: NOW - 86_400, expires_at: null, revoked_at: null, devices: 1 }],
+  })));
 }
 
 /** Serious and critical only: see the note at the top of this file. */
@@ -98,6 +109,7 @@ const views = [
   ['Devices', '#/devices'],
   ['TV mode', '#/tv'],
   ['Guide', '#/guide'],
+  ['Settings', '#/settings'],
 ] as const;
 
 for (const [name, hash] of views) {
@@ -105,6 +117,8 @@ for (const [name, hash] of views) {
     await stubApi(page);
     await page.goto(`/${hash}`);
     await expect(page.locator('#view')).not.toBeEmpty();
+    // Settings draws in two steps; check what it settles on, not its loading line.
+    if (hash === '#/settings') await expect(page.locator('.settings')).toBeVisible();
     expect(await seriousViolations(page)).toEqual([]);
   });
 }

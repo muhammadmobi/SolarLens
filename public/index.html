@@ -671,6 +671,41 @@
   body.tv.moving .tvexit { opacity: 1; }
   body:not(.tv) .tvexit { display: none; }
   .empty code { background: var(--surface-2); padding: 3px 8px; border-radius: 7px; font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---------- signing in and settings ---------- */
+  .authcard { max-width: 520px; margin: 24px auto; }
+  .authcard .body > p:first-child { margin-top: 0; }
+  .authform { display: flex; flex-direction: column; gap: 12px; margin: 14px 0; }
+  .authform.inline { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
+  /* A password field as wide as a wide card reads as a text area. */
+  .settings .authform:not(.inline) { max-width: 440px; }
+  .authform label { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; font-weight: 650; }
+  .authform label small { color: var(--muted); font-weight: 500; }
+  .authform input, .authform select, .sharelink input {
+    font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); min-width: 0;
+  }
+  .authform input:focus-visible, .authform select:focus-visible, .sharelink input:focus-visible { outline: 2px solid var(--solarman); outline-offset: 1px; }
+  .authbtn {
+    font: inherit; font-weight: 700; font-size: 14.5px; padding: 10px 16px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink); align-self: flex-start;
+  }
+  .authbtn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); width: 100%; margin: 6px 0; }
+  .authbtn:focus-visible { outline: 2px solid var(--solarman); outline-offset: 2px; }
+  .authmore { margin-top: 12px; }
+  .authmore summary { cursor: pointer; color: var(--muted); font-size: 13.5px; font-weight: 650; }
+  .authmore summary:focus-visible { outline: 2px solid var(--solarman); outline-offset: 2px; border-radius: 4px; }
+  .autherr { color: var(--bad); font-weight: 650; min-height: 1.2em; margin: 8px 0 0; }
+  .authnote { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 0; }
+  .authlist { list-style: none; margin: 12px 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .authlist li { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .authlist li > span { display: flex; flex-direction: column; gap: 2px; }
+  .switchrow { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; }
+  .switchrow input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+  .switchrow span { display: flex; flex-direction: column; gap: 4px; }
+  .sharelink { display: flex; gap: 8px; margin-top: 10px; }
+  .sharelink input { flex: 1; font-family: var(--mono); font-size: 12.5px; }
+  .settingsbtn .gearicon { display: block; }
   .stack { display: flex; flex-direction: column; gap: 18px; }
 </style>
 </head>
@@ -689,6 +724,7 @@
     </div>
     <span class="livedot" id="updated"><i></i>loading…</span>
     <a class="tvbtn guidebtn" id="guidebtn" href="#/guide" aria-label="Guide: what SolarLens does and where to find it" title="Guide: what SolarLens does and where to find it"><svg class="guideicon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 6.5C10.3 5.2 7.9 4.5 3 4.5v13c4.9 0 7.3.7 9 2 1.7-1.3 4.1-2 9-2v-13c-4.9 0-7.3.7-9 2z"/><path d="M12 6.5v13"/></svg><span class="guidelabel">Guide</span></a>
+    <a class="tvbtn settingsbtn" id="settingsbtn" href="#/settings" aria-label="Settings: sign-in, devices and sharing" title="Settings: sign-in, devices and sharing"><svg class="gearicon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
     <a class="tvbtn" id="tvbtn" href="#/tv" aria-label="TV mode" title="TV mode: full screen, for a wall display">📺</a>
     <button class="themebtn" id="theme" type="button" aria-label="Change theme">🖥️</button>
   </div>
@@ -733,6 +769,7 @@
     historical data  the Historical Data tab
     devices          the Devices tab: each datalogger and its week, hardware, SolisCloud relays
     system detail    one system in full: the blocks Power and a system page share
+    signing in and settings    the sign-in page, and Settings behind the gear icon
     the guide        the Guide page, behind the book icon in the header
     routing          which view the address (#/...) asks for; TV mode
     loading data     fetching from /api, on a timer and on coming back to the tab
@@ -942,10 +979,10 @@
   // the server - see src/push.ts - because the on-grid system goes quiet every
   // night, and a phone should not be told so every evening.
   //
-  // Signing a device up is a write, so it needs the SolarLens key: from the
-  // cookie /auth leaves on a device that has been signed in, or typed here
-  // once. A typed key is sent with that one request and kept only in memory,
-  // for the test button, until the page is closed.
+  // Signing a device up is a write, so it needs the owner: signed in on this
+  // device (Settings), or the SolarLens key typed here once. A typed key is
+  // sent with that one request and kept only in memory, for the test button,
+  // until the page is closed.
   const pushSupported = () => window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && notifySupported();
   const pushBytes = (s) => {
     const b = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -1053,7 +1090,7 @@
       <div class="exportrow">${needKey
         ? `<input type="password" class="pushkey" id="pushkey" autocomplete="off" placeholder="SolarLens key" aria-label="SolarLens key">`
         : ''}<button type="button" class="rangebtn" id="pushon">Turn on for this device</button></div>
-      ${needKey ? '<small class="faint">This device is not signed in, and signing a device up needs the key. It is sent with this request and not stored.</small>' : ''}${note}`);
+      ${needKey ? '<small class="faint">Signing a device up needs the owner. Sign in under Settings, or enter the SolarLens key here: it is sent with this request and not stored.</small>' : ''}${note}`);
     $('pushon').onclick = async () => {
       const typed = $('pushkey') ? $('pushkey').value.trim() : '';
       if (typed) pushTypedKey = typed;
@@ -1196,10 +1233,17 @@
     return (pts || []).filter((p) => plantDay(p.ts, p.tz_offset_sec ?? off) === today);
   };
 
-  /** GET one /api route as JSON; a refusal becomes an 'unauthorized' error the router shows. */
+  /**
+   * GET one /api route as JSON. A refusal becomes an error the router shows:
+   * 'signin' when the owner has made the dashboard private and this browser is
+   * not signed in, 'unauthorized' for any other refusal.
+   */
   async function api(path) {
     const r = await fetch(path, { credentials: 'same-origin' });
-    if (r.status === 401) throw new Error('unauthorized');
+    if (r.status === 401) {
+      const why = (await r.json().catch(() => ({}))).error;
+      throw new Error(why === 'signin' ? 'signin' : 'unauthorized');
+    }
     if (!r.ok) throw new Error(`${path} -> ${r.status}`);
     return r.json();
   }
@@ -3159,6 +3203,284 @@
     bindRawFilters();
   }
 
+  // ---------- signing in and settings ----------
+  /**
+   * Signing in, and the owner's Settings.
+   *
+   * The page itself holds no data, so it is served to anyone; when the Worker
+   * answers a read with {error: 'signin'}, the owner has made the dashboard
+   * private, and this is what shows instead. Once signed in, a browser stays
+   * signed in: the Worker renews its cookies on the way through (see
+   * src/auth/sessions.ts), so nothing here ever has to ask again.
+   *
+   * Every request here is a POST with a JSON body to /auth/*, and every answer
+   * is JSON with an `error` to show when it goes wrong.
+   */
+  async function authPost(path, body = {}) {
+    const res = await fetch(path, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const wait = data.until ? ` Try again after ${when(data.until)}.` : '';
+      throw new Error((data.error || `The server said ${res.status}.`) + (res.status === 429 ? wait : ''));
+    }
+    return data;
+  }
+  const authGet = async (path) => {
+    const res = await fetch(path, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `The server said ${res.status}.`);
+    return res.json();
+  };
+
+  // Passkeys trade in raw bytes; the Worker speaks base64url.
+  const b64uBytes = (s) => pushBytes(s);
+  const bytesB64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const passkeysSupported = () => window.isSecureContext && !!window.PublicKeyCredential && !!navigator.credentials;
+
+  /** Make a passkey on this device for the signed-in owner, and keep it on the server. */
+  async function addPasskey(name) {
+    const o = await authPost('/auth/passkey/options', { purpose: 'register' });
+    const cred = await navigator.credentials.create({ publicKey: {
+      ...o,
+      challenge: b64uBytes(o.challenge),
+      user: { ...o.user, id: b64uBytes(o.user.id) },
+      excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64uBytes(c.id) })),
+    } });
+    await authPost('/auth/passkey/register', {
+      name,
+      response: { clientDataJSON: bytesB64u(cred.response.clientDataJSON), attestationObject: bytesB64u(cred.response.attestationObject) },
+    });
+  }
+
+  /** Sign in with a passkey this device already holds. */
+  async function signInWithPasskey() {
+    const o = await authPost('/auth/passkey/options', { purpose: 'login' });
+    const cred = await navigator.credentials.get({ publicKey: { ...o, challenge: b64uBytes(o.challenge) } });
+    await authPost('/auth/passkey/login', {
+      id: cred.id,
+      response: {
+        clientDataJSON: bytesB64u(cred.response.clientDataJSON),
+        authenticatorData: bytesB64u(cred.response.authenticatorData),
+        signature: bytesB64u(cred.response.signature),
+      },
+    });
+  }
+
+  /** A passkey prompt the person closed is not an error worth a paragraph. */
+  const passkeyError = (e) => (e && e.name === 'NotAllowedError' ? 'The passkey prompt was closed or timed out.' : e.message);
+
+  /** Signed in: forget the refusal and draw whatever was asked for. */
+  function signedIn() {
+    state.error = null;
+    if (location.hash === '#/signin') location.hash = '#/';
+    refresh();
+  }
+
+  /**
+   * The sign-in form, drawn into `box`: a passkey button where the browser has
+   * passkeys, the password, and - folded away - first-time setup or a
+   * forgotten password, which both take the setup code.
+   */
+  function signInForm(box, st) {
+    const expired = new URLSearchParams(location.search).get('link') === 'expired';
+    box.innerHTML = `
+      ${expired ? '<p class="authnote">That share link has run out or was taken back. Ask for a new one, or sign in.</p>' : ''}
+      ${st.passkeys && passkeysSupported() ? '<button type="button" class="authbtn primary" id="pk-in">Sign in with a passkey</button>' : ''}
+      ${st.password ? `<form class="authform" id="pw-form">
+        <label>Password<input type="password" id="pw" autocomplete="current-password" required></label>
+        <button type="submit" class="authbtn">Sign in</button>
+      </form>` : ''}
+      <details class="authmore" ${!st.password && !st.passkeys ? 'open' : ''}>
+        <summary>${st.password || st.passkeys ? 'Forgot your password?' : 'Set up sign-in'}</summary>
+        <form class="authform" id="setup-form">
+          <p class="cardnote">The setup code is the API token this dashboard was deployed with (<code>API_TOKEN</code>, in its secrets).
+            ${st.password || st.passkeys ? 'Setting a new password signs every other device out.' : 'You can add a passkey once you are in, and skip the password.'}</p>
+          <label>Setup code<input type="password" id="setup-code" autocomplete="off" required></label>
+          <label>New password <small>at least 12 characters${st.password || st.passkeys ? '' : ', or leave empty to use passkeys only'}</small>
+            <input type="password" id="setup-pw" autocomplete="new-password" minlength="12"></label>
+          <button type="submit" class="authbtn">${st.password || st.passkeys ? 'Set a new password' : 'Set up'}</button>
+        </form>
+      </details>
+      <p class="autherr" id="auth-err" role="alert"></p>`;
+    const err = (m) => { $('auth-err').textContent = m; };
+    if ($('pk-in')) $('pk-in').onclick = async () => {
+      try { await signInWithPasskey(); signedIn(); } catch (e) { err(passkeyError(e)); }
+    };
+    if ($('pw-form')) $('pw-form').onsubmit = async (ev) => {
+      ev.preventDefault();
+      try { await authPost('/auth/login', { password: $('pw').value }); signedIn(); } catch (e) { err(e.message); }
+    };
+    $('setup-form').onsubmit = async (ev) => {
+      ev.preventDefault();
+      const pw = $('setup-pw').value;
+      try {
+        await authPost('/auth/setup', { code: $('setup-code').value, password: pw ? pw : null });
+        location.hash = '#/settings';
+        signedIn();
+      } catch (e) { err(e.message); }
+    };
+  }
+
+  /** The whole page, when the dashboard is private and this browser is not signed in. */
+  async function renderSignIn() {
+    $('view').innerHTML = `<section class="card authcard"><h2>Sign in</h2><div class="body">
+      <p>This dashboard is private. Sign in once on this device and it stays signed in.</p>
+      <div id="signin-box"><p class="cardnote">Loading…</p></div></div></section>`;
+    try {
+      const st = await authGet('/auth/status');
+      if ($('signin-box')) signInForm($('signin-box'), st);
+    } catch (e) {
+      if ($('signin-box')) $('signin-box').innerHTML = `<p class="autherr">${esc(e.message)}</p>`;
+    }
+  }
+
+  const SHARE_DAYS = [['1', 'a day'], ['7', 'a week'], ['30', 'a month'], ['', 'until I take it back']];
+
+  /**
+   * Settings: for the owner, the switch that makes the dashboard private, the
+   * passkeys, the password, every signed-in device and every share link. For
+   * someone else, what they need: how to sign in, or that the dashboard was
+   * shared with them.
+   */
+  async function renderSettings(note = '') {
+    const view = $('view');
+    view.innerHTML = '<section class="card"><h2>Settings</h2><div class="body"><p class="cardnote">Loading…</p></div></section>';
+    let st;
+    try { st = await authGet('/auth/status'); } catch (e) {
+      view.innerHTML = `<section class="card"><h2>Settings</h2><div class="body"><p class="autherr">${esc(e.message)}</p></div></section>`;
+      return;
+    }
+    if (location.hash !== '#/settings') return;
+    if (!st.configured) {
+      view.innerHTML = `<section class="card"><h2>Settings</h2><div class="body"><p>Sign-in is not available on this server: it has no <code>API_TOKEN</code>. The README says how to set one.</p></div></section>`;
+      return;
+    }
+    if (st.role === 'viewer') {
+      view.innerHTML = `<section class="card authcard"><h2>Settings</h2><div class="body">
+        <p>This dashboard was shared with you to view. Its owner can take the link back at any time.</p>
+        <button type="button" class="authbtn" id="signout">Sign out of this device</button></div></section>`;
+      $('signout').onclick = async () => { await authPost('/auth/logout').catch(() => {}); location.reload(); };
+      return;
+    }
+    if (st.role !== 'owner') {
+      view.innerHTML = `<section class="card authcard"><h2>Sign in</h2><div class="body">
+        <p>Settings are for the owner. ${st.password || st.passkeys ? 'Sign in to change them.' : 'Nobody has set up sign-in yet: the setup code starts it.'}</p>
+        <div id="signin-box"></div></div></section>`;
+      signInForm($('signin-box'), st);
+      return;
+    }
+
+    let s;
+    try { s = await authGet('/auth/settings'); } catch (e) {
+      view.innerHTML = `<section class="card"><h2>Settings</h2><div class="body"><p class="autherr">${esc(e.message)}</p></div></section>`;
+      return;
+    }
+    if (location.hash !== '#/settings') return;
+    const canLock = s.password || s.passkeys.length;
+    const devices = s.devices.map((d) => `<tr>
+        <td><div class="dev-name">${esc(d.label || 'A browser')}${d.this ? ' <span class="pill ok"><i></i>this device</span>' : ''}</div>
+            <div class="dev-meta">${d.role === 'owner' ? 'you' : 'shared, view only'}</div></td>
+        <td>${esc(ago(d.last_seen_at))}</td>
+        <td>${esc(fmtDate(d.created_at))}</td>
+        <td>${d.this ? '' : `<button type="button" class="rangebtn" data-revoke="${esc(d.id)}">Sign out</button>`}</td>
+      </tr>`).join('');
+    const passkeys = s.passkeys.length ? s.passkeys.map((k) => `<li><span><strong>${esc(k.name || 'Passkey')}</strong>
+        <small class="faint">added ${esc(fmtDate(k.created_at))}${k.last_used_at ? ` · last used ${esc(ago(k.last_used_at))}` : ' · not used yet'}</small></span>
+        <button type="button" class="rangebtn" data-unkey="${esc(k.id)}">Remove</button></li>`).join('')
+      : '<li><span class="faint">None yet.</span></li>';
+    const shares = s.shares.length ? s.shares.map((x) => `<li><span><strong>${esc(x.name || 'Unnamed link')}</strong>
+        <small class="faint">made ${esc(fmtDate(x.created_at))} · ${x.expires_at ? `runs out ${esc(fmtDate(x.expires_at))}` : 'until taken back'} · ${x.devices} ${x.devices === 1 ? 'device' : 'devices'} using it</small></span>
+        <button type="button" class="rangebtn" data-unshare="${esc(x.id)}">Take back</button></li>`).join('')
+      : '<li><span class="faint">No links out.</span></li>';
+
+    view.innerHTML = `<div class="stack settings">
+      ${note ? `<p class="authnote" role="status">${esc(note)}</p>` : ''}
+      <section class="card"><h2>Who can see this dashboard</h2><div class="body">
+        <label class="switchrow"><input type="checkbox" id="req" ${s.required ? 'checked' : ''} ${canLock || s.required ? '' : 'disabled'}>
+          <span><strong>Require sign-in to view</strong>
+          <small class="faint">${s.required ? 'On: only you, and anyone you share a link with, can see the readings.'
+            : canLock ? 'Off: anyone with the address can see the readings, as before 3.0. Nothing identifying is shown either way.'
+              : 'Add a passkey or set a password first, so you cannot lock yourself out.'}</small></span></label>
+        <p class="cardnote">The relays, phone notifications and the status check keep working either way.</p>
+      </div></section>
+
+      <section class="card"><h2>Passkeys</h2><div class="body">
+        <p class="cardnote">Sign in with a fingerprint, a face or the device PIN. Nothing that could sign you in is stored on the server.</p>
+        <ul class="authlist">${passkeys}</ul>
+        ${passkeysSupported() ? `<form class="authform inline" id="pk-add"><label>Name<input id="pk-name" placeholder="${esc(navigator.userAgent.includes('Android') ? 'My phone' : 'This computer')}" maxlength="60"></label>
+          <button type="submit" class="authbtn">Add a passkey on this device</button></form>`
+          : '<p class="cardnote">This browser cannot make passkeys.</p>'}
+      </div></section>
+
+      <section class="card"><h2>Password</h2><div class="body">
+        <form class="authform" id="pw-change">
+          ${s.password ? '<label>Current password<input type="password" id="pw-cur" autocomplete="current-password" required></label>' : '<p class="cardnote">No password is set: you sign in with passkeys.</p>'}
+          <label>${s.password ? 'New password' : 'Set a password'} <small>at least 12 characters</small><input type="password" id="pw-new" autocomplete="new-password" minlength="12" required></label>
+          <button type="submit" class="authbtn">${s.password ? 'Change password' : 'Set password'}</button>
+        </form>
+        ${s.password && s.passkeys.length ? '<button type="button" class="rangebtn" id="pw-remove">Remove the password, and use passkeys only</button>' : ''}
+      </div></section>
+
+      <section class="card"><h2>Signed-in devices</h2><div class="tablewrap" tabindex="0" role="region" aria-label="Signed-in devices, scrolls sideways">
+        <table class="devices"><thead><tr><th>Device</th><th>Last used</th><th>Signed in</th><th></th></tr></thead><tbody>${devices}</tbody></table></div>
+        <div class="body"><button type="button" class="rangebtn" id="revoke-others" ${s.devices.length > 1 ? '' : 'disabled'}>Sign out every other device</button>
+          <button type="button" class="rangebtn" id="signout">Sign out of this device</button></div>
+      </section>
+
+      <section class="card"><h2>Share to view</h2><div class="body">
+        <p class="cardnote">A link that lets someone see the dashboard, and change nothing. Taking it back signs out everyone who used it.</p>
+        <ul class="authlist">${shares}</ul>
+        <form class="authform inline" id="share-add">
+          <label>For<input id="share-name" placeholder="Family" maxlength="60"></label>
+          <label>Good for<select id="share-days">${SHARE_DAYS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></label>
+          <button type="submit" class="authbtn">Make a link</button>
+        </form>
+        <div id="share-new"></div>
+      </div></section>
+      <p class="autherr" id="auth-err" role="alert"></p>
+    </div>`;
+
+    const err = (m) => { $('auth-err').textContent = m; };
+    const redo = (msg) => renderSettings(msg);
+    const act = (fn) => async (ev) => { ev?.preventDefault?.(); try { await fn(ev); } catch (e) { err(passkeyError(e)); } };
+
+    $('req').onchange = act(async () => redo((await authPost('/auth/settings/required', { on: $('req').checked })).required
+      ? 'The dashboard is private now.' : 'The dashboard is open to anyone with its address again.'));
+    if ($('pk-add')) $('pk-add').onsubmit = act(async () => { await addPasskey($('pk-name').value.trim()); redo('Passkey added.'); });
+    $('pw-change').onsubmit = act(async () => {
+      await authPost('/auth/settings/password', { current: $('pw-cur') ? $('pw-cur').value : undefined, next: $('pw-new').value });
+      redo('Password saved.');
+    });
+    if ($('pw-remove')) $('pw-remove').onclick = act(async () => {
+      const current = $('pw-cur').value;
+      if (!current) { err('Type your current password above first.'); return; }
+      await authPost('/auth/settings/password', { current, next: null });
+      redo('Password removed. Sign in with a passkey from now on.');
+    });
+    $('revoke-others').onclick = act(async () => {
+      const n = (await authPost('/auth/settings/devices/revoke', { others: true })).signedOut;
+      redo(`Signed out ${n} ${n === 1 ? 'device' : 'devices'}.`);
+    });
+    $('signout').onclick = act(async () => { await authPost('/auth/logout'); location.hash = '#/'; location.reload(); });
+    for (const b of view.querySelectorAll('[data-revoke]')) b.onclick = act(async () => { await authPost('/auth/settings/devices/revoke', { id: b.dataset.revoke }); redo('Signed out.'); });
+    for (const b of view.querySelectorAll('[data-unkey]')) b.onclick = act(async () => { await authPost('/auth/settings/passkeys/remove', { id: b.dataset.unkey }); redo('Passkey removed.'); });
+    for (const b of view.querySelectorAll('[data-unshare]')) b.onclick = act(async () => { await authPost('/auth/settings/shares/revoke', { id: b.dataset.unshare }); redo('Link taken back.'); });
+    $('share-add').onsubmit = act(async () => {
+      const days = $('share-days').value;
+      const made = await authPost('/auth/settings/shares', { name: $('share-name').value.trim(), days: days ? Number(days) : null });
+      await renderSettings('Link made. It is shown once - copy it now.');
+      const box = $('share-new');
+      if (!box) return;
+      box.innerHTML = `<div class="sharelink"><input readonly id="share-url" value="${esc(made.url)}" aria-label="The new share link">
+        <button type="button" class="authbtn" id="share-copy">Copy</button></div>`;
+      $('share-copy').onclick = async () => {
+        try { await navigator.clipboard.writeText(made.url); $('share-copy').textContent = 'Copied'; } catch { $('share-url').select(); }
+      };
+    });
+  }
+
   // ---------- the guide ----------
   //
   // What SolarLens is, what is on each tab, and where to find things - opened
@@ -3190,6 +3512,9 @@
       ['Battery charge through the day', `${tab('#/power', 'Power')}, under the hybrid system - Charge today`],
       ['PV strings, voltages, currents, temperature', `${tab('#/power', 'Power')}, under each system`],
       ['Inverter model, firmware, datalogger signal', tab('#/devices', 'Devices')],
+      ['Make the dashboard private, and stay signed in', `${tab('#/settings', 'Settings')} (the gear) - Require sign-in to view`],
+      ['Let someone see it without changing anything', `${tab('#/settings', 'Settings')} - Share to view`],
+      ['Sign out a lost phone', `${tab('#/settings', 'Settings')} - Signed-in devices`],
       ['Whether a datalogger kept its link this week', `${tab('#/devices', 'Devices')} - each datalogger, Last 7 days`],
       ['Warranty and installation date', `${tab('#/power', 'Power')}, under each system, or the system on its own`],
       ['When each laptop\'s SolisCloud login runs out', `${tab('#/devices', 'Devices')} - SolisCloud relays`],
@@ -3273,6 +3598,7 @@
     const hash = location.hash || '#/';
     for (const a of $('nav').children) a.classList.toggle('on', a.getAttribute('href') === hash);
     $('guidebtn').classList.toggle('on', hash === '#/guide');
+    $('settingsbtn').classList.toggle('on', hash === '#/settings');
     document.body.classList.remove('ovfit');
     const tv = hash === '#/tv';
     if (document.body.classList.contains('tv') !== tv) {
@@ -3284,6 +3610,9 @@
     // error: it is the page to read while the rest is still loading, when the
     // feeds are down, or when the server has refused a request.
     if (hash === '#/guide') return renderGuide();
+    // Settings works signed out too: it is where the owner signs in and sets up.
+    if (hash === '#/settings') return renderSettings();
+    if (state.error === 'signin') return renderSignIn();
     if (state.error === 'unauthorized') {
       // Reads are public, so this should not happen. It is kept because a
       // deployment mid-rollout can still answer 401, and a blank page would
@@ -3471,7 +3800,8 @@
       route();
     } catch (e) {
       state.error = e.message;
-      if (e.message === 'unauthorized') { $('updated').innerHTML = '<i></i>unauthorized'; route(); }
+      if (e.message === 'signin') { $('updated').innerHTML = '<i></i>sign in'; route(); }
+      else if (e.message === 'unauthorized') { $('updated').innerHTML = '<i></i>unauthorized'; route(); }
       else $('updated').innerHTML = `<i></i>error: ${esc(e.message)}`;
     }
   }

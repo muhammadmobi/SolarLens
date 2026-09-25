@@ -18,6 +18,28 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **An owner login, and a dashboard that can be private.** Set up once under
+  Settings (the new gear in the header) with the setup code - `API_TOKEN` - and
+  a password, and add passkeys on your phones and computers. Then turn on
+  **Require sign-in to view**: the readings need a sign-in from then on. It is
+  off until you turn it on, and cannot be turned on before there is a way to
+  sign in.
+- **Signed in once, signed in for good.** A one-hour session and a year-long
+  refresh token; the Worker renews both on the way through whenever the hour is
+  up, so the dashboard, the TV and the service worker never see the sign-in
+  page again. The refresh token rotates at every renewal and the one before is
+  remembered: a copy used later signs the device out. Two tabs renewing at once
+  do not. Only hashes are stored.
+- **Passkeys**, verified in the Worker itself (ES256 and RS256, no library),
+  and never locked out.
+- **Settings**: every signed-in device with sign-out for one or all others,
+  taking effect at once; the password changed or removed; and **Share to
+  view** - a view-only link for a day, a week, a month or until taken back.
+- **A lockout**: five wrong tries from one address lock it for fifteen
+  minutes; thirty from everywhere in an hour pause password sign-in for an
+  hour.
+- **`GET /api/status`**: how fresh each feed is and nothing else, open even on
+  a private dashboard, for a monitor and the deploy's smoke test.
 - **Everything each datalogger reports, and its week.** The Devices tab opens
   with a card per datalogger: how it connects, its signal and signal bars, how
   often it uploads, its last contact, how long it has run since its last
@@ -62,6 +84,14 @@ checkout of any tag says which release it is.
 
 ### Changed
 
+- **Reads send `Cache-Control: private`** rather than `public`: an answer can
+  now depend on who is asking.
+- **`/auth?t=<API_TOKEN>` signs the browser in with a proper session** instead
+  of leaving the token itself in a cookie. The 2.x cookie is still honoured.
+- **The deploy's smoke test** reads freshness from `/api/status`, and on a
+  private dashboard checks that a signed-out caller is asked to sign in.
+- **Replacing `API_TOKEN`** now keeps every signed-in device signed in, but the
+  password must be set again, since it is keyed with the token.
 - **The code explains itself.** Every source file now opens with what it is for
   and how it fits with the others - the Worker's routes and cron, the database
   layer, each vendor's client, the relay agent, the scripts - and each function
