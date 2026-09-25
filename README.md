@@ -77,11 +77,11 @@ A single Cloudflare Worker does three jobs:
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
 3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Five tabs, plus a per-system page they all link into:
    - **Overview** (`#/`) — one column per system, sized to fit a laptop screen without scrolling: the energy-flow diagram, then that system's figures as tiles, then its day curve. Producing now, house load, grid direction and battery charge live in the diagram and are not repeated as figures. Model and datalogger signal are not here at all — they never change, so they sit on Devices. Anything above the curve opens that system's detail page; the curve opens Power. Below 1080px wide the columns stack, and below 660px tall the page scrolls, because two systems will not fit on a phone and a very short window cannot hold a diagram, twelve figures and a readable curve at once.
-   - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry (built, but not shown on the live site yet: the payload it reads is withheld from public answers - `docs/feature-gaps.md` gap 5).
+   - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry - every measurement the vendor sent, with each id, serial, name and place left out.
    - **Historical Data** (`#/history`) — day by day per system: produced, consumed, imported, exported, battery in and out, peak and sample count, with a bar per day. Columns appear only where that system measures the quantity, and the page says plainly that the record begins when SolarLens started collecting rather than when the array was installed.
    - **Alerts** (`#/alerts`) — everything either cloud says is wrong, one collapsible section per system. Nothing is invented: each row names the field it came from, so an empty section reads as "both vendors report normal" rather than "nobody looked". The tab carries a count badge.
    - **Devices** (`#/devices`) — hardware inventory: inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
-   - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table (not shown on the live site yet - gap 5).
+   - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table of the vendor's measurements.
 
    There is no Energy flow tab: the diagrams lead the overview instead, and an old `#/flow` bookmark lands there.
 
@@ -545,7 +545,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**401 unit tests** and **364 end-to-end tests** (182 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**422 unit tests** and **370 end-to-end tests** (185 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -582,7 +582,7 @@ exact lines no test reaches.
 
 ### Unit tests — `tests/unit/`
 
-Twenty-five files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; eight drive the Worker or its database layer against a real database, through the two helpers in `tests/helpers/`:
+Twenty-six files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; nine drive the Worker or its database layer against a real database, through the two helpers in `tests/helpers/`:
 
 - **`helpers/d1.ts`** — SQLite behind the D1 interface, with the project's own migrations applied. D1 *is* SQLite and Node ships one, so the SQL a test exercises is the SQL that runs in production. It also refuses a bound value D1 would refuse, which is how a `undefined` reaches a test rather than a deploy.
 - **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about.
@@ -593,7 +593,8 @@ Twenty-five files, one concern each. Most are pure-function tests against fixtur
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
 - **`clients.test.ts`** — all three vendor HTTP clients against a stubbed `fetch`: SolisCloud request signing, SolarMan token acquisition and refresh-and-retry, the browser-session refresh flow, the alert and period reads, error envelopes and HTTP failures.
-- **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id.
+- **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id. Also the two things made from the raw payload: the alert fields as named columns (a SolisCloud zero kept apart from a vendor that sends no counter), and the telemetry table, which keeps a field only if its name is not an identifier in any of the spellings the vendors use and its value carries no long run of digits.
+- **`fixture-contract.test.ts`** — the end-to-end fixtures held to the real Worker. It runs the Worker on the vendor fixtures and fails if a row in `tests/fixtures/dashboard-api.ts` carries a field `/api/latest` or `/api/devices` does not send, or lacks one they do, and if any spec serves a raw payload. This is the test that would have caught gap 5.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
 - **`solarman-alarm-detail.test.ts`** — SolarMan's advice and timeline read the way its own detail panel reads them: each run of five-minute samples one occurrence with an end, a recent run left active, a run into midnight left unknown, the plant's own day asked for, and only the newest few alerts detailed each hour.
@@ -674,7 +675,7 @@ while charts keep the brighter ones.
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **98.2%** | **91.6%** | **97.6%** | **99.5%** |
+| **All of `src/`** — everything the Worker ships | **98.2%** | **92.0%** | **97.6%** | **99.5%** |
 | &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 97% | 91% | 91% | **100%** |
 | &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 91% | **100%** | **100%** |
 | &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |
@@ -938,11 +939,11 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /api/latest` | open | newest reading per inverter, with `metrics` |
+| `GET /api/latest` | open | newest reading per inverter, with `metrics`, the payload's alert fields (`alarm_count`, `alarm_level`, `warning_status`, `business_warning_status`, `consumer_warning_status`, `network_status`) and `telemetry` - its measurements, with no identifier |
 | `GET /api/series?from=&to=&tz=` | open | readings in a range (≤ 31 days). Omit `from` and the window opens at the earliest plant's own midnight; `tz` is the fallback for a plant whose vendor reports no timezone |
 | `GET /api/health` | open | recent poll log, the newest line per feed, and each SolisCloud relay heard from in the last 14 days with its login's expiry. Relay ids are never returned |
 | `GET /api/history?days=&tz=` | open | one row per inverter per day, each cut at that plant's own midnight (`tz` is the fallback, the caller's UTC offset in minutes) |
-| `GET /api/devices` | open | hardware inventory |
+| `GET /api/devices` | open | hardware inventory, with a device's own alert count as `alert_status` (SolarMan; -1 means nothing to report) |
 | `GET /api/alarms?days=` | open | fault history, newest first (default 730 days). An alarm's internal id is never returned, since it contains the vendor's plant id |
 | `GET /api/periods` | open | each vendor's own month and year totals, back to installation |
 | `POST /api/poll` | API_TOKEN | poll all providers now — makes live vendor calls, so it spends quota |
@@ -1063,6 +1064,7 @@ solar-lens/
 │   ├── unit/series-rules.test.ts   live beats backfilled; where "today" opens
 │   ├── unit/daylight-saving.test.ts  history that keeps its day across a clock change
 │   ├── unit/public-view.test.ts what a public response may and may not carry
+│   ├── unit/fixture-contract.test.ts  the end-to-end fixtures, held to the real Worker
 │   ├── unit/clients.test.ts     the vendor HTTP clients against a stubbed fetch
 │   ├── unit/events.test.ts      alarms and period totals from both vendors
 │   ├── unit/solarman-alarm-detail.test.ts  SolarMan's advice, and when each fault cleared
@@ -1072,6 +1074,7 @@ solar-lens/
 │   ├── unit/timezone.test.ts    plant timezones and where a plant's day begins
 │   ├── unit/relays.test.ts      relay reports, login expiry, and relay naming
 │   ├── fixtures/               captured vendor payloads, scrubbed of identifiers
+│   ├── fixtures/dashboard-api.ts  what the API answers, as the end-to-end suite serves it
 │   ├── unit/release-version.test.ts  the guide's release is the package's
 │   ├── e2e/push.spec.ts         turning notifications to a closed browser on and off
 │   ├── e2e/guide.spec.ts        the guide page and its button
@@ -1183,7 +1186,10 @@ What that choice costs is bounded rather than accepted:
 - **Vendor identifiers never leave the Worker.** `src/public-view.ts` strips
   them from every response. Station and plant ids become positional aliases
   (`s1`, `s2`), serial numbers are masked to their last four characters, and the
-  stored raw vendor payload is not served at all. A station id, a plant id and a
+  stored raw vendor payload is not served as it is. What the page needs from it
+  goes out instead: the alert fields as named columns, and `telemetry`, a copy
+  built by allowing measurements rather than stripping identifiers - so an id
+  under a name nobody has seen yet is left out too. A station id, a plant id and a
   serial are account-level handles — what a vendor's support desk asks for, what
   a warranty is keyed on — and none of them is needed to draw a chart.
 - Aliases are positional rather than hashed **on purpose**. A SolarMan station
@@ -1238,7 +1244,7 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] Unit tests (Vitest) and e2e tests (Playwright, desktop + mobile)
 - [x] Hardware inventory: Devices view, datalogger status and RSSI, per-MPPT-string PV power
 - [x] Per-system detail view
-- [ ] Searchable raw telemetry, and the alerts built from vendor flags, on the live site - they read a payload the server withholds (`docs/feature-gaps.md` gap 5)
+- [x] Searchable raw telemetry, and the alerts built from vendor flags, on the live site - the Worker now sends them as named fields (3.0)
 - [x] Energy-flow diagram (PV / grid / battery / load), battery arm omitted for on-grid
 - [x] Checks on every pull request, required before merging: types, unit, end-to-end, build, privacy, attribution, headers, relay scripts
 - [x] Vulnerability, secret and code scanning, weekly as well as per pull request

@@ -40,9 +40,9 @@ git clone https://github.com/muhammadmobi/SolarLens
 cd SolarLens
 npm ci
 npm run typecheck             # types for src/ and tests/
-npm run test:unit             # ~275 tests, a few seconds
+npm run test:unit             # ~420 tests, a few seconds
 npm run test:unit:coverage    # the same, with the coverage thresholds applied
-npm run test:e2e              # ~265 tests, about three minutes, needs Chrome
+npm run test:e2e              # ~370 tests, about three minutes, needs Chrome
 ```
 
 All of that runs with no Cloudflare account, no database and no vendor
@@ -133,7 +133,7 @@ quota, `/api/ingest/*` because they write.
 | `src/index.ts` | Every route, the auth middleware, the security headers, the cron entry point. Hono. |
 | `src/db.ts` | All SQL. Upserts, the latest-per-inverter query, series, daily rollups, the poll log, alarms, period totals, relays, a token store. |
 | `src/poll.ts` | The cron fan-out: which providers to call, in what order, what to do when one fails. |
-| `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, drops raw payloads. |
+| `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, and sends the raw payload only as its alert fields and a cleaned `telemetry` copy. |
 | `src/relays.ts` | Validates a relay's report on itself into a narrow shape. |
 | `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. |
 | `src/providers/types.ts` | The `Provider` interface every adapter implements, plus shared shapes. |
@@ -242,7 +242,12 @@ copy was lost. What holds the line instead is `src/public-view.ts`:
   not hashed, because a SolarMan station id is eight digits and a hash of one is
   reversible by trying all hundred million.
 - **Serials are masked** to the last four characters.
-- **`raw`, the stored vendor payload, is never served.**
+- **`raw`, the stored vendor payload, is never served as it is.** Its alert
+  fields go out as named columns, and its measurements as `telemetry`, built
+  by allowing fields rather than stripping them: a field is kept only if its
+  name is not an identifier and its value is a number, a boolean or a short
+  string with no long run of digits. A device's own alert count goes out as
+  `alert_status`.
 - **A relay's id never leaves the database**; the page names relays by nickname
   or as "Relay 1", "Relay 2". The id is random and never the computer's name,
   because a Windows machine name often carries a company and a person's name.
@@ -393,14 +398,14 @@ purpose. `docs/feature-gaps.md` is the honest list. SolarMan alarm detail and no
   and the deploy's smoke test cover.
 - **SolisCloud's official API key** would remove the weekly login, the laptop
   and the relay entirely.
-- **The page reads a raw vendor payload the server never sends.** For privacy,
-  `src/public-view.ts` drops each vendor's raw payload from every public
-  answer, but three parts of the dashboard still read it: the Raw telemetry
-  table, the alerts built from the payload's own fields (SolisCloud's alarm
-  count and level, SolarMan's warning flags and datalogger link), and a device's
-  own alert count. None of them shows on the live site, and the guide still
-  points people to the raw table. The tests use fixtures that include the
-  payload, so they pass. `docs/feature-gaps.md` gap 5 has the two ways to close it.
+- ~~The page reads a raw vendor payload the server never sends.~~ **Closed in
+  3.0.** The Worker sends the alert fields as named columns and a cleaned
+  `telemetry` copy for the Raw telemetry table (`src/public-view.ts`). The
+  end-to-end fixtures now live in `tests/fixtures/dashboard-api.ts`, and
+  `tests/unit/fixture-contract.test.ts` holds them to what the real Worker
+  sends, field by field. **When you add a column to `/api/latest` or
+  `/api/devices`, add it to those fixtures too** - the contract test will
+  say so if you forget.
 - **Push is set up once per server and once per device.** Until
   `node scripts/make-vapid-key.mjs` has run, the Alerts tab says notifications to
   a closed browser are not set up - which is the state to check first when a
