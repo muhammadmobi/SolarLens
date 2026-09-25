@@ -258,8 +258,6 @@ export interface DeviceRow {
   battery: string | null;
   /** JSON LoggerDetail, or null. */
   logger: string | null;
-  /** JSON LoggerNetwork, or null. For the owner only: never in a public answer. */
-  network: string | null;
   updated_at: number;
   raw: string | null;
 }
@@ -273,8 +271,8 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
     .prepare(
       `INSERT INTO devices
          (id, provider, plant_id, kind, sn, name, model, firmware, rated_power_w, status,
-          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, ac_phases, frequency_hz, power_factor, temp_c, dc_bus_v, battery, updated_at, raw, logger, network)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)
+          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, ac_phases, frequency_hz, power_factor, temp_c, dc_bus_v, battery, updated_at, raw, logger)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26)
        -- Each column keeps what is stored when this push leaves it null: the
        -- list record and the detail record each carry only some fields, and
        -- whichever arrived last must not blank out what the other one set.
@@ -299,7 +297,6 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
          dc_bus_v        = COALESCE(excluded.dc_bus_v, devices.dc_bus_v),
          battery         = COALESCE(excluded.battery, devices.battery),
          logger          = COALESCE(excluded.logger, devices.logger),
-         network         = COALESCE(excluded.network, devices.network),
          updated_at      = excluded.updated_at,
          raw             = COALESCE(excluded.raw, devices.raw)`,
     )
@@ -313,10 +310,32 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
       at,
       d.raw ? JSON.stringify(d.raw) : null,
       d.logger ? JSON.stringify(d.logger) : null,
-      d.network ? JSON.stringify(d.network) : null,
     )
     .run();
+  if (d.network) await upsertDeviceNetwork(db, d.id, d.network, at);
   await recordDeviceSample(db, d.id, at);
+}
+
+/**
+ * A datalogger's network handles, kept in device_network rather than on the
+ * devices row: see migrations/0014_datalogger.sql for why a separate table.
+ * Only a push that carries them writes here, so one that does not leaves the
+ * last known handles in place.
+ */
+async function upsertDeviceNetwork(db: D1Database, deviceId: string, network: NonNullable<Device['network']>, at: number): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO device_network (device_id, network, updated_at) VALUES (?1, ?2, ?3)
+       ON CONFLICT(device_id) DO UPDATE SET network = excluded.network, updated_at = excluded.updated_at`,
+    )
+    .bind(deviceId, JSON.stringify(network), at)
+    .run();
+}
+
+/** Every datalogger's network handles, by device id. For the owner's view only; never public. */
+export async function deviceNetworks(db: D1Database): Promise<Map<string, string>> {
+  const { results } = await db.prepare('SELECT device_id, network FROM device_network').all<{ device_id: string; network: string }>();
+  return new Map(results.map((r) => [r.device_id, r.network]));
 }
 
 /** How long device_samples keeps a row: long enough to see a season's pattern. */

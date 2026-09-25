@@ -13,7 +13,7 @@ import { linkOf, loggerDetail, loggerNetwork } from '../../src/providers/logger'
 import { deviceFromCollector } from '../../src/providers/soliscloud';
 import { deviceFromRecord } from '../../src/providers/solarman';
 import {
-  DEVICE_SAMPLES_KEEP_S, deviceSamples, forgetOldDeviceSamples, listDevices, recordDeviceSample, upsertDevice,
+  DEVICE_SAMPLES_KEEP_S, deviceNetworks, deviceSamples, forgetOldDeviceSamples, listDevices, recordDeviceSample, upsertDevice,
   upsertInverter,
 } from '../../src/db';
 import { createTestD1, type TestD1 } from '../helpers/d1';
@@ -189,7 +189,20 @@ describe('link history', () => {
     await upsertDevice(d1.db, { ...logger({ id: 'soliscloud:datalogger:L1' }), logger: null, network: null }, 2000);
     const [row] = await listDevices(d1.db);
     expect(JSON.parse(String(row.logger)).signalLevel).toBe(2);
-    expect(JSON.parse(String(row.network)).cellId).toBe('B');
+    const nets = await deviceNetworks(d1.db);
+    expect(JSON.parse(String(nets.get('soliscloud:datalogger:L1'))).cellId).toBe('B');
+  });
+
+  it('keeps the network handles off the devices row, where an older Worker would serve them', async () => {
+    // A Worker rolled back to 2.10 reads SELECT * FROM devices and strips only
+    // the columns it knew. So the handles must not be a column there at all.
+    d1 = createTestD1();
+    await upsertDevice(d1.db, deviceFromCollector({ sn: 'L1', machine: 'S3-4G', lac: 'AREA1', ci: 'CELL1', connectionOperator: 'Op' }, 'p1'), 1000);
+    // raw is left out: every Worker, 2.10 included, withholds it. Every other
+    // column is what an older public view would pass through.
+    const rows = d1.raw.prepare('SELECT * FROM devices').all() as Record<string, unknown>[];
+    const everything = JSON.stringify(rows.map(({ raw: _raw, ...rest }) => rest));
+    for (const secret of ['AREA1', 'CELL1', 'Op"']) expect(everything).not.toContain(secret);
   });
 });
 
