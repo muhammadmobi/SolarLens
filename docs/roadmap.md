@@ -74,6 +74,18 @@ are shown only to the signed-in owner.
   public demo in phase 5. The TV signs in once, like any other device.
 - A limit on failed attempts, then a lockout.
 
+**As built:** the switch lives in Settings ("Require sign-in to view") rather
+than in the Worker's configuration, so turning privacy on needs no deploy and
+cannot be turned on before a way to sign in exists. The first way in is the
+setup code - `API_TOKEN` - which also resets a forgotten password. The session
+is signed with a key derived from `API_TOKEN` and the password is keyed with
+one, so a copy of the database signs nobody in; the cost is that replacing
+`API_TOKEN` means setting the password again (devices and passkeys are
+unaffected). The password gets 10,000 PBKDF2 rounds rather than the hundreds of
+thousands a password stored alone would want: a Worker on the free plan has
+about 10 ms of CPU per request, and the key the hash is keyed with, together
+with the lockout, is what protects it. `/api/status` stays open for monitoring.
+
 ### 4. Any number of inverters
 
 A colour per system, used everywhere it appears. The Overview becomes a summary

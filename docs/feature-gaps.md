@@ -48,6 +48,15 @@ live database after 2.10.0.
 | **Datalogger status, model, firmware, signal** | ● | ● | ● both — Solis in dBm, SolarMan in percent |
 | Everything else the datalogger reports: link type, signal bars, time since restart and in total, make date | ● | ◐ | ● a card per logger on the Devices tab — SolarMan's list says less, and nothing is invented for it |
 | A datalogger's link over time: online, offline, signal | ○ | ○ | ● the last seven days as a strip, a summary and a signal line — neither app keeps this |
+
+### Access
+
+| Feature | SolisCloud | SolarMan | SolarLens |
+|---|:--:|:--:|---|
+| Sign-in to see your plant | ● | ● | ● optional, the owner's choice; passkeys and a password |
+| Stay signed in | ◐ SolisCloud asks again weekly | ● | ● a year, renewed on every use |
+| See and sign out your devices | ○ | ○ | ● |
+| Share a view-only link | ◐ visitor accounts | ◐ shared plants need an account | ● a link, no account, for as long as you say |
 | Per-MPPT-string DC power | ● | ● | ● both |
 | Per-string voltage & current | ● | ● | ● both |
 | Per-phase AC voltage, current, frequency | ● | ● | ● both (Solis adds power factor and DC bus) |
