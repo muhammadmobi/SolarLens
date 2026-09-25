@@ -382,7 +382,8 @@ The short history a newcomer would otherwise repeat.
 
 ## 14. What is still missing
 
-`docs/feature-gaps.md` is the honest list. SolarMan alarm detail and notifications to a closed browser, both listed here before, are built. What is left:
+`docs/roadmap.md` is the plan for 3.0, phase by phase, and what was left out on
+purpose. `docs/feature-gaps.md` is the honest list. SolarMan alarm detail and notifications to a closed browser, both listed here before, are built. What is left:
 
 - ~~The Worker's own routes have no test that runs them before a merge.~~
   **Closed in 2.7**: `tests/helpers/d1.ts` puts SQLite behind the D1 interface,

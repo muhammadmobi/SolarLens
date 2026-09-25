@@ -18,6 +18,10 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **A roadmap to 3.0.** `docs/roadmap.md` sets out the twelve phases of the
+  next release - the owner login, any number of inverters, a public demo,
+  weather and expected output with a site map, savings, questions answered in
+  the app and an MCP server - and what was left out on purpose.
 - **A proper icon for the guide.** The header's "?" is now an open book with
   the word *Guide* beside it - drawn in the text colour, so it follows the theme
   and inverts while the guide is open - and the book alone on a phone, where the

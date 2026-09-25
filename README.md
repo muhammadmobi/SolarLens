@@ -1086,7 +1086,8 @@ solar-lens/
 ├── CHANGELOG.md              release history, newest first
 ├── docs/handoff.md           running, repairing and handing over the system
 ├── docs/api-notes.md         observed vendor field names and conventions
-└── docs/feature-gaps.md      SolisCloud vs SolarMan vs SolarLens, feature by feature
+├── docs/feature-gaps.md      SolisCloud vs SolarMan vs SolarLens, feature by feature
+└── docs/roadmap.md           the plan for 3.0, phase by phase
 ```
 
 ### Finding your way around the code
