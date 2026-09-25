@@ -246,7 +246,9 @@ export function deviceAliasFor<T extends { id: string; kind?: string | null; pla
 /**
  * Device rows for a public response, stripped and aliased the same way. The one
  * payload field the page reads - SolarMan's own alert count on a device record,
- * where -1 means "nothing to report" - comes across as `alert_status`.
+ * where -1 means "nothing to report" - comes across as `alert_status`. The
+ * `network` column (a logger's operator and cell, or its MAC address) is left
+ * out: it can place a logger on a map.
  */
 export function publicDevices<T extends { id: string; kind?: string | null; sn?: string | null; plant_id?: string | null; raw?: unknown }>(
   rows: T[],
@@ -254,12 +256,17 @@ export function publicDevices<T extends { id: string; kind?: string | null; sn?:
 ) {
   const deviceAlias = deviceAliasFor(rows, alias);
   return rows.map((r) => ({
-    ...omit(r, ['raw', 'sn', 'plant_id']),
+    ...omit(r, ['raw', 'sn', 'plant_id', 'network']),
     id: deviceAlias(r.id),
     plant_id: alias(r.plant_id),
     sn: maskSerial(r.sn),
     alert_status: numOrNull(asRecord(r.raw)?.alertStatus),
   }));
+}
+
+/** Link history rows, under the same device aliases publicDevices gives. */
+export function publicDeviceSamples<T extends { device_id: string }>(rows: T[], deviceAlias: Alias) {
+  return rows.map((r) => ({ ...r, device_id: deviceAlias(r.device_id) }));
 }
 
 

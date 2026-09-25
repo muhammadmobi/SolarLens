@@ -45,7 +45,18 @@ async function stubApi(page: Page) {
       id: 'd1', provider: 'soliscloud', plant_id: 's1', kind: 'inverter', sn: '••••1234', name: 'Inverter',
       model: 'S5-GR3P10K', firmware: '1.0.78', status: 'online', signal_dbm: -63, strings: [{ index: 1, powerW: 4200 }],
       ac_phases: null, temp_c: 41, last_seen: NOW - 60,
+    }, {
+      // A datalogger, so the Devices tab draws its card, its week and its signal.
+      id: 'd2', provider: 'soliscloud', plant_id: 's1', kind: 'datalogger', sn: '••••7777', name: 'Datalogger',
+      model: 'S3-WIFI-ST', firmware: '10186', status: 'online', signal_dbm: -63, upload_cycle_s: 300, last_seen: NOW - 60,
+      logger: JSON.stringify({ link: 'Wi-Fi', signalLevel: 3, uptimeS: 7200, workingS: 86_400, manufacturedAt: NOW - 86_400 * 400 }),
     }],
+  })));
+  await page.route('**/api/devices/history**', (r) => r.fulfill(json({
+    now: NOW, days: 7, from: NOW - 7 * 86_400,
+    samples: [0, 1, 2, 3].map((i) => ({
+      device_id: 'd2', ts: NOW - 7 * 86_400 + i * 2 * 86_400, status: i === 2 ? 'offline' : 'online', signal_dbm: -60 - i, signal_pct: null,
+    })),
   })));
   await page.route('**/api/history**', (r) => r.fulfill(json({
     now: NOW, days: 30,
