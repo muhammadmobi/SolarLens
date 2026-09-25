@@ -243,11 +243,13 @@ copy was lost. What holds the line instead is `src/public-view.ts`:
   reversible by trying all hundred million.
 - **Serials are masked** to the last four characters.
 - **`raw`, the stored vendor payload, is never served as it is.** Its alert
-  fields go out as named columns, and its measurements as `telemetry`, built
-  by allowing fields rather than stripping them: a field is kept only if its
-  name is not an identifier and its value is a number, a boolean or a short
-  string with no long run of digits. A device's own alert count goes out as
-  `alert_status`.
+  fields go out as named columns, and its measurements as `telemetry`: only
+  the fields on the reviewed list in `src/public-view.ts` (TELEMETRY_KEYS),
+  and only with a plain value. **A new vendor field shows in the Raw telemetry
+  table only once someone has read it and added it to that list** - that is the
+  point, since the plant records carry notes, codes and a zone name beside the
+  measurements. A device's own alert count goes out as `alert_status`, and a
+  device is named by a positional alias ("s1-datalogger-1"), not its serial.
 - **A relay's id never leaves the database**; the page names relays by nickname
   or as "Relay 1", "Relay 2". The id is random and never the computer's name,
   because a Windows machine name often carries a company and a person's name.

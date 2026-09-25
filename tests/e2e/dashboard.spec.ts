@@ -288,14 +288,14 @@ test.describe('Alerts', () => {
   });
 
   test("raises a device's own alert count, and ignores SolarMan's -1", async ({ page }) => {
-    const devs = devices().map((d) => (d.id === 'solarman:inverter:HYB01' ? { ...d, alert_status: 3 }
-      : d.id === 'solarman:datalogger:LOG02' ? { ...d, alert_status: -1 } : d));
+    const devs = devices().map((d) => (d.id === 's2-inverter-1' ? { ...d, alert_status: 3 }
+      : d.id === 's2-datalogger-1' ? { ...d, alert_status: -1 } : d));
     await stubApi(page, { devs });
     await page.goto('/#/alerts');
     const sec = page.locator('details.syssec').nth(1);
     await expect(sec).toContainText('3 alerts');
     await expect(sec).toContainText('Raised on the device record');
-    await expect(sec).not.toContainText('LOG02:');
+    await expect(sec).not.toContainText('OG02:');
     await expect(sec).not.toContainText('-1 alert');
   });
 
@@ -881,7 +881,7 @@ test.describe('Devices', () => {
     const rows = page.locator('table.devices tbody tr');
     await expect(rows).toHaveCount(4);
     await expect(rows.nth(0)).toContainText('S5-GR3P10K');
-    await expect(rows.nth(0)).toContainText('DEMO01');
+    await expect(rows.nth(0)).toContainText('••••MO01');
     await expect(rows.nth(0)).toContainText('10.00 kW');
     await expect(rows.nth(0)).toContainText('2 producing');
     // The datalogger's RSSI is the field that names a silent outage.
@@ -1220,7 +1220,7 @@ test.describe('PV strings on an offline inverter', () => {
   // view counted those as strings producing now, on a system the header
   // correctly called offline.
   const offlineSolis = () => inverters({ solis: { ts: NOW - 19 * 3600, status: 'offline' } });
-  const staleDevices = () => devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+  const staleDevices = () => devices().map((d) => d.id === 's1-inverter-1'
     ? { ...d, status: 'offline', last_seen: NOW - 19 * 3600 }
     : d);
 
@@ -1265,7 +1265,7 @@ test.describe('PV strings: counting what is connected', () => {
   test('an empty MPPT socket is not counted as a string that is not producing', async ({ page }) => {
     // One array on input 1, nothing on input 2: that is one string, producing.
     // "1 of 2" would read as a fault that does not exist.
-    const devs = devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+    const devs = devices().map((d) => d.id === 's1-inverter-1'
       ? { ...d, strings: JSON.stringify([
           { index: 1, powerW: 2289, voltageV: 253.6, currentA: 9.2 },
           { index: 2, powerW: 0, voltageV: 0.5, currentA: 0 },
@@ -1283,7 +1283,7 @@ test.describe('PV strings: counting what is connected', () => {
   });
 
   test('a connected string reading zero in daylight is reported as a shortfall', async ({ page }) => {
-    const devs = devices().map((d) => d.id === 'soliscloud:inverter:DEMO01'
+    const devs = devices().map((d) => d.id === 's1-inverter-1'
       ? { ...d, strings: JSON.stringify([
           { index: 1, powerW: 4100, voltageV: 480, currentA: 8.5 },
           { index: 2, powerW: 0, voltageV: 310, currentA: 0 },

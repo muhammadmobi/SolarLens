@@ -90,11 +90,15 @@ checkout of any tag says which release it is.
   count now appear on the live site.** All three read the vendor's raw payload,
   which the public view has never sent, so none of them had ever shown outside
   the tests (gap 5). The Worker now sends the fields the alerts need as named
-  columns, and `telemetry`: a copy of the payload built by allowing fields
-  rather than stripping them - numbers, units and status words, with every id,
-  serial, name, place, address and link left out, whatever it is called. A
-  SolisCloud plant reporting zero alarms stays silent; a vendor that sends no
-  counter at all is no longer read as zero.
+  columns, and `telemetry`: the payload's fields that are on a reviewed list
+  of measurements, and nothing else - so the ids, the owner's notes, the
+  platform codes and the zone name a live plant record carries stay out, and so
+  does any field nobody has reviewed. A SolisCloud plant reporting zero alarms
+  stays silent; a vendor that sends no counter, or a blank one, is no longer
+  read as zero.
+- **Each device has a public name of its own.** Every device went out as
+  "unknown", since its real id carries its serial; each is now named by its
+  system and place ("s1-datalogger-1"), so the page can tell them apart.
 - **The end-to-end fixtures can no longer drift from the Worker.** They moved to
   `tests/fixtures/dashboard-api.ts`, and a unit test runs the real Worker on
   the vendor fixtures and fails if a fixture row carries a field the Worker does

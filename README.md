@@ -593,7 +593,7 @@ Twenty-six files, one concern each. Most are pure-function tests against fixture
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
 - **`clients.test.ts`** — all three vendor HTTP clients against a stubbed `fetch`: SolisCloud request signing, SolarMan token acquisition and refresh-and-retry, the browser-session refresh flow, the alert and period reads, error envelopes and HTTP failures.
-- **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id. Also the two things made from the raw payload: the alert fields as named columns (a SolisCloud zero kept apart from a vendor that sends no counter), and the telemetry table, which keeps a field only if its name is not an identifier in any of the spellings the vendors use and its value carries no long run of digits.
+- **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id. Also the two things made from the raw payload: the alert fields as named columns (a SolisCloud zero kept apart from a vendor that sends no counter), and the telemetry table, which keeps only fields on a reviewed list of measurements - so the ids, the owner's notes, the platform codes and the zone name a live plant record carries are all left out, and so is any field nobody has reviewed, whatever it is called. Device rows are named by a positional alias ("s1-datalogger-1") rather than their serial.
 - **`fixture-contract.test.ts`** — the end-to-end fixtures held to the real Worker. It runs the Worker on the vendor fixtures and fails if a row in `tests/fixtures/dashboard-api.ts` carries a field `/api/latest` or `/api/devices` does not send, or lacks one they do, and if any spec serves a raw payload. This is the test that would have caught gap 5.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
@@ -1187,9 +1187,11 @@ What that choice costs is bounded rather than accepted:
   them from every response. Station and plant ids become positional aliases
   (`s1`, `s2`), serial numbers are masked to their last four characters, and the
   stored raw vendor payload is not served as it is. What the page needs from it
-  goes out instead: the alert fields as named columns, and `telemetry`, a copy
-  built by allowing measurements rather than stripping identifiers - so an id
-  under a name nobody has seen yet is left out too. A station id, a plant id and a
+  goes out instead: the alert fields as named columns, and `telemetry`, the
+  payload's fields that are on a reviewed list of measurements. A field nobody
+  has reviewed is left out, whatever it is called: the SolisCloud plant record
+  alone carries over four hundred, among them the owner's own notes and the
+  plant's time-zone name, which names its city. A station id, a plant id and a
   serial are account-level handles — what a vendor's support desk asks for, what
   a warranty is keyed on — and none of them is needed to draw a chart.
 - Aliases are positional rather than hashed **on purpose**. A SolarMan station
