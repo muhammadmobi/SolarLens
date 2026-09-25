@@ -583,6 +583,26 @@
   .dev-name { font-weight: 700; }
   .dev-meta { color: var(--muted); font-size: 12.5px; }
 
+  /* Each datalogger: what it says about itself, and its link over a week. */
+  .loggers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; margin-bottom: 16px; }
+  .linkhist { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .linkhist .lh-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 13px; }
+  .linkhist .lh-head .t { font-weight: 700; }
+  .linkhist .lh-head .p { color: var(--muted); }
+  .lstrip { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--line-soft); }
+  .lstrip > i { display: block; height: 100%; min-width: 1px; }
+  .lstrip .on { background: var(--ok); }
+  .lstrip .off { background: var(--bad); }
+  .lstrip .alarm { background: var(--warn); }
+  .lstrip .unknown, .lstrip .none { background: var(--line); }
+  .lh-axis { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .lh-key { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+  .lh-key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .lh-key .on { background: var(--ok); } .lh-key .off { background: var(--bad); } .lh-key .none { background: var(--line); }
+  .sig-chart { width: 100%; height: auto; display: block; }
+  .sig-chart .grid { stroke: var(--line-soft); stroke-width: 1; }
+  .sig-chart .axis { fill: var(--faint); font-size: 11px; }
+
   details.syssec { margin-top: 20px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
   details.syssec > summary {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -711,7 +731,7 @@
     overview         the Overview tab
     alerts           the Alerts tab: what is wrong now, and fault history
     historical data  the Historical Data tab
-    devices          the Devices tab: hardware and SolisCloud relays
+    devices          the Devices tab: each datalogger and its week, hardware, SolisCloud relays
     system detail    one system in full: the blocks Power and a system page share
     the guide        the Guide page, behind the book icon in the header
     routing          which view the address (#/...) asks for; TV mode
@@ -765,7 +785,7 @@
   // Everything the views draw from, filled by refresh() and the load*()
   // functions: the newest reading per system, today's samples, the hardware,
   // the poll log, and which chart lines the reader has switched off.
-  const state = { latest: null, series: null, devices: [], health: null, error: null, hidden: savedHidden };
+  const state = { latest: null, series: null, devices: [], deviceHistory: null, health: null, error: null, hidden: savedHidden };
 
   // Each vendor's colour, for chart lines and accents.
   const colorFor = (p) => ({ soliscloud: 'var(--solis)', solarman: 'var(--solarman)', local: 'var(--local)' }[p] || 'var(--muted)');
@@ -2579,6 +2599,174 @@
   }
 
   // ---------- devices ----------
+  /**
+   * Each device's link over the last week, from /api/devices/history.
+   *
+   * Fetched only when a view that draws it opens, and at most every five
+   * minutes: the rows only move when a logger changes state, and the Devices
+   * tab is not somewhere anyone sits for long. The view is drawn once without
+   * it and again when it lands, rather than waiting for it.
+   */
+  const DEVICE_HISTORY_STALE_MS = 5 * 60 * 1000;
+  async function loadDeviceHistory() {
+    const h = state.deviceHistory;
+    if (h && (h.loading || Date.now() - h.at < DEVICE_HISTORY_STALE_MS)) return;
+    state.deviceHistory = { loading: true, at: Date.now() };
+    try {
+      state.deviceHistory = { ...(await api('/api/devices/history?days=7')), at: Date.now() };
+    } catch (e) {
+      state.deviceHistory = { error: e.message, at: Date.now() };
+    }
+    if (location.hash === '#/devices') renderDevices();
+  }
+
+  /**
+   * How long a device can stay silent before its state is no longer known.
+   * A device's history gains a row at least hourly while it is being heard from
+   * (see recordDeviceSample in src/db.ts), so past an hour and a quarter
+   * without one, nobody was listening - the relay off, the poll failing - and
+   * the strip says "not heard from" rather than carrying the last state on.
+   */
+  const LINK_QUIET_S = 3600 + 900;
+
+  /**
+   * One device's week as spans of one state each: 'on', 'off', 'alarm',
+   * 'unknown' (heard from, status not given) and 'none' (not heard from).
+   * Each row's state holds until the next row, or until the quiet limit runs
+   * out, whichever comes first.
+   */
+  function linkSpans(deviceId, hist) {
+    const rows = (hist.samples || []).filter((r) => r.device_id === deviceId);
+    const from = hist.from, to = hist.now;
+    const kind = (st) => (st === 'online' ? 'on' : st === 'offline' ? 'off' : st === 'alarm' ? 'alarm' : 'unknown');
+    const spans = [];
+    const push = (a, b, k) => {
+      if (b <= a) return;
+      const last = spans[spans.length - 1];
+      if (last && last.k === k && last.b === a) last.b = b; else spans.push({ a, b, k });
+    };
+    if (!rows.length || rows[0].ts > from) push(from, rows.length ? rows[0].ts : to, 'none');
+    rows.forEach((r, i) => {
+      const a = Math.max(from, r.ts);
+      const end = i + 1 < rows.length ? rows[i + 1].ts : to;
+      const heard = Math.min(end, Math.max(a, r.ts + LINK_QUIET_S));
+      push(a, heard, kind(r.status));
+      push(heard, end, 'none');
+    });
+    return spans;
+  }
+
+  /** "under a minute", "40 min", "2 h 5 min", "3 d 4 h", for a length in seconds. */
+  function spanText(sec) {
+    const s = Math.max(0, Math.round(sec));
+    if (s < 60) return 'under a minute';
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+    return `${Math.floor(s / 86400)} d ${Math.round((s % 86400) / 3600)} h`;
+  }
+
+  /** The week in one line: share of time online, how often and how long it dropped, and silence. */
+  function linkSummary(spans, total) {
+    const sum = (k) => spans.filter((x) => x.k === k).reduce((a, x) => a + (x.b - x.a), 0);
+    const off = spans.filter((x) => x.k === 'off');
+    const parts = [`online ${Math.round((sum('on') / total) * 100)}% of the time`];
+    if (off.length) {
+      const longest = Math.max(...off.map((x) => x.b - x.a));
+      parts.push(`offline ${off.length === 1 ? 'once' : `${off.length} times`}, longest ${spanText(longest)}`);
+    } else parts.push('never reported offline');
+    const none = sum('none');
+    if (none > 0) parts.push(`not heard from for ${spanText(none)}`);
+    return parts.join(' · ');
+  }
+
+  /**
+   * The signal across the week: dBm for SolisCloud, on a fixed -100 to -40
+   * scale, and SolarMan's percentage on 0 to 100. Fixed rather than fitted,
+   * for the reason the charge chart gives: a signal that moved three dBm,
+   * drawn edge to edge, looks like one that collapsed. A silence longer than
+   * the quiet limit breaks the line.
+   */
+  function signalChart(deviceId, hist, isDbm) {
+    const key = isDbm ? 'signal_dbm' : 'signal_pct';
+    const pts = (hist.samples || []).filter((r) => r.device_id === deviceId && r[key] != null);
+    if (pts.length < 2) return '';
+    const [lo, hi, unit] = isDbm ? [-100, -40, ' dBm'] : [0, 100, '%'];
+    const W = 420, H = 96, L = 54, R = 8, T = 6, B = 18;
+    const from = hist.from, to = hist.now;
+    const x = (t) => L + ((Math.max(from, t) - from) / (to - from)) * (W - L - R);
+    const y = (v) => T + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (H - T - B);
+    let out = '';
+    for (const v of [lo, (lo + hi) / 2, hi]) {
+      out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>`;
+      out += `<text class="axis" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}${unit}</text>`;
+    }
+    out += `<text class="axis" x="${L}" y="${H - 3}">7 days ago</text><text class="axis" x="${W - R}" y="${H - 3}" text-anchor="end">now</text>`;
+    // Each value holds until the next row, so the line steps rather than
+    // slanting between two readings an hour apart.
+    let d = '';
+    pts.forEach((p, i) => {
+      const gap = i > 0 && p.ts - pts[i - 1].ts > LINK_QUIET_S;
+      if (i > 0 && !gap) d += `L${x(p.ts).toFixed(1)},${y(pts[i - 1][key]).toFixed(1)}`;
+      d += `${i === 0 || gap ? 'M' : 'L'}${x(p.ts).toFixed(1)},${y(p[key]).toFixed(1)}`;
+    });
+    const last = pts[pts.length - 1];
+    if (to - last.ts <= LINK_QUIET_S) d += `L${x(to).toFixed(1)},${y(last[key]).toFixed(1)}`;
+    out += `<path d="${d}" fill="none" stroke="var(--solarman)" stroke-width="2" stroke-linejoin="round"/>`;
+    const vals = pts.map((p) => p[key]);
+    return `<div class="lh-head"><span class="t">Signal</span><span class="p">weakest ${Math.min(...vals)}${unit} · strongest ${Math.max(...vals)}${unit}</span></div>
+      <svg class="sig-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Signal strength over the last seven days">${out}</svg>`;
+  }
+
+  /** The week's strip, its key, its summary and the signal line, for one device. */
+  function linkHistory(d) {
+    const hist = state.deviceHistory;
+    if (!hist || hist.loading) return '<div class="linkhist"><div class="lh-head"><span class="p">Loading the last seven days…</span></div></div>';
+    if (hist.error || !hist.from) return '<div class="linkhist"><div class="lh-head"><span class="p">The link history could not be loaded.</span></div></div>';
+    const total = hist.now - hist.from;
+    const spans = linkSpans(d.id, hist);
+    const label = { on: 'online', off: 'offline', alarm: 'in alarm', unknown: 'status not given', none: 'not heard from' };
+    const bar = spans.map((x) => `<i class="${x.k}" style="width:${(((x.b - x.a) / total) * 100).toFixed(3)}%" title="${esc(label[x.k])}: ${esc(when(x.a))} to ${esc(when(x.b))}"></i>`).join('');
+    const summary = linkSummary(spans, total);
+    return `<div class="linkhist">
+      <div class="lh-head"><span class="t">Last 7 days</span><span class="p">${esc(summary)}</span></div>
+      <div class="lstrip" role="img" aria-label="Link over the last seven days: ${esc(summary)}">${bar}</div>
+      <div class="lh-axis"><span>7 days ago</span><span>now</span></div>
+      <div class="lh-key"><span><i class="on"></i>online</span><span><i class="off"></i>offline</span><span><i class="none"></i>not heard from</span></div>
+      ${signalChart(d.id, hist, d.signal_dbm != null)}
+    </div>`;
+  }
+
+  /**
+   * One datalogger, as fully as its vendor describes it. The part of a system
+   * that fails quietly: the inverter keeps producing while the logger stops
+   * talking, so everything it says about its own link is here, with its week.
+   */
+  function loggerCard(d) {
+    const lg = parse(d.logger) || {};
+    const owner = (state.latest?.inverters ?? []).find(
+      (i) => i.provider === d.provider && (!d.plant_id || d.plant_id === plantIdOf(i)));
+    const cls = d.status === 'online' ? 'ok' : d.status === 'alarm' ? 'bad' : 'warn';
+    const rows = [
+      ['Status', `<span class="pill ${cls}"><i></i>${esc(d.status ?? 'unknown')}</span>`],
+      lg.link ? ['Connects by', esc(lg.link)] : null,
+      ['Signal', esc(signalLabel(d))],
+      lg.signalLevel != null ? ['Signal bars', esc(String(lg.signalLevel))] : null,
+      d.upload_cycle_s ? ['Uploads every', esc(spanText(d.upload_cycle_s))] : null,
+      ['Last contact', esc(d.last_seen ? `${when(d.last_seen)} · ${ago(d.last_seen)}` : '—')],
+      lg.uptimeS != null ? ['Running since restart', esc(spanText(lg.uptimeS))] : null,
+      lg.workingS != null ? ['Working in total', esc(spanText(lg.workingS))] : null,
+      d.model ? ['Model', esc(d.model)] : null,
+      d.firmware ? ['Firmware', esc(d.firmware), true] : null,
+      d.sn ? ['Serial', esc(d.sn), true] : null,
+      lg.manufacturedAt ? ['Made', esc(fmtDate(lg.manufacturedAt))] : null,
+      d.commissioned_at ? ['First connected', esc(fmtDate(d.commissioned_at))] : null,
+      d.warranty_until ? ['Warranty to', esc(fmtDate(d.warranty_until))] : null,
+    ].filter(Boolean);
+    const body = rows.map(([k, v, mono]) => `<dt>${esc(k)}</dt><dd class="${mono ? 'mono' : ''}">${v}</dd>`).join('');
+    return `<section class="card logger"><h3>Datalogger · ${esc(owner?.name ?? providerName(d.provider))}</h3><div class="body">
+      <dl class="kv">${body}</dl>${linkHistory(d)}</div></section>`;
+  }
+
   function renderDevices() {
     if (!state.devices.length) {
       $('view').innerHTML = `<div class="card"><div class="empty">No hardware recorded yet. The relay agent fills this in — run <code>npm run relay:solis</code>.</div></div>`;
@@ -2603,7 +2791,10 @@
         <td>${d.temp_c != null ? `${d.temp_c} °C` : '—'}</td>
       </tr>`;
     };
-    $('view').innerHTML = `<section class="card"><h2>Hardware</h2><div class="tablewrap" tabindex="0" role="region" aria-label="Table, scrolls sideways">
+    loadDeviceHistory();
+    const loggers = state.devices.filter((d) => d.kind === 'datalogger');
+    const loggerCards = loggers.length ? `<div class="loggers">${loggers.map(loggerCard).join('')}</div>` : '';
+    $('view').innerHTML = `${loggerCards}<section class="card"><h2>Hardware</h2><div class="tablewrap" tabindex="0" role="region" aria-label="Table, scrolls sideways">
       <table class="devices">
         <thead><tr><th>Status</th><th>Device</th><th>Serial</th><th>Model</th><th>Firmware</th>
           <th>Rated / signal</th><th>Last contact</th><th>PV strings</th><th>Temp</th></tr></thead>
@@ -2844,10 +3035,12 @@
       logger.sn ? ['Serial', esc(logger.sn), true] : null,
       logger.model ? ['Model', esc(logger.model)] : null,
       logger.firmware ? ['Firmware', esc(logger.firmware), true] : null,
+      parse(logger.logger)?.link ? ['Connects by', esc(parse(logger.logger).link)] : null,
       ['Signal', esc(signalLabel(logger))],
       logger.upload_cycle_s ? ['Uploads every', `${logger.upload_cycle_s}s`] : null,
       ['Last contact', esc(logger.last_seen ? ago(logger.last_seen) : '—')],
-    ]) : '';
+      parse(logger.logger)?.uptimeS != null ? ['Running since restart', esc(spanText(parse(logger.logger).uptimeS))] : null,
+    ], 'Its week online and its signal are on the Devices tab.') : '';
 
     const live = kvCard('Live power', [
       ['AC output', fmtWs(inv.ac_power_w)],
@@ -2997,6 +3190,7 @@
       ['Battery charge through the day', `${tab('#/power', 'Power')}, under the hybrid system - Charge today`],
       ['PV strings, voltages, currents, temperature', `${tab('#/power', 'Power')}, under each system`],
       ['Inverter model, firmware, datalogger signal', tab('#/devices', 'Devices')],
+      ['Whether a datalogger kept its link this week', `${tab('#/devices', 'Devices')} - each datalogger, Last 7 days`],
       ['Warranty and installation date', `${tab('#/power', 'Power')}, under each system, or the system on its own`],
       ['When each laptop\'s SolisCloud login runs out', `${tab('#/devices', 'Devices')} - SolisCloud relays`],
       ['Every measurement the vendor sent', `${tab('#/power', 'Power')}, under each system - Raw telemetry, with a filter`],

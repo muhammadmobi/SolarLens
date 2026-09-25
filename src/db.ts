@@ -256,6 +256,10 @@ export interface DeviceRow {
   dc_bus_v: number | null;
   /** JSON BatteryDetail (see providers/types.ts), or null. */
   battery: string | null;
+  /** JSON LoggerDetail, or null. */
+  logger: string | null;
+  /** JSON LoggerNetwork, or null. For the owner only: never in a public answer. */
+  network: string | null;
   updated_at: number;
   raw: string | null;
 }
@@ -269,8 +273,8 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
     .prepare(
       `INSERT INTO devices
          (id, provider, plant_id, kind, sn, name, model, firmware, rated_power_w, status,
-          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, ac_phases, frequency_hz, power_factor, temp_c, dc_bus_v, battery, updated_at, raw)
-       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)
+          signal_dbm, signal_pct, upload_cycle_s, commissioned_at, warranty_until, last_seen, strings, ac_phases, frequency_hz, power_factor, temp_c, dc_bus_v, battery, updated_at, raw, logger, network)
+       VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)
        -- Each column keeps what is stored when this push leaves it null: the
        -- list record and the detail record each carry only some fields, and
        -- whichever arrived last must not blank out what the other one set.
@@ -294,6 +298,8 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
          temp_c          = COALESCE(excluded.temp_c, devices.temp_c),
          dc_bus_v        = COALESCE(excluded.dc_bus_v, devices.dc_bus_v),
          battery         = COALESCE(excluded.battery, devices.battery),
+         logger          = COALESCE(excluded.logger, devices.logger),
+         network         = COALESCE(excluded.network, devices.network),
          updated_at      = excluded.updated_at,
          raw             = COALESCE(excluded.raw, devices.raw)`,
     )
@@ -306,8 +312,83 @@ export async function upsertDevice(db: D1Database, d: Device, at = nowSec()): Pr
       d.battery ? JSON.stringify(d.battery) : null,
       at,
       d.raw ? JSON.stringify(d.raw) : null,
+      d.logger ? JSON.stringify(d.logger) : null,
+      d.network ? JSON.stringify(d.network) : null,
     )
     .run();
+  await recordDeviceSample(db, d.id, at);
+}
+
+/** How long device_samples keeps a row: long enough to see a season's pattern. */
+export const DEVICE_SAMPLES_KEEP_S = 90 * 86400;
+
+/**
+ * Note a device's status and signal as they now stand, for its link history.
+ *
+ * Read from the devices row after the upsert, so it records the merged view -
+ * a detail push that carries no status leaves the status the list push set.
+ * A row is written only when something has moved: the status changed, the
+ * signal moved by more than the noise it jitters by (3 dBm, or 5 points on
+ * SolarMan's percentage), or an hour has passed since the last row. Every
+ * relay pass and every cron run lands here, about 288 times a day per device;
+ * a steady logger writes 24 rows of it, and a flapping one writes each flap.
+ * That keeps both the writes and the reads of a week's history small, which on
+ * D1's free tier is the difference that matters.
+ */
+export async function recordDeviceSample(db: D1Database, deviceId: string, at = nowSec()): Promise<void> {
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO device_samples (device_id, ts, status, signal_dbm, signal_pct)
+       SELECT d.id, ?2, d.status, d.signal_dbm, d.signal_pct FROM devices d
+       WHERE d.id = ?1
+         AND NOT EXISTS (
+           SELECT 1 FROM (
+             SELECT ts, status, signal_dbm, signal_pct FROM device_samples
+             WHERE device_id = ?1 ORDER BY ts DESC LIMIT 1
+           ) last
+           WHERE last.ts > ?2 - 3600
+             AND last.status IS d.status
+             AND (last.signal_dbm IS d.signal_dbm OR abs(last.signal_dbm - d.signal_dbm) <= 3)
+             AND (last.signal_pct IS d.signal_pct OR abs(last.signal_pct - d.signal_pct) <= 5)
+         )`,
+    )
+    .bind(deviceId, at)
+    .run();
+}
+
+export interface DeviceSampleRow {
+  device_id: string;
+  ts: number;
+  status: string | null;
+  signal_dbm: number | null;
+  signal_pct: number | null;
+}
+
+/**
+ * Every device's link history since `from`, oldest first, plus the last row
+ * before it - so the page knows what state the window opened in, rather than
+ * drawing the first hours as unknown for a logger that was simply steady.
+ */
+export async function deviceSamples(db: D1Database, from: number): Promise<DeviceSampleRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT device_id, ts, status, signal_dbm, signal_pct FROM device_samples WHERE ts >= ?1
+       UNION ALL
+       -- Driven from devices, a handful of rows, so each lookup is one seek on
+       -- the (device_id, ts) key rather than a pass over ninety days of rows.
+       SELECT s.device_id, s.ts, s.status, s.signal_dbm, s.signal_pct FROM devices d
+       JOIN device_samples s ON s.device_id = d.id
+        AND s.ts = (SELECT MAX(ts) FROM device_samples x WHERE x.device_id = d.id AND x.ts < ?1)
+       ORDER BY ts`,
+    )
+    .bind(from)
+    .all<DeviceSampleRow>();
+  return results;
+}
+
+/** Drop link history older than DEVICE_SAMPLES_KEEP_S. Run with each cron pass; it touches only what it deletes. */
+export async function forgetOldDeviceSamples(db: D1Database, now = nowSec()): Promise<void> {
+  await db.prepare('DELETE FROM device_samples WHERE ts < ?1').bind(now - DEVICE_SAMPLES_KEEP_S).run();
 }
 
 /** Every device, SolisCloud first, then inverters before dataloggers, then by serial. */

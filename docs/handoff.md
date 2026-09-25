@@ -40,9 +40,9 @@ git clone https://github.com/muhammadmobi/SolarLens
 cd SolarLens
 npm ci
 npm run typecheck             # types for src/ and tests/
-npm run test:unit             # ~420 tests, a few seconds
+npm run test:unit             # ~450 tests, a few seconds
 npm run test:unit:coverage    # the same, with the coverage thresholds applied
-npm run test:e2e              # ~370 tests, about three minutes, needs Chrome
+npm run test:e2e              # ~380 tests, about three minutes, needs Chrome
 ```
 
 All of that runs with no Cloudflare account, no database and no vendor
@@ -168,7 +168,8 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 |---|---|---|
 | `inverters` | monitored unit | `id` is `{provider}:{vendor_id}`, or `{provider}:station:{plant_id}` when the plant is the unit. `tz_name` is the zone's name where the vendor states one - SolarMan's `regionTimezone`, SolisCloud's `timeZoneStandardId` - which the SolarMan plant here does and the SolisCloud plant here, as its relay forwards it, does not; `tz_offset_sec` the offset in force now |
 | `readings` | sample | Keyed `(inverter_id, ts, source)`. Holds the normalised columns **and** `raw`, the untouched vendor JSON, which is never served. `tz_offset_sec` is the offset in force *when it was read*, so a day keeps its boundary after the clocks change; every row in production carries it since the 2.9 backfill |
-| `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC |
+| `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC. A logger's `logger` (link, signal bars, uptime, make date) is public; its `network` (operator and cell, or MAC) is not, and is never served |
+| `device_samples` | change in a device's status or signal | The link history on the Devices tab. Written on a change, or hourly while nothing changes; kept 90 days |
 | `alarms` | vendor fault | Severity, raised, cleared, readable name |
 | `vendor_periods` | vendor period total | Day, month and year totals per plant, from the vendor itself, back to installation |
 | `poll_log` | poll attempt | The health endpoint and the footer read this; pruned after a week |
@@ -250,6 +251,10 @@ copy was lost. What holds the line instead is `src/public-view.ts`:
   point, since the plant records carry notes, codes and a zone name beside the
   measurements. A device's own alert count goes out as `alert_status`, and a
   device is named by a positional alias ("s1-datalogger-1"), not its serial.
+- **A datalogger's network handles are never served.** Its mobile operator
+  and cell, or its MAC address, are stored in `devices.network` for the owner;
+  `publicDevices` leaves the column out, because a cell id or a MAC address
+  can place a logger on a map or tie it to one household.
 - **A relay's id never leaves the database**; the page names relays by nickname
   or as "Relay 1", "Relay 2". The id is random and never the computer's name,
   because a Windows machine name often carries a company and a person's name.

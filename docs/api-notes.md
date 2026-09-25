@@ -68,6 +68,19 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   - `inverterTemperature` (+ `inverterTemperatureUnit`), `dcBus`, `insulationResistance`
   - A wired but unlit string still reports volts with zero watts, so string presence is
     decided by any of V/A/W being non-zero.
+- The collector record the relay forwards (the datalogger), beside `sn`, `machine`, `version`
+  and `state`:
+  - `rssi` (dBm) and `rssiLevel` (the portal's signal bars); `dataUploadCycle` (s, as a string)
+  - `currentWorkingTime` - seconds since the logger last restarted; `totalWorkingTime` (and
+    `runingTime`, the same figure) - seconds working in total, across restarts
+  - `factoryTime` - when it was made, epoch **s** as a string; `collectorActiveDate` - first
+    connected, epoch **ms**; `shelfEndTime` / `updateShelfEndTime` - original and extended
+    warranty end, epoch **ms**
+  - `connectionOperator`, `lac`, `ci` - a cellular logger's operator, location area and cell.
+    Not stripped by `stripPii`, but a location all the same: SolarLens stores them in
+    `devices.network` and never serves them.
+  - `simFlowState` is -5 on a Wi-Fi logger; its other values are not known, so it is not read.
+  - The link type is not a field. It is read from the model name (`S3-WIFI-ST`).
 - `station/detailMix` also carries the plant's timezone: `timeZone` in whole hours,
   `timeZoneStandardId` as an IANA name, and `timeZoneStr` as a label. SolarLens reads the hours.
 - `alarm/list` body `{currentPage, pageSize, state, faultType: 0, stationId}` → `data.records[]`
@@ -132,8 +145,10 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   - `signalIntensity` — **0-100 percent** on the collector, *not* the dBm SolisCloud reports
   - `generation` (today kWh), `generationTotal` (lifetime kWh), `generationPower` (W)
   - `featureData` — a JSON **string** of raw registers. On the collector it carries `MDUv1`
-    (firmware, e.g. `LSW3_15_FFFF_1.0.78`; its first segment names the logger family) and
-    `MDU_MAC_ADD1`. On the inverter it carries `B_left_cap1` (SOC %), `B_P1` (battery W),
+    (firmware, e.g. `LSW3_15_FFFF_1.0.78`, or `MW3_15U_...` on newer LSW-3 builds; its first
+    segment names the logger family, and so its link) and `MDU_MAC_ADD1`, the logger's MAC
+    address - stored in `devices.network` for the owner, never served. `communicationMode`
+    ("2" on this Wi-Fi stick) is a code whose other values are not known, so it is not read. On the inverter it carries `B_left_cap1` (SOC %), `B_P1` (battery W),
     `DPi_t1` (total DC input W), `Etdy_ge1` / `Et_ge0` (today / lifetime generation kWh),
     `Etdy_cg1` / `Etdy_dcg1` (charge / discharge today), `PG_Pt1` (grid W).
   - No per-string (`DV*` / `DC*` / `DP*`) registers appear on this hybrid — only total DC input.

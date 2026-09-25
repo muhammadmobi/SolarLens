@@ -15,7 +15,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bearer, createHarness, type Harness } from '../helpers/worker';
-import { devices, inverters } from '../fixtures/dashboard-api';
+import { deviceHistory, devices, inverters } from '../fixtures/dashboard-api';
 
 const post = (body: unknown) => ({
   method: 'POST',
@@ -28,7 +28,7 @@ const fixture = (name: string) => JSON.parse(readFileSync(`tests/fixtures/${name
 const fields = (row: object) => Object.keys(row).sort();
 
 let h: Harness;
-let served: { inverters: Record<string, unknown>[]; devices: Record<string, unknown>[] };
+let served: { inverters: Record<string, unknown>[]; devices: Record<string, unknown>[]; history: Record<string, unknown> & { samples: Record<string, unknown>[] } };
 
 beforeAll(async () => {
   h = createHarness();
@@ -50,6 +50,7 @@ beforeAll(async () => {
   served = {
     inverters: ((await (await h.fetch('/api/latest')).json()) as { inverters: Record<string, unknown>[] }).inverters,
     devices: ((await (await h.fetch('/api/devices')).json()) as { devices: Record<string, unknown>[] }).devices,
+    history: (await (await h.fetch('/api/devices/history')).json()) as typeof served.history,
   };
 });
 afterAll(() => h.close());
@@ -68,6 +69,22 @@ describe('the end-to-end fixtures match what the Worker sends', () => {
   it('every device row has exactly the fields /api/devices sends', () => {
     const real = fields(served.devices[0]);
     for (const row of devices()) expect(fields(row), String(row.id)).toEqual(real);
+  });
+
+  it('the link history has the fields /api/devices/history sends', () => {
+    const fx = deviceHistory();
+    expect(fields(fx)).toEqual(fields(served.history));
+    expect(served.history.samples.length).toBeGreaterThan(0);
+    const real = fields(served.history.samples[0]);
+    for (const row of fx.samples) expect(fields(row)).toEqual(real);
+  });
+
+  it('names each device in its history as /api/devices names it', () => {
+    const ids = new Set(served.devices.map((d) => d.id));
+    for (const r of served.history.samples) expect(ids.has(r.device_id)).toBe(true);
+    // And the fixtures' history points at the fixtures' devices.
+    const fxIds = new Set(devices().map((d) => d.id));
+    for (const r of deviceHistory().samples) expect(fxIds.has(r.device_id)).toBe(true);
   });
 
   it('no end-to-end spec serves the raw payload the Worker withholds', () => {

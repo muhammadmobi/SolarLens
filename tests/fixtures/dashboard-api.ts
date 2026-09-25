@@ -80,7 +80,7 @@ export function devices() {
         { index: 3, voltageV: 232, currentA: 0.1 },
       ]),
       frequency_hz: 49.64, power_factor: 0.99, temp_c: 40.6, dc_bus_v: 589.9,
-      battery: null, updated_at: NOW, alert_status: null,
+      battery: null, logger: null, updated_at: NOW, alert_status: null,
     },
     {
       id: 's1-datalogger-1', provider: 'soliscloud', plant_id: SOLIS, kind: 'datalogger',
@@ -89,6 +89,8 @@ export function devices() {
       commissioned_at: null, warranty_until: null, last_seen: NOW - 120,
       strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
       temp_c: null, dc_bus_v: null, battery: null,
+      // What SolisCloud's collector record says about the logger itself.
+      logger: JSON.stringify({ link: 'Wi-Fi', signalLevel: 3, uptimeS: 7502, workingS: 32_840_119, manufacturedAt: 1694412117 }),
       updated_at: NOW, alert_status: null,
     },
     {
@@ -107,7 +109,7 @@ export function devices() {
         ratedCapacityAh: 100, nominalVoltageV: 24, chemistry: 'lithium', status: 'Static',
         bmsSocPct: 100, bmsChargeVoltageV: 28.5, bmsDischargeVoltageV: 0,
       }),
-      updated_at: NOW, alert_status: null,
+      logger: null, updated_at: NOW, alert_status: null,
     },
     {
       id: 's2-datalogger-1', provider: 'solarman', plant_id: HYBRID, kind: 'datalogger',
@@ -116,6 +118,8 @@ export function devices() {
       commissioned_at: null, warranty_until: null, last_seen: NOW - 200,
       strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
       temp_c: null, dc_bus_v: null, battery: null,
+      // SolarMan's device list gives only the link, read from the firmware family.
+      logger: JSON.stringify({ link: 'Wi-Fi', signalLevel: null, uptimeS: null, workingS: null, manufacturedAt: null }),
       updated_at: NOW, alert_status: null,
     },
   ];
@@ -154,4 +158,23 @@ export function historyRows() {
     });
   }
   return rows;
+}
+
+/**
+ * A week of link history, as /api/devices/history returns it: the SolisCloud
+ * logger steady but for one two-hour drop two days ago, and the SolarMan logger
+ * whose signal sags one evening. Rows appear only when something moved, and
+ * at least hourly otherwise - as the Worker writes them.
+ */
+export function deviceHistory() {
+  const from = NOW - 7 * 86400;
+  const samples: { device_id: string; ts: number; status: string; signal_dbm: number | null; signal_pct: number | null }[] = [];
+  for (let t = from - 600; t <= NOW; t += 3600) {
+    const down = t >= NOW - 2 * 86400 && t < NOW - 2 * 86400 + 7200;
+    samples.push({ device_id: 's1-datalogger-1', ts: t, status: down ? 'offline' : 'online', signal_dbm: down ? null : -58, signal_pct: null });
+    const sag = t >= NOW - 86400 && t < NOW - 86400 + 3 * 3600;
+    samples.push({ device_id: 's2-datalogger-1', ts: t + 60, status: 'online', signal_dbm: null, signal_pct: sag ? 41 : 84 });
+  }
+  samples.sort((a, b) => a.ts - b.ts);
+  return { now: NOW, days: 7, from, samples };
 }

@@ -80,7 +80,7 @@ A single Cloudflare Worker does three jobs:
    - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry - every measurement the vendor sent, with each id, serial, name and place left out.
    - **Historical Data** (`#/history`) — day by day per system: produced, consumed, imported, exported, battery in and out, peak and sample count, with a bar per day. Columns appear only where that system measures the quantity, and the page says plainly that the record begins when SolarLens started collecting rather than when the array was installed.
    - **Alerts** (`#/alerts`) — everything either cloud says is wrong, one collapsible section per system. Nothing is invented: each row names the field it came from, so an empty section reads as "both vendors report normal" rather than "nobody looked". The tab carries a count badge.
-   - **Devices** (`#/devices`) — hardware inventory: inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
+   - **Devices** (`#/devices`) — a card per datalogger, then the hardware inventory. Each datalogger card holds everything its vendor reports about it - how it connects, signal and signal bars, upload interval, last contact, time since its last restart and in total, model, firmware, when it was made, first connected and warranty - and its last seven days: a strip of online, offline and not heard from, how often and how long it dropped, and its signal as a line on a fixed scale. Below, inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
    - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table of the vendor's measurements.
 
    There is no Energy flow tab: the diagrams lead the overview instead, and an old `#/flow` bookmark lands there.
@@ -545,7 +545,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**422 unit tests** and **370 end-to-end tests** (185 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**448 unit tests** and **382 end-to-end tests** (191 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -582,7 +582,7 @@ exact lines no test reaches.
 
 ### Unit tests — `tests/unit/`
 
-Twenty-six files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; nine drive the Worker or its database layer against a real database, through the two helpers in `tests/helpers/`:
+Twenty-seven files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; ten drive the Worker or its database layer against a real database, through the two helpers in `tests/helpers/`:
 
 - **`helpers/d1.ts`** — SQLite behind the D1 interface, with the project's own migrations applied. D1 *is* SQLite and Node ships one, so the SQL a test exercises is the SQL that runs in production. It also refuses a bound value D1 would refuse, which is how a `undefined` reaches a test rather than a deploy.
 - **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about.
@@ -594,6 +594,7 @@ Twenty-six files, one concern each. Most are pure-function tests against fixture
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
 - **`clients.test.ts`** — all three vendor HTTP clients against a stubbed `fetch`: SolisCloud request signing, SolarMan token acquisition and refresh-and-retry, the browser-session refresh flow, the alert and period reads, error envelopes and HTTP failures.
 - **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id. Also the two things made from the raw payload: the alert fields as named columns (a SolisCloud zero kept apart from a vendor that sends no counter), and the telemetry table, which keeps only fields on a reviewed list of measurements - so the ids, the owner's notes, the platform codes and the zone name a live plant record carries are all left out, and so is any field nobody has reviewed, whatever it is called. Device rows are named by a positional alias ("s1-datalogger-1") rather than their serial.
+- **`datalogger.test.ts`** — everything a datalogger reports: its link read from the model name (and left unknown rather than guessed), SolisCloud's signal bars, restart and working time and make date, the operator, cell and MAC address kept apart and never published; and the link history - a row the first time, on each change of status, on a signal move beyond its jitter (3 dBm, 5 points), and hourly otherwise, the window opened by the row before it, and 90 days kept.
 - **`fixture-contract.test.ts`** — the end-to-end fixtures held to the real Worker. It runs the Worker on the vendor fixtures and fails if a row in `tests/fixtures/dashboard-api.ts` carries a field `/api/latest` or `/api/devices` does not send, or lacks one they do, and if any spec serves a raw payload. This is the test that would have caught gap 5.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
@@ -624,7 +625,7 @@ sends:
 
 | Spec | What it holds the dashboard to |
 |---|---|
-| `dashboard.spec.ts` | The bulk, 133 tests: the overview and its layout at both widths, the theme, the header figures, each system's page, charts, alerts, history, devices, relays, TV mode, freshness and the auth gate |
+| `dashboard.spec.ts` | The bulk, 141 tests: the overview and its layout at both widths, the theme, the header figures, each system's page, charts, alerts, history, devices, each datalogger's card and week, relays, TV mode, freshness and the auth gate |
 | `accessibility.spec.ts` | axe-core's WCAG 2 A and AA rules on every view, a keyboard walk-through, and a full keyboard lap of each view showing focus |
 | `guide.spec.ts` | The guide: one tap from anywhere, opens with no data or a refused request, names the systems, links only to real pages |
 | `history-systems.spec.ts` | Historical Data's system switch: narrows charts, tables, count and CSV; remembered; falls back when a system is gone |
@@ -674,7 +675,7 @@ while charts keep the brighter ones.
 `npm run test:unit:coverage` writes a terminal summary plus `coverage/index.html` (and `lcov.info` for CI tooling), and fails the run if it drops below the thresholds in `vitest.config.ts`.
 
 | Scope | Statements | Branches | Functions | Lines |
-|---|---|---|---|---|
+| **All of `src/`** — everything the Worker ships | **98.2%** | **92.2%** | **97.8%** | **99.5%** |
 | **All of `src/`** — everything the Worker ships | **98.2%** | **92.0%** | **97.6%** | **99.5%** |
 | &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 97% | 91% | 91% | **100%** |
 | &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 91% | **100%** | **100%** |
@@ -908,11 +909,12 @@ node scripts/ci/check-privacy.mjs     # the guard, over the working tree
 
 ## Data model
 
-Eleven tables in D1, made by the files in `migrations/`, applied in order:
+Twelve tables in D1, made by the files in `migrations/`, applied in order:
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
-- **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. Filled by the relay agent; the vendor payload is stripped of address, coordinates and account identifiers before storage.
+- **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. A datalogger also has `logger` - how it connects, signal bars, seconds since restart and in total, when it was made - and `network`: its mobile operator and cell, or its MAC address, **kept for the owner and never part of a public answer**, since either can place a logger. Filled by the relay agent and the cron; the vendor payload is stripped of address, coordinates and account identifiers before storage.
+- **`device_samples`** — each device's status and signal over time, for its link history: a row when either changes, or at least hourly while nothing does, so a steady logger writes 24 rows a day rather than 288. Kept 90 days; pruned by the cron.
 - **`alarms`** — each vendor fault: `code`, `message`, `severity` (`info` / `warning` / `fault`), the vendor's own `vendor_level`, `advice`, `begin_ts`, `end_ts` (null while active, or where the vendor never says), and `state` (`active` / `recovered` / `unknown`). Its `id` contains the vendor's plant id and is never served.
 - **`vendor_periods`** — each vendor's own totals per `period` (`day` / `month` / `year`) and `key` (`2026-09`, `2026`): generation, load, grid both ways, battery both ways and full-load hours. These reach back to installation, which SolarLens's own readings cannot.
 - **`relays`** — each SolisCloud relay's report on itself: a random `id` (never a computer name, never served), an optional `name`, `state` (`ok` / `login-expired` / `error`), `login_expires_at` from the portal's own login cookie, and when it was first and last heard from.
@@ -943,7 +945,8 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `GET /api/series?from=&to=&tz=` | open | readings in a range (≤ 31 days). Omit `from` and the window opens at the earliest plant's own midnight; `tz` is the fallback for a plant whose vendor reports no timezone |
 | `GET /api/health` | open | recent poll log, the newest line per feed, and each SolisCloud relay heard from in the last 14 days with its login's expiry. Relay ids are never returned |
 | `GET /api/history?days=&tz=` | open | one row per inverter per day, each cut at that plant's own midnight (`tz` is the fallback, the caller's UTC offset in minutes) |
-| `GET /api/devices` | open | hardware inventory, with a device's own alert count as `alert_status` (SolarMan; -1 means nothing to report) |
+| `GET /api/devices` | open | hardware inventory, with a device's own alert count as `alert_status` (SolarMan; -1 means nothing to report) and a datalogger's `logger` description; each device named by a positional alias (`s1-datalogger-1`), never its serial, and `network` never sent |
+| `GET /api/devices/history?days=7` | open | each device's status and signal over the last 1-30 days, oldest first, with the row before the window so the week opens in a known state |
 | `GET /api/alarms?days=` | open | fault history, newest first (default 730 days). An alarm's internal id is never returned, since it contains the vendor's plant id |
 | `GET /api/periods` | open | each vendor's own month and year totals, back to installation |
 | `POST /api/poll` | API_TOKEN | poll all providers now — makes live vendor calls, so it spends quota |
@@ -1060,6 +1063,7 @@ solar-lens/
 │   ├── unit/readings.test.ts    the two paths from a vendor reply to a reading
 │   ├── unit/sparse.test.ts      a vendor that sends almost nothing
 │   ├── unit/device-shapes.test.ts  each shape a device record arrives in
+│   ├── unit/datalogger.test.ts  what a logger reports, its network kept back, its link history
 │   ├── unit/fallbacks.test.ts   the fallback branches nothing else reached
 │   ├── unit/series-rules.test.ts   live beats backfilled; where "today" opens
 │   ├── unit/daylight-saving.test.ts  history that keeps its day across a clock change

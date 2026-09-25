@@ -18,6 +18,21 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **Everything each datalogger reports, and its week.** The Devices tab opens
+  with a card per datalogger: how it connects, its signal and signal bars, how
+  often it uploads, its last contact, how long it has run since its last
+  restart and in total, its model, firmware, make date, first connection and
+  warranty - whatever its vendor reports, and nothing invented where it does
+  not. Beneath, its last seven days: a strip of online, offline and not heard
+  from, how often and how long it dropped, and its signal as a line on a fixed
+  scale. The system page's link card names the link and the last restart.
+- **Link history, kept small.** Each device's status and signal are recorded
+  in a new `device_samples` table when either changes, or hourly while
+  nothing does - a steady logger writes 24 rows a day rather than 288 - and
+  kept 90 days. `GET /api/devices/history` serves the last 1 to 30 days.
+- **A datalogger's network handles are kept, and kept back.** Its mobile
+  operator and cell, or its MAC address, are stored for the owner and never
+  part of a public answer: either can place a logger on a map.
 - **A roadmap to 3.0.** `docs/roadmap.md` sets out the twelve phases of the
   next release - the owner login, any number of inverters, a public demo,
   weather and expected output with a site map, savings, questions answered in
