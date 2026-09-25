@@ -246,9 +246,10 @@ export function deviceAliasFor<T extends { id: string; kind?: string | null; pla
 /**
  * Device rows for a public response, stripped and aliased the same way. The one
  * payload field the page reads - SolarMan's own alert count on a device record,
- * where -1 means "nothing to report" - comes across as `alert_status`. The
- * `network` column (a logger's operator and cell, or its MAC address) is left
- * out: it can place a logger on a map.
+ * where -1 means "nothing to report" - comes across as `alert_status`.
+ * A logger's network handles live in their own table (device_network) and are
+ * never on these rows; `network` is dropped here as well, so a caller that
+ * joins them in for the owner cannot pass them on by accident.
  */
 export function publicDevices<T extends { id: string; kind?: string | null; sn?: string | null; plant_id?: string | null; raw?: unknown }>(
   rows: T[],

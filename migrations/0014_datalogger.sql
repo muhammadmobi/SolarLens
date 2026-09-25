@@ -8,9 +8,17 @@
 ALTER TABLE devices ADD COLUMN logger TEXT;
 
 -- Its network handles: mobile operator and cell, or MAC address (LoggerNetwork).
--- Either can place a logger or tie it to one household, so this column is never
--- part of a public answer; src/public-view.ts leaves it out.
-ALTER TABLE devices ADD COLUMN network TEXT;
+-- Either can place a logger or tie it to one household, so they are for the
+-- owner only - and they live in a table of their own rather than a column on
+-- devices. A Worker rolled back to 2.10 answers /api/devices from
+-- SELECT * FROM devices and strips only the columns it knew about, so a column
+-- added here would be served by it to anyone. A separate table it has never
+-- heard of cannot be.
+CREATE TABLE IF NOT EXISTS device_network (
+  device_id   TEXT PRIMARY KEY,
+  network     TEXT NOT NULL,     -- JSON LoggerNetwork
+  updated_at  INTEGER NOT NULL
+);
 
 -- Status and signal as they were over time, for the link history on the
 -- Devices tab. A row is written when either changes, and at least hourly

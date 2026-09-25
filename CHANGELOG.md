@@ -32,7 +32,10 @@ checkout of any tag says which release it is.
   kept 90 days. `GET /api/devices/history` serves the last 1 to 30 days.
 - **A datalogger's network handles are kept, and kept back.** Its mobile
   operator and cell, or its MAC address, are stored for the owner and never
-  part of a public answer: either can place a logger on a map.
+  part of a public answer: either can place a logger on a map. They live in a
+  table of their own, so even a Worker rolled back to 2.10 - which serves
+  every column of the devices table it does not know to strip - cannot serve
+  them.
 - **A roadmap to 3.0.** `docs/roadmap.md` sets out the twelve phases of the
   next release - the owner login, any number of inverters, a public demo,
   weather and expected output with a site map, savings, questions answered in
