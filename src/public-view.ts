@@ -15,9 +15,19 @@
  * SolarMan station id is eight digits, so a hash of one can be reversed by
  * trying all hundred million of them.
  *
- * `raw` never leaves the server at all. It is the vendor payload kept for
- * debugging, stripPii has already been over it, and "already stripped" is a
- * poor reason to publish something nobody is going to read.
+ * `raw` never leaves the server as it is. It is the vendor payload kept for
+ * debugging, and it carries ids, serials and - for SolarMan, whose payload is
+ * stored unstripped - whatever else the vendor chose to put in it. Two things
+ * are taken from it instead, both built here so the rule lives in one place:
+ *
+ * - the handful of fields the dashboard's alerts read (SolisCloud's alarm
+ *   count and level, SolarMan's warning flags and datalogger link), as named
+ *   columns - see vendorSignals;
+ * - the rest as `telemetry`, a copy holding measurements only, for the Raw
+ *   telemetry table - see safeTelemetry.
+ *
+ * Until 3.0 the page read `raw` directly, and since `raw` was never sent, none
+ * of those three things ever showed on the live site (feature-gaps gap 5).
  */
 
 export type Alias = (id: string | null | undefined) => string | null;
@@ -57,11 +67,114 @@ function omit<T extends object>(row: T, keys: readonly string[]): Record<string,
   return out;
 }
 
+type Rec = Record<string, unknown>;
+
+/** A stored payload as an object: D1 hands back JSON text, tests hand objects. */
+function asRecord(raw: unknown): Rec | null {
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw); } catch { return null; }
+  }
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Rec) : null;
+}
+
+/** A number, or null for anything that is not one - "", null, "n/a". */
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** A short status word, or null. Anything long is not a status word. */
+function wordOrNull(v: unknown): string | null {
+  if (v === null || v === undefined || typeof v === 'object') return null;
+  const s = String(v).trim();
+  return s && s.length <= 32 ? s : null;
+}
+
+/**
+ * The payload fields the dashboard's alerts are built from, as named columns.
+ *
+ * Each is null when the vendor did not send it, so "SolisCloud says no alarms"
+ * (0) and "this is not SolisCloud" (null) stay different. SolarMan's flags read
+ * NORMAL until something is wrong; the page decides what is worth a row.
+ */
+export function vendorSignals(raw: unknown) {
+  const r = asRecord(raw) ?? {};
+  return {
+    alarm_count: numOrNull(r.alarmCount),
+    alarm_level: numOrNull(r.alarmLevel),
+    warning_status: wordOrNull(r.warningStatus),
+    business_warning_status: wordOrNull(r.businessWarningStatus),
+    consumer_warning_status: wordOrNull(r.consumerWarningStatus),
+    network_status: wordOrNull(r.networkStatus),
+  };
+}
+
+/**
+ * Field names that identify rather than measure: ids and serials in every
+ * spelling the two vendors use (id, sno, systemId, collectorSn, inverterNo),
+ * network handles, names, places, contact details and links. Matched at a word
+ * boundary or a camelCase one, so "idle" and "snapshot" are not caught while
+ * "stationId" and "deviceSn" are.
+ */
+const IDENT_KEY = new RegExp([
+  '^ids?$', '^id[A-Z_]', 'Ids?$', 'IDs?$', '_ids?$', 'Ids?[A-Z_]',
+  '^sno$', 'Sno$', '^sn$', 'Sn$', 'SN$', '[Ss]erial', 'No$', '[Nn]umber$',
+  '[Mm]ac$', '[Mm]ac[A-Z]', '^ip$', 'Ip$', 'IP$', '[Ss]sid', '[Ii]mei', '[Ii]ccid', '[Ii]msi',
+  '[Nn]ame$', '[Nn]ame[A-Z]', '[Uu]ser', '[Oo]wner', '[Aa]ccount', '[Tt]oken', '[Pp]ass',
+  '[Ee]mail', '[Pp]hone', '[Mm]obile', '[Aa]ddr', '[Pp]osition', '[Ll]ocation',
+  '[Ll]at$', '[Ll]atitude', '[Ll]ng$', '[Ll]on$', '[Ll]ongitude',
+  '[Cc]ity', '[Cc]ounty', '[Cc]ountry', '[Rr]egion', '[Pp]rovince', '[Zz]ip', '[Pp]ostal',
+  '[Uu]rl$', '[Uu]rl[A-Z]', '[Pp]ic', '[Ll]ogo', '[Ii]mage',
+].join('|'));
+
+/** Field names under which a long run of digits is a time or an energy total, not an id. */
+const LONG_NUMBER_OK = /time|date|stamp|energy|total|power|value|month|year|day|kwh|wh$/i;
+
+/**
+ * The payload as a table of measurements, for the Raw telemetry table.
+ *
+ * Built by allowing, not by stripping: a field is kept only if its name is not
+ * an identifier (IDENT_KEY) and its value is a plain number, a boolean, or a
+ * short string with no long run of digits in it. A long whole number is kept
+ * only under a name that says it is a time or an energy figure. So a vendor
+ * that adds a new id field tomorrow, under any name, has it dropped unless the
+ * name happens to say "total" - and the ids the two vendors send today are all
+ * caught by name as well. Nested objects are left out: the page's detail cards
+ * already show the ones worth showing, and each would need the same review.
+ *
+ * Returned as JSON text, like `metrics`, or null when nothing survives.
+ */
+export function safeTelemetry(raw: unknown): string | null {
+  const r = asRecord(raw);
+  if (!r) return null;
+  const out: Rec = {};
+  for (const [k, v] of Object.entries(r)) {
+    if (k.startsWith('_') || IDENT_KEY.test(k)) continue;
+    if (v === null || typeof v === 'boolean') { out[k] = v; continue; }
+    if (typeof v === 'number') {
+      if (!Number.isFinite(v)) continue;
+      const digits = String(Math.trunc(Math.abs(v))).length;
+      if (digits >= 7 && !LONG_NUMBER_OK.test(k)) continue;
+      out[k] = v;
+      continue;
+    }
+    if (typeof v === 'string') {
+      if (v.length > 40) continue;
+      if (/\d{7,}/.test(v) && !LONG_NUMBER_OK.test(k)) continue;
+      if (/@|https?:|www\./i.test(v)) continue;
+      out[k] = v;
+    }
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : null;
+}
+
 /**
  * Inverter rows for a public response: the vendor and plant ids and the raw
- * payload dropped, the id replaced by its alias, the serial masked to four.
+ * payload dropped, the id replaced by its alias, the serial masked to four,
+ * and the payload's alert fields and measurements added in its place.
  */
-export function publicInverters<T extends { id: string; serial?: string | null }>(
+export function publicInverters<T extends { id: string; serial?: string | null; raw?: unknown }>(
   rows: T[],
   alias: Alias,
 ) {
@@ -69,11 +182,17 @@ export function publicInverters<T extends { id: string; serial?: string | null }
     ...omit(r, ['vendor_id', 'plant_id', 'serial', 'raw']),
     id: alias(r.id),
     serial: maskSerial(r.serial),
+    ...vendorSignals(r.raw),
+    telemetry: safeTelemetry(r.raw),
   }));
 }
 
-/** Device rows for a public response, stripped and aliased the same way. */
-export function publicDevices<T extends { id: string; sn?: string | null; plant_id?: string | null }>(
+/**
+ * Device rows for a public response, stripped and aliased the same way. The one
+ * payload field the page reads - SolarMan's own alert count on a device record,
+ * where -1 means "nothing to report" - comes across as `alert_status`.
+ */
+export function publicDevices<T extends { id: string; sn?: string | null; plant_id?: string | null; raw?: unknown }>(
   rows: T[],
   alias: Alias,
 ) {
@@ -82,6 +201,7 @@ export function publicDevices<T extends { id: string; sn?: string | null; plant_
     id: alias(r.id),
     plant_id: alias(r.plant_id),
     sn: maskSerial(r.sn),
+    alert_status: numOrNull(asRecord(r.raw)?.alertStatus),
   }));
 }
 

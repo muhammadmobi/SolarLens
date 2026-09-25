@@ -23,6 +23,24 @@ checkout of any tag says which release it is.
   weather and expected output with a site map, savings, questions answered in
   the app and an MCP server - and what was left out on purpose.
 
+### Fixed
+
+- **The Raw telemetry table, the vendor-flag alerts and a device's own alert
+  count now appear on the live site.** All three read the vendor's raw payload,
+  which the public view has never sent, so none of them had ever shown outside
+  the tests (gap 5). The Worker now sends the fields the alerts need as named
+  columns, and `telemetry`: a copy of the payload built by allowing fields
+  rather than stripping them - numbers, units and status words, with every id,
+  serial, name, place, address and link left out, whatever it is called. A
+  SolisCloud plant reporting zero alarms stays silent; a vendor that sends no
+  counter at all is no longer read as zero.
+
+- **The end-to-end fixtures can no longer drift from the Worker.** They moved to
+  `tests/fixtures/dashboard-api.ts`, and a unit test runs the real Worker on
+  the vendor fixtures and fails if a fixture row carries a field the Worker does
+  not send - the raw payload was one - or lacks one it does. The rows also use
+  the aliases the Worker really publishes (`s1`, `s2`) rather than vendor ids.
+
 ## [2.11.0] — 2026-10-19
 
 SolisCloud readings again after the portal moved its plant page, a relay that
