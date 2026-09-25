@@ -25,10 +25,10 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './db';
-import { daily, earliestDayStart, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
+import { daily, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
 import { tzNameOf, tzOffsetSec } from './providers/units';
-import { aliasFor, publicAlarms, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
+import { aliasFor, deviceAliasFor, publicAlarms, publicDeviceSamples, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
 import { parseRelayStatus } from './relays';
 import { plantFilter, pollAll } from './poll';
 import { announce, forgetOldMessages, isPushEndpoint, needsPriming, recentMessages, subscribe, tellOne, unsubscribe, vapidKey, vapidPublicKey } from './push';
@@ -392,6 +392,24 @@ app.get('/api/devices', async (c) => {
   return c.json({ now: nowSec(), devices: publicDevices(devices, aliasFor(ids)) });
 });
 
+/**
+ * Each device's link history: status and signal over the last few days, for
+ * the Devices tab's strip and signal line. Rows are written only when something
+ * moved (see recordDeviceSample), so a week is a few hundred rows at most.
+ * `days` is 1 to 30, 7 by default; anything that is not a number is the default.
+ */
+app.get('/api/devices/history', async (c) => {
+  const asked = Number(c.req.query('days') ?? 7);
+  const days = Number.isFinite(asked) ? Math.min(30, Math.max(1, Math.round(asked))) : 7;
+  const from = nowSec() - days * 86400;
+  const [devices, ids, samples] = await Promise.all([listDevices(c.env.DB), inverterIds(c.env.DB), deviceSamples(c.env.DB, from)]);
+  c.header('Cache-Control', CACHE);
+  return c.json({
+    now: nowSec(), days, from,
+    samples: publicDeviceSamples(samples, deviceAliasFor(devices, aliasFor(ids))),
+  });
+});
+
 app.post('/api/ingest/station', async (c) => {
   const token = c.env.INGEST_TOKEN;
   if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);
@@ -622,6 +640,12 @@ export default {
         await forgetOldMessages(env.DB);
       } catch (e) {
         console.error('push:', String(e));
+      }
+      // Housekeeping, kept apart so a push failure never leaves it undone.
+      try {
+        await forgetOldDeviceSamples(env.DB);
+      } catch (e) {
+        console.error('housekeeping:', String(e));
       }
     }));
   },

@@ -7,7 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
  * per-system detail view, the hardware inventory, staleness and the auth gate.
  */
 
-import { HYBRID, NOW, SOLIS, devices, historyRows, inverters, metrics, series } from '../fixtures/dashboard-api';
+import { HYBRID, NOW, SOLIS, deviceHistory, devices, historyRows, inverters, metrics, series } from '../fixtures/dashboard-api';
 
 /**
  * Answer every /api route the page calls from the shared fixtures, so the
@@ -22,6 +22,7 @@ async function stubApi(page: Page, opts: {
   periods?: unknown[];
   relays?: unknown[];
   feeds?: { ts: number; ok: number; detail: string; provider: string }[];
+  linkHistory?: unknown | 'error';
 } = {}) {
   const status = opts.status ?? 200;
   const invs = opts.invs ?? inverters();
@@ -32,6 +33,9 @@ async function stubApi(page: Page, opts: {
   await page.route('**/api/latest', (r) => r.fulfill(json(status === 200 ? { now: NOW, inverters: invs } : { error: 'unauthorized' })));
   await page.route('**/api/series**', (r) => r.fulfill(json(status === 200 ? { from: 0, to: NOW, points } : { error: 'unauthorized' })));
   await page.route('**/api/devices', (r) => r.fulfill(json(status === 200 ? { now: NOW, devices: devs } : { error: 'unauthorized' })));
+  await page.route('**/api/devices/history**', (r) => (opts.linkHistory === 'error'
+    ? r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) })
+    : r.fulfill(json(opts.linkHistory ?? deviceHistory()))));
   await page.route('**/api/history**', (r) => r.fulfill(json({ now: NOW, days: 30, rows: opts.history ?? historyRows() })));
   await page.route('**/api/alarms**', (r) => (opts.alarms === 'error'
     ? r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'boom' }) })
@@ -871,6 +875,78 @@ test.describe('AC output page', () => {
     await expect(page.locator('.card h3')).toContainText([
       'Identity & hardware', 'Datalogger & link', 'Live power', 'Energy counters',
     ]);
+  });
+});
+
+test.describe('Dataloggers', () => {
+  test('each logger gets a card saying everything its vendor reports about it', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/devices');
+    const cards = page.locator('.loggers section.logger');
+    await expect(cards).toHaveCount(2);
+    const solis = cards.nth(0);
+    await expect(solis.locator('h3')).toContainText('Demo Solis Plant');
+    await expect(solis).toContainText('Wi-Fi');
+    await expect(solis).toContainText('-58 dBm');
+    await expect(solis).toContainText('Running since restart');
+    await expect(solis).toContainText('2 h 5 min');
+    await expect(solis).toContainText('Working in total');
+    await expect(solis).toContainText('Made');
+    await expect(solis).toContainText('5 min');   // uploads every 300 s
+    // SolarMan says less about its logger, and nothing is invented for it.
+    const sm = cards.nth(1);
+    await expect(sm).toContainText('84%');
+    await expect(sm).not.toContainText('Running since restart');
+  });
+
+  test('draws the week: online, the one drop, and how long it lasted', async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/devices');
+    const solis = page.locator('.loggers section.logger').nth(0);
+    const head = solis.locator('.linkhist .lh-head').first();
+    await expect(head).toContainText('offline once, longest 2 h 0 min');
+    await expect(head).toContainText('online 9');
+    await expect(solis.locator('.lstrip i.off')).toHaveCount(1);
+    await expect(solis.locator('.lstrip')).toHaveAttribute('aria-label', /offline once/);
+    // The signal line, on a fixed dBm scale.
+    await expect(solis.locator('svg.sig-chart')).toBeVisible();
+    await expect(solis).toContainText('weakest -58 dBm');
+  });
+
+  test("shows SolarMan's evening sag on its percentage scale", async ({ page }) => {
+    await stubApi(page);
+    await page.goto('/#/devices');
+    const sm = page.locator('.loggers section.logger').nth(1);
+    await expect(sm).toContainText('never reported offline');
+    await expect(sm).toContainText('weakest 41%');
+    await expect(sm).toContainText('strongest 84%');
+  });
+
+  test('a logger nobody heard from is grey, not green', async ({ page }) => {
+    // The relay was off for the last day: the last row is a day old.
+    const h = deviceHistory();
+    h.samples = h.samples.filter((r) => r.ts < NOW - 86400);
+    await stubApi(page, { linkHistory: h });
+    await page.goto('/#/devices');
+    const solis = page.locator('.loggers section.logger').nth(0);
+    await expect(solis.locator('.linkhist .lh-head').first()).toContainText('not heard from for');
+    await expect(solis.locator('.lstrip i.none').last()).toBeVisible();
+  });
+
+  test('a history that fails to load says so, and the rest of the tab still draws', async ({ page }) => {
+    await stubApi(page, { linkHistory: 'error' });
+    await page.goto('/#/devices');
+    await expect(page.locator('.loggers section.logger').first()).toContainText('could not be loaded');
+    await expect(page.locator('table.devices tbody tr')).toHaveCount(4);
+  });
+
+  test("the system page's link card names the link and the restart", async ({ page }) => {
+    await stubApi(page);
+    await page.goto(`/#/system/${SOLIS}`);
+    const card = page.locator('section.card', { hasText: 'Datalogger & link' });
+    await expect(card).toContainText('Wi-Fi');
+    await expect(card).toContainText('Running since restart');
+    await expect(card).toContainText('Devices tab');
   });
 });
 

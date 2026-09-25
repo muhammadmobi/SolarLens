@@ -102,7 +102,47 @@ export interface Device {
   dcBusV: number | null;
   /** Battery and BMS detail; hybrids only, and the field set differs by vendor. */
   battery: BatteryDetail | null;
+  /** What a datalogger says about itself beyond status and signal; see LoggerDetail. */
+  logger?: LoggerDetail | null;
+  /** A datalogger's network handles, for the signed-in owner only; see LoggerNetwork. */
+  network?: LoggerNetwork | null;
   raw: unknown;
+}
+
+/**
+ * What a datalogger reports about itself, beyond the status, signal, model,
+ * firmware, upload interval and last contact that every device row carries.
+ *
+ * Nothing here identifies the logger or where it is, so it is published with
+ * the rest of the device row. Each field is null where the vendor does not say:
+ * SolisCloud reports most of them; SolarMan's device list reports only the
+ * signal, which the row already has, and the model the link is read from.
+ */
+export interface LoggerDetail {
+  /** How it reaches the internet - 'Wi-Fi', 'Ethernet', 'Cellular' - read from the model name. */
+  link: string | null;
+  /** SolisCloud's own signal bars, beside the dBm figure. */
+  signalLevel: number | null;
+  /** Seconds since the logger last restarted. A small number after a quiet spell means it rebooted. */
+  uptimeS: number | null;
+  /** Seconds it has been working in total, across restarts. */
+  workingS: number | null;
+  /** When it was made, epoch seconds. */
+  manufacturedAt: number | null;
+}
+
+/**
+ * A datalogger's network handles: its mobile operator and cell, or its MAC
+ * address. A cell id and a MAC address can each place a logger on a map or tie
+ * it to one household, so these are stored for the owner and never published -
+ * src/public-view.ts leaves the column out of every public answer.
+ */
+export interface LoggerNetwork {
+  operator: string | null;
+  /** Location area code and cell id of the mast a cellular logger is using. */
+  cellArea: string | null;
+  cellId: string | null;
+  mac: string | null;
 }
 
 /**
