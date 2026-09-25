@@ -14,6 +14,15 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [Unreleased]
+
+### Added
+
+- **A roadmap to 3.0.** `docs/roadmap.md` sets out the twelve phases of the
+  next release - the owner login, any number of inverters, a public demo,
+  weather and expected output with a site map, savings, questions answered in
+  the app and an MCP server - and what was left out on purpose.
+
 ## [2.11.0] — 2026-10-19
 
 SolisCloud readings again after the portal moved its plant page, a relay that
