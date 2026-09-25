@@ -49,18 +49,20 @@ describe('an empty description is no description', () => {
 });
 
 describe("SolisCloud's collector record", () => {
-  // The fields the live record carries beside status and signal. Values are
-  // illustrative; the field names and their units are real.
+  // The fields the live record carries beside status and signal. The names and
+  // units are real; every value is invented - a working time of 400 days, made
+  // and warranted on round dates.
+  const WORKING_S = 400 * 86400;
   const record = {
     sn: 'LOG0001SERIAL', machine: 'S3-WIFI-ST', version: '10186', state: 1, rssi: -59, rssiLevel: 3,
-    dataUploadCycle: '300', currentWorkingTime: '7502', totalWorkingTime: '32840119', runingTime: '32840119',
-    factoryTime: '1694412117', collectorActiveDate: 1709121876665, shelfEndTime: 1779552000000,
+    dataUploadCycle: '300', currentWorkingTime: '7502', totalWorkingTime: String(WORKING_S), runingTime: String(WORKING_S),
+    factoryTime: '1690000000', collectorActiveDate: 1700000000000, shelfEndTime: 1780000000000,
     connectionOperator: 'Operator', lac: 'A1', ci: 'B2',
   };
 
   it('describes the logger: link, signal bars, time since restart and in total, and when it was made', () => {
     const d = deviceFromCollector(record, 'p1');
-    expect(d.logger).toEqual({ link: 'Wi-Fi', signalLevel: 3, uptimeS: 7502, workingS: 32840119, manufacturedAt: 1694412117 });
+    expect(d.logger).toEqual({ link: 'Wi-Fi', signalLevel: 3, uptimeS: 7502, workingS: WORKING_S, manufacturedAt: 1690000000 });
   });
 
   it('keeps the operator and the mast apart, for the owner', () => {
@@ -68,12 +70,12 @@ describe("SolisCloud's collector record", () => {
   });
 
   it('falls back to the original warranty when there is no extended one', () => {
-    expect(deviceFromCollector(record, 'p1').warrantyUntil).toBe(1779552000);
+    expect(deviceFromCollector(record, 'p1').warrantyUntil).toBe(1780000000);
     expect(deviceFromCollector({ ...record, updateShelfEndTime: 1800000000000 }, 'p1').warrantyUntil).toBe(1800000000);
   });
 
   it('reads a factory time sent in milliseconds, and ignores a zero one', () => {
-    expect(deviceFromCollector({ ...record, factoryTime: 1694412117000 }, 'p1').logger?.manufacturedAt).toBe(1694412117);
+    expect(deviceFromCollector({ ...record, factoryTime: 1690000000000 }, 'p1').logger?.manufacturedAt).toBe(1690000000);
     expect(deviceFromCollector({ ...record, factoryTime: 0 }, 'p1').logger?.manufacturedAt).toBeNull();
   });
 });
