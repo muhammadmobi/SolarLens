@@ -414,9 +414,19 @@ describe('writes', () => {
     expect(res.status).not.toBe(401);
   });
 
-  it('still honour the cookie 2.x left, which is the token itself', async () => {
+  it('no longer accept the cookie 2.x left, which is the token itself, and clear it', async () => {
+    // That cookie could not be signed out short of replacing the token, so a
+    // browser holding it is asked to sign in like any other.
     const res = await h.fetch('/api/push/test', { method: 'POST', headers: { 'content-type': 'application/json', cookie: `sl_token=${CODE}` }, body: '{"endpoint":"x"}' });
-    expect(res.status).not.toBe(401);
+    expect(res.status).toBe(401);
+    expect(res.headers.getSetCookie().some((l) => /^sl_token=;/.test(l) && /max-age=0/i.test(l))).toBe(true);
+  });
+
+  it('clear the 2.x cookie on sign-out too', async () => {
+    const b = await ownerSignedIn();
+    b.jar.set('sl_token', CODE);
+    await b.post('/auth/logout');
+    expect(b.jar.has('sl_token')).toBe(false);
   });
 });
 
@@ -625,9 +635,10 @@ describe("a datalogger's network handles", () => {
 });
 
 describe('caching', () => {
-  it('keeps every answer out of shared caches, and sign-in answers out of all of them', async () => {
+  it('keeps every answer out of every cache, so a sign-out cannot be undone by one', async () => {
     const b = browser(h);
-    expect((await b.get('/api/latest')).headers.get('cache-control')).toBe('private, max-age=60');
-    expect((await b.get('/auth/status')).headers.get('cache-control')).toBe('no-store');
+    for (const path of ['/api/latest', '/api/devices', '/api/health', '/api/series', '/api/history', '/api/alarms', '/api/periods', '/api/devices/history', '/auth/status']) {
+      expect((await b.get(path)).headers.get('cache-control'), path).toBe('no-store');
+    }
   });
 });
