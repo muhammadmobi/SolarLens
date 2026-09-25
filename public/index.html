@@ -1164,7 +1164,7 @@
     const morning = first && first.tz_offset_sec != null ? first.tz_offset_sec : off;
     return [midnightNow + (off - morning), midnightNow + 86400];
   };
-  // JSON stored as text (metrics, raw) as an object, or null.
+  // JSON sent as text (metrics, telemetry) as an object, or null.
   const parse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
   // One fetch covers every system, and it opens at the earliest plant's
   // midnight - so a system further east is handed samples from its own
@@ -1916,10 +1916,12 @@
   }
   const stamp = (ts) => ts ? `${when(ts)} · ${ago(ts)}` : 'time not reported';
 
+  // SolarMan's warning flags, as the Worker names them (src/public-view.ts,
+  // vendorSignals). Each reads NORMAL until something is wrong.
   const WARN_FLAGS = [
-    ['warningStatus', 'Inverter warning'],
-    ['businessWarningStatus', 'Service warning'],
-    ['consumerWarningStatus', 'Load warning'],
+    ['warning_status', 'Inverter warning'],
+    ['business_warning_status', 'Service warning'],
+    ['consumer_warning_status', 'Load warning'],
   ];
 
   /**
@@ -1985,7 +1987,6 @@
   function alertsFor(inv) {
     const out = [];
     const st = statusOf(inv);
-    const raw = parse(inv.raw) ?? {};
     // Every row carries the moment it is describing: the sample it was read
     // from, the device's last contact, or the poll that failed.
     const add = (level, title, detail, source, ts = inv.ts) => out.push({ level, title, detail, source, ts });
@@ -2008,24 +2009,25 @@
     }
 
     // --- SolisCloud: an alarm counter and a severity level -----------------
-    const alarms = Number(raw.alarmCount);
+    // null means the vendor did not say, which is not the same as zero.
+    const alarms = inv.alarm_count == null ? NaN : Number(inv.alarm_count);
     if (Number.isFinite(alarms) && alarms > 0) {
       add('bad', `${alarms} active alarm${alarms === 1 ? '' : 's'}`,
         'Open the SolisCloud alarm list for the fault codes; SolarLens only sees the count.', 'SolisCloud');
     }
-    const level = Number(raw.alarmLevel);
+    const level = inv.alarm_level == null ? NaN : Number(inv.alarm_level);
     if (Number.isFinite(level) && level > 0) {
       add(level > 1 ? 'bad' : 'warn', `Alarm level ${level}`, 'Raised by the plant itself.', 'SolisCloud');
     }
 
     // --- SolarMan: flags that read NORMAL until they do not -----------------
     for (const [key, label] of WARN_FLAGS) {
-      const v = raw[key];
+      const v = inv[key];
       if (v && String(v).toUpperCase() !== 'NORMAL') {
         add('warn', label, `Reported as "${String(v).toLowerCase()}".`, 'SolarMan');
       }
     }
-    const net = raw.networkStatus;
+    const net = inv.network_status;
     if (net && String(net).toUpperCase() !== 'NORMAL') {
       add('warn', 'Datalogger link', `Reported as "${String(net).toLowerCase()}".`, 'SolarMan');
     }
@@ -2040,8 +2042,7 @@
         add('warn', `${what} offline`,
           d.last_seen ? `Last contact ${ago(d.last_seen)}.` : 'No contact recorded.', providerName(d.provider), dts);
       }
-      const drow = parse(d.raw) ?? {};
-      const dAlert = Number(drow.alertStatus);
+      const dAlert = d.alert_status == null ? NaN : Number(d.alert_status);
       // SolarMan uses -1 for "nothing to report", so only a positive count is news.
       if (Number.isFinite(dAlert) && dAlert > 0) {
         add('bad', `${what}: ${dAlert} alert${dAlert === 1 ? '' : 's'}`, 'Raised on the device record.', 'SolarMan', dts);
@@ -2748,9 +2749,14 @@
       <dl class="kv">${rows}${tail}</dl></div></section>`;
   }
 
-  /** Every figure the vendor sent, as a filterable table, for questions the page does not answer. */
+  /**
+   * Every measurement the vendor sent, as a filterable table, for questions the
+   * page does not answer. Read from `telemetry`, the copy of the payload the
+   * Worker cleans for publishing (src/public-view.ts, safeTelemetry): numbers,
+   * units and status words, with every id, serial, name and place left out.
+   */
   function rawCard(inv) {
-    const raw = parse(inv.raw);
+    const raw = parse(inv.telemetry);
     if (!raw || typeof raw !== 'object') return '';
     const entries = Object.entries(raw).filter(([, v]) => v === null || typeof v !== 'object');
     if (!entries.length) return '';
@@ -2993,7 +2999,7 @@
       ['Inverter model, firmware, datalogger signal', tab('#/devices', 'Devices')],
       ['Warranty and installation date', `${tab('#/power', 'Power')}, under each system, or the system on its own`],
       ['When each laptop\'s SolisCloud login runs out', `${tab('#/devices', 'Devices')} - SolisCloud relays`],
-      ['Every raw figure the vendor sent', `${tab('#/power', 'Power')}, under each system - Raw telemetry, with a filter`],
+      ['Every measurement the vendor sent', `${tab('#/power', 'Power')}, under each system - Raw telemetry, with a filter`],
       ['Show it on a wall screen', `📺 at the top - ${tab('#/tv', 'TV mode')}; Esc to leave`],
       ['Light or dark', '🖥️ at the top - follows your device, or pick one'],
       ['Put it on a phone\'s home screen', 'Your browser\'s menu - Add to Home Screen (on an iPhone, the Share button)'],
