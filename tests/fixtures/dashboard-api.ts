@@ -90,7 +90,7 @@ export function devices() {
       strings: null, ac_phases: null, frequency_hz: null, power_factor: null,
       temp_c: null, dc_bus_v: null, battery: null,
       // What SolisCloud's collector record says about the logger itself.
-      logger: JSON.stringify({ link: 'Wi-Fi', signalLevel: 3, uptimeS: 7502, workingS: 32_840_119, manufacturedAt: 1694412117 }),
+      logger: JSON.stringify({ link: 'Wi-Fi', signalLevel: 3, uptimeS: 7502, workingS: 400 * 86400, manufacturedAt: 1690000000 }),
       updated_at: NOW, alert_status: null,
     },
     {
