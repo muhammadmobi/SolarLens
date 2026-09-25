@@ -675,13 +675,13 @@ while charts keep the brighter ones.
 `npm run test:unit:coverage` writes a terminal summary plus `coverage/index.html` (and `lcov.info` for CI tooling), and fails the run if it drops below the thresholds in `vitest.config.ts`.
 
 | Scope | Statements | Branches | Functions | Lines |
+|---|---|---|---|---|
 | **All of `src/`** — everything the Worker ships | **98.2%** | **92.2%** | **97.8%** | **99.5%** |
-| **All of `src/`** — everything the Worker ships | **98.2%** | **92.0%** | **97.6%** | **99.5%** |
 | &nbsp;&nbsp;`index.ts` — routes, auth, headers, cron | 97% | 91% | 91% | **100%** |
-| &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 91% | **100%** | **100%** |
+| &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 92% | **100%** | **100%** |
 | &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |
 | &nbsp;&nbsp;`push.ts` — phone notifications | **100%** | 99% | **100%** | **100%** |
-| &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 92% | **100%** | **100%** |
+| &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 96% | **100%** | **100%** |
 | &nbsp;&nbsp;`relays.ts` — a relay's report, validated | **100%** | **100%** | **100%** | **100%** |
 | &nbsp;&nbsp;`events.ts` — alarms and period totals | **100%** | 91% | **100%** | **100%** |
 | &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 94% | 93% | **100%** | **100%** |
@@ -909,11 +909,12 @@ node scripts/ci/check-privacy.mjs     # the guard, over the working tree
 
 ## Data model
 
-Twelve tables in D1, made by the files in `migrations/`, applied in order:
+Thirteen tables in D1, made by the files in `migrations/`, applied in order:
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
-- **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. A datalogger also has `logger` - how it connects, signal bars, seconds since restart and in total, when it was made - and `network`: its mobile operator and cell, or its MAC address, **kept for the owner and never part of a public answer**, since either can place a logger. Filled by the relay agent and the cron; the vendor payload is stripped of address, coordinates and account identifiers before storage.
+- **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. A datalogger also has `logger` - how it connects, signal bars, seconds since restart and in total, when it was made - Its network handles - mobile operator and cell, or MAC address - are **not** on this row: see `device_network`. Filled by the relay agent and the cron; the vendor payload is stripped of address, coordinates and account identifiers before storage.
+- **`device_network`** — a datalogger's network handles: its mobile operator and cell, or its MAC address, as JSON. **Kept for the owner and never part of a public answer**, since either can place a logger. A table of its own rather than a column on `devices` on purpose: a Worker rolled back to 2.10 serves `SELECT * FROM devices` minus the columns it knew about, so a new column there would reach anyone; a table it has never heard of cannot.
 - **`device_samples`** — each device's status and signal over time, for its link history: a row when either changes, or at least hourly while nothing does, so a steady logger writes 24 rows a day rather than 288. Kept 90 days; pruned by the cron.
 - **`alarms`** — each vendor fault: `code`, `message`, `severity` (`info` / `warning` / `fault`), the vendor's own `vendor_level`, `advice`, `begin_ts`, `end_ts` (null while active, or where the vendor never says), and `state` (`active` / `recovered` / `unknown`). Its `id` contains the vendor's plant id and is never served.
 - **`vendor_periods`** — each vendor's own totals per `period` (`day` / `month` / `year`) and `key` (`2026-09`, `2026`): generation, load, grid both ways, battery both ways and full-load hours. These reach back to installation, which SolarLens's own readings cannot.
@@ -945,7 +946,7 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `GET /api/series?from=&to=&tz=` | open | readings in a range (≤ 31 days). Omit `from` and the window opens at the earliest plant's own midnight; `tz` is the fallback for a plant whose vendor reports no timezone |
 | `GET /api/health` | open | recent poll log, the newest line per feed, and each SolisCloud relay heard from in the last 14 days with its login's expiry. Relay ids are never returned |
 | `GET /api/history?days=&tz=` | open | one row per inverter per day, each cut at that plant's own midnight (`tz` is the fallback, the caller's UTC offset in minutes) |
-| `GET /api/devices` | open | hardware inventory, with a device's own alert count as `alert_status` (SolarMan; -1 means nothing to report) and a datalogger's `logger` description; each device named by a positional alias (`s1-datalogger-1`), never its serial, and `network` never sent |
+| `GET /api/devices` | open | hardware inventory, with a device's own alert count as `alert_status` (SolarMan; -1 means nothing to report) and a datalogger's `logger` description; each device named by a positional alias (`s1-datalogger-1`), never its serial; a logger's network handles never sent |
 | `GET /api/devices/history?days=7` | open | each device's status and signal over the last 1-30 days, oldest first, with the row before the window so the week opens in a known state |
 | `GET /api/alarms?days=` | open | fault history, newest first (default 730 days). An alarm's internal id is never returned, since it contains the vendor's plant id |
 | `GET /api/periods` | open | each vendor's own month and year totals, back to installation |
