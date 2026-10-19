@@ -79,7 +79,7 @@ try {
     if ($LASTEXITCODE -ne 0) { Die "Could not set the Cloudflare secret $name - nothing was changed locally." }
     Ok 'Cloudflare secret updated'
 
-    $lines = Get-Content $devVars
+    $lines = Get-Content $devVars -Encoding UTF8
     if ($lines -match "^$name=") {
       $lines = $lines -replace "^$name=.*$", "$name=$value"
     } else {
@@ -123,8 +123,8 @@ try {
   if ($Api) {
     # Both read from .dev.vars rather than being written into this file: the
     # repository is public, and a deployment URL is as personal as a token.
-    $token = (Get-Content $devVars | Where-Object { $_ -like 'API_TOKEN=*' }) -replace '^API_TOKEN=', ''
-    $url   = ((Get-Content $devVars | Where-Object { $_ -like 'SOLARLENS_URL=*' }) -replace '^SOLARLENS_URL=', '').TrimEnd('/')
+    $token = (Get-Content $devVars -Encoding UTF8 | Where-Object { $_ -like 'API_TOKEN=*' }) -replace '^API_TOKEN=', ''
+    $url   = ((Get-Content $devVars -Encoding UTF8 | Where-Object { $_ -like 'SOLARLENS_URL=*' }) -replace '^SOLARLENS_URL=', '').TrimEnd('/')
     Write-Host "`nEvery device is now signed out. To unlock one, open this on it once:" -ForegroundColor Cyan
     Write-Host "  $url/auth?t=$token" -ForegroundColor Yellow
     Write-Host '  (the link contains the token - do not post it anywhere)'
