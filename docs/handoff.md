@@ -210,25 +210,44 @@ Two behaviours to know before changing it:
 
 ## 7. The relay, and the weekly login
 
-- Runs from a **Windows scheduled task at logon**, started through
-  `scripts/relay-hidden.vbs` rather than `node.exe` directly, because node is a
-  console application and would put a black terminal on screen at every logon.
+- Runs from a **Windows scheduled task at logon, and again every ten minutes**,
+  started through `scripts/relay-hidden.vbs` rather than `node.exe` directly,
+  because node is a console application and would put a black terminal on
+  screen at every logon. The ten-minute check does nothing while the relay
+  runs; it exists because a relay that stopped used to stay down until the
+  next logon - once for nine days - since Task Scheduler's "restart on failure"
+  covers only a task that fails to start. Setup registers both.
 - **Always headless in the background**: the launcher forces it, whatever
   `.dev.vars` says.
-- **A SolisCloud web login lasts exactly seven days**, is not extended by use,
-  and its page carries a captcha - so no script can renew it. Measured, not
-  assumed: a login made at 14:53 UTC carries a cookie expiring 14:53 UTC seven
-  days later, after a relay used it every five minutes in between.
+- **A SolisCloud web login lasts exactly seven days** and is not extended by
+  use. Measured, not assumed: a login made at 14:53 UTC carries a cookie
+  expiring 14:53 UTC seven days later, after a relay used it every five minutes
+  in between.
+- **With the login saved, the relay renews it itself.** `SOLIS_USERNAME` and
+  `SOLIS_PASSWORD` in `.dev.vars` (setup writes them from an installer that
+  carries them): when the login runs out, the relay logs in again, still
+  hidden - fills both in, ticks the agreement box (the owner asked for that),
+  presses Login. If SolisCloud asks for a puzzle or a code, which no script
+  answers, a window opens, filled in, for a person to finish. One attempt an
+  hour, so a refused password is not tried until the account locks. Both
+  values are plain text in `.dev.vars` and in an installer made with them.
 - The relay reports its login's expiry after every cycle. The dashboard warns
   two days ahead, naming the computer.
-- **Renewing is one double-click**: `renew-solis-login.cmd` on that laptop. It
-  checks the login hidden first and opens a window only if a login is needed.
+- **Without a saved login, renewing is one double-click**:
+  `renew-solis-login.cmd` on that laptop. It checks the login hidden first and
+  opens a window only if a login is needed.
+- **The relay reads someone else's website, and that website changes.** In
+  October 2026 SolisCloud moved its plant page, and every relay failed with a
+  valid login until it was taught the new address. The pages it opens are
+  `PLANT_PAGES` (and the device and alarm pages) in `agent/solis-relay.mjs`;
+  when a relay reports *error* with a valid login, look at the site first -
+  run the relay once in a window (`RELAY_ONCE=1`, `RELAY_HEADLESS=0`).
 - **A relay only works while its computer is awake.** Sleep set to *Never* when
   plugged in; a closed lid that sleeps is the same outage.
 - More than one relay is fine: duplicate readings are stored once, and whichever
   laptop is awake fills the gaps.
 
-The permanent fix is SolisCloud's official API key (their ticket #1041568).
+The permanent fix is SolisCloud's official API key (a support ticket is open).
 `SolisCloudProvider` is already written and activates the moment the key and
 secret are set, and the relay disappears entirely.
 
@@ -258,6 +277,7 @@ copy was lost. What holds the line instead is `src/public-view.ts`:
 | `INGEST_TOKEN` (lets a relay push) | Cloudflare secret + `.dev.vars` on each relay laptop | `scripts/rotate-tokens.ps1 -Ingest`, then re-run the installer on each laptop |
 | SolarMan session tokens | `.dev.vars`, refreshed automatically | Re-capture from the portal; `README.md` has the steps |
 | SolisCloud portal login | The `.relay-profile` browser profile beside the relay | `renew-solis-login.cmd` |
+| SolisCloud username and password (optional) | `.dev.vars` on each relay laptop, as `SOLIS_USERNAME` / `SOLIS_PASSWORD`, and in any installer `make-laptop-installer.ps1` wrote from it - plain text both | Change it on SolisCloud, then in each `.dev.vars`; make the installer again |
 | Plant ids, database id, deployment address | `.dev.vars`, and the `production` environment's secrets | Read them from the Cloudflare dashboard |
 
 **`.dev.vars` on the main machine is the most valuable file in the system.** It
@@ -306,7 +326,7 @@ break it mid-run).
 
 | When | What |
 |---|---|
-| Weekly, when the dashboard warns | Renew a SolisCloud login: `renew-solis-login.cmd` on the named laptop |
+| Weekly, only if the dashboard warns | Nothing, with the login saved in `.dev.vars`: the relay logs in by itself. Otherwise, or if SolisCloud asked for a puzzle and nobody answered: `renew-solis-login.cmd` on the named laptop |
 | Once, then per new phone | `node scripts/make-vapid-key.mjs` gives the Worker its push key; then Alerts tab → *Turn on for this device* on each phone |
 | After a release that changes relay code | Double-click `setup-solarlens-relay.cmd` on each relay laptop; the deploy summary says when |
 | After any release | Nothing: an open dashboard offers *Reload* within fifteen minutes, or on coming back to the tab, and a TV display reloads itself |
@@ -321,6 +341,7 @@ and running a relay in a visible window, since a hidden relay writes no log.
 | Symptom | Almost always | Fix |
 |---|---|---|
 | One system reads offline while the sun is up | Relay laptop asleep, off, or its login expired | Devices tab says which; `renew-solis-login.cmd` |
+| A relay reports *error* although its login is valid | SolisCloud moved a page the relay reads | Run the relay once in a window to see which step fails; the plant page's addresses are `PLANT_PAGES` in `agent/solis-relay.mjs` |
 | Both feeds stale | The Worker's cron, or Cloudflare | Cloudflare dashboard → the Worker's logs |
 | A deploy failed | The smoke test refused it; the old version is already back | The run's log names the failing check in words |
 | A deploy failed at the first step | The Cloudflare token expired or was rolled | New token → update the `production` secret |
@@ -379,6 +400,7 @@ The short history a newcomer would otherwise repeat.
 | **A dashboard tab left open across a release kept running the old page**, so the 2.10 guide went unseen on a screen that had been open all along | A page refreshes its figures, never itself; it now compares its own script with the server's and offers a reload |
 | **On a phone the page was wider than the screen**: the tab bar could not shrink, the browser zoomed the layout out, and a notice fixed to the bottom landed below it where it could not be tapped | Test layouts at phone width, and hold the page to the screen width - `tests/e2e/phone-width.spec.ts` does |
 | **Several Copilot review rounds found real bugs** - a notification repeating every five minutes, a race in the reload check - and some threads had been resolved without a word | Every pull request: wait for the review, fix, reply, resolve, repeat until none is open. The ruleset now refuses a merge with an open conversation |
+| **SolisCloud moved its plant page, and no Solis reading arrived for two days**: the relay waited on an address the portal no longer had, logged in or not, while the other laptop's relay had stopped weeks before, with nothing to start it again | A relay is a browser reading someone else's site: when it fails with a valid login, look at the site first. And a hidden process needs something to start it again - the task now checks every ten minutes |
 
 ## 14. What is still missing
 
