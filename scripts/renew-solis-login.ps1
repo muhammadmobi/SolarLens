@@ -112,7 +112,13 @@ Step 3 'Checking the SolisCloud login'
 # nothing for anyone to see or do; a window opens only when a login is needed.
 $profileDir = if ($env:RELAY_PROFILE) { $env:RELAY_PROFILE } else { Join-Path $Root '.relay-profile' }
 $code = -1
-if (Test-Path (Join-Path $profileDir 'Default')) {
+# With the SolisCloud login saved in .dev.vars, an empty profile starts hidden
+# too: the relay logs in by itself and opens a window only if it must.
+$devVarsFile = Join-Path $Root '.dev.vars'
+$hasLogin = (Test-Path $devVarsFile) -and
+  [bool](Select-String -Path $devVarsFile -Pattern '^\s*SOLIS_PASSWORD\s*=\s*\S' -Quiet) -and
+  [bool](Select-String -Path $devVarsFile -Pattern '^\s*SOLIS_USERNAME\s*=\s*\S' -Quiet)
+if ($hasLogin -or (Test-Path (Join-Path $profileDir 'Default'))) {
   Write-Host '    Checking in the background - no window unless SolisCloud wants a login.'
   $code = Invoke-RelayOnce
   if ($code -eq 0) { Ok 'The saved login still works, and a reading went through' }

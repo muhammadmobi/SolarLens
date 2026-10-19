@@ -54,7 +54,7 @@
  * RELAY_HEADLESS=1 hides its window entirely once you have logged in once.
  */
 import { chromium } from 'playwright-core';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readAlarms, readPeriods } from './solis-extras.mjs';
 import { loginExpiryFromCookies, onceExitCode, relayId, relayName, stateForError } from './relay-status.mjs';
@@ -373,8 +373,11 @@ async function ensureLoggedIn() {
   if (!needed) return;
   if (HEADLESS && !CDP && CAN_FILL) return autoLogin();
   if (HEADLESS) throw new Error('session expired - run headed once to log in again');
-  log(await fillLogin()
-    ? 'Logging in with the saved login. If SolisCloud asks for a puzzle or a code, answer it in the window. Waiting…'
+  // Filled in, not sent: a person is at this window, and the saved login may
+  // just have been refused by a hidden run - sending it again would be a
+  // second automatic try within the hour.
+  log(await fillLogin({ submit: false })
+    ? 'The saved login is filled in: press Login in the window, and answer a puzzle or a code if SolisCloud asks. Waiting…'
     : 'Please log in to SolisCloud in the Chrome window. Waiting…');
   const until = Date.now() + 15 * 60_000;
   while (Date.now() < until) {
@@ -440,12 +443,20 @@ async function fillLogin({ submit = true } = {}) {
  */
 const LOGIN_EVERY_MS = 60 * 60_000;
 const WINDOW_OPEN_MS = 60 * 60_000;
-let lastLoginAt = 0;
+// The time of the last automatic login is kept in a file in the profile, not
+// in memory: setup, renew-solis-login and the ten-minute check each start a
+// new relay, and a limit that a restart forgets would let each of them send
+// the same refused password again within the hour.
+const LOGIN_STAMP = resolve(PROFILE, 'solarlens-last-login');
+const lastLoginAt = () => {
+  try { return Number(readFileSync(LOGIN_STAMP, 'utf8')) || 0; } catch { return 0; }
+};
 async function autoLogin() {
-  if (Date.now() - lastLoginAt < LOGIN_EVERY_MS) {
+  if (Date.now() - lastLoginAt() < LOGIN_EVERY_MS) {
     throw new Error('session expired - a login was already tried within the hour');
   }
-  lastLoginAt = Date.now();
+  // Written before Login is pressed, so a relay that dies mid-login still counts the try.
+  try { writeFileSync(LOGIN_STAMP, String(Date.now())); } catch (e) { log(`could not record the login attempt (${e.message})`); }
   // The page is on the login form already: that is how a login was found to be needed.
   if (await fillLogin()) {
     const until = Date.now() + 20_000;
