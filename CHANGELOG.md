@@ -14,7 +14,11 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
-## [Unreleased]
+## [2.11.0] — 2026-10-19
+
+SolisCloud readings again after the portal moved its plant page, a relay that
+starts again and logs in by itself, Historical Data one system at a time, and a
+notice when a newer version is out.
 
 ### Added
 
@@ -1249,6 +1253,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[2.11.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.7.0...v2.8.0

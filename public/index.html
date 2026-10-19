@@ -2967,7 +2967,7 @@
   // sits behind an icon rather than taking a tab from the pages used every day.
   // RELEASE is kept equal to package.json's version by a unit test, so the
   // guide never describes a release other than the one it ships with.
-  const RELEASE = '2.10.0';
+  const RELEASE = '2.11.0';
 
   function renderGuide() {
     const systems = (state.latest?.inverters ?? []).map((inv) => {
@@ -3010,16 +3010,20 @@
       </div></section>
 
       <section class="card"><h2>What is new in ${RELEASE}</h2><div class="body"><ul>
-        <li><strong>Notifications on your phone, even with the dashboard closed.</strong> Alerts tab - <em>Also when this
-          browser is closed</em> - Turn on for this device. You are told when a system stops reporting while it was
-          producing, a fault is recorded, a SolisCloud login is about to run out, or a vendor stops answering. Each is
-          told once, and again only if it clears and comes back.</li>
-        <li><strong>SolarMan faults now say when they cleared,</strong> and SolarMan's advice where it gives any. Faults
-          it used to fold into one line a day are shown one by one.</li>
-        <li><strong>This guide.</strong> The <strong>Guide</strong> button, the open book at the top of every page.</li>
+        <li><strong>SolisCloud readings arrive again.</strong> SolisCloud moved its plant page in October, and the relay
+          now finds the new one. A relay that stops is started again within ten minutes, and the monthly and yearly
+          totals come through again.</li>
+        <li><strong>The relay logs in to SolisCloud by itself</strong> when its seven-day login runs out, out of sight.
+          A window opens only if SolisCloud asks for a puzzle or a code.</li>
+        <li><strong>A proper Guide button</strong> - an open book at the top of every page.</li>
+        <li><strong>Historical Data, one system at a time.</strong> Pick a system at the top, or All systems; the CSV
+          follows your choice.</li>
+        <li><strong>"A new version of SolarLens is available."</strong> A tab left open is told when there is a newer
+          release, with a Reload button; TV mode reloads by itself.</li>
+        <li><strong>No wider than a phone.</strong> Every page now fits a phone's screen; the tabs scroll sideways.</li>
       </ul>
-      <p class="cardnote">In 2.9: Download CSV on Historical Data, the <em>Tell me when something changes</em> switch,
-        days that stay correct when the clocks change, and every page checked for accessibility.</p>
+      <p class="cardnote">In 2.10: notifications on your phone even with the dashboard closed, SolarMan faults that
+        say when they cleared, and this guide.</p>
       </div></section>
 
       <section class="card"><h2>The tabs</h2><div class="body"><dl class="tabs">
