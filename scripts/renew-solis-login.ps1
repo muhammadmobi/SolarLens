@@ -58,7 +58,14 @@ if (-not (Test-Path (Join-Path $Root 'agent\solis-relay.mjs'))) {
 Step 1 'Stopping the hidden relay'
 $taskInfo = Get-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
 $wasDisabled = $taskInfo -and $taskInfo.State -eq 'Disabled'
+# Switched off until step 4, not only stopped: the task's ten-minute check would
+# otherwise start a relay beside the one run here, and that one takes the
+# profile back by closing this one's browser - mid-login, if you are typing.
+# The finally below switches it back on, whatever happens in between.
+$suspended = $taskInfo -and -not $wasDisabled
+if ($suspended) { Disable-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue | Out-Null }
 if ($taskInfo) { Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue }
+try {
 # Stop the task first, then its wrapper, then node, then the relay's own Chrome:
 # a Chrome still holding the profile would stop the visible run from starting.
 foreach ($p in @(
@@ -119,6 +126,9 @@ if ($code -ne 0) {
     Die 'No reading was sent, so the login is not renewed yet. Run this again and complete the login in the Chrome window.'
   }
   Ok 'Logged in, and a reading went through'
+}
+} finally {
+  if ($suspended) { Enable-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue | Out-Null }
 }
 
 # --- 4. back to running hidden ----------------------------------------------

@@ -49,6 +49,8 @@ SOLIS_PLANT_IDS=
 # A window opens only if SolisCloud asks for a puzzle or a code.
 # scripts/make-laptop-installer.ps1 carries them into the installer it writes.
 # PLAIN TEXT: anyone who can read this file can log in to your SolisCloud.
+# Setup writes them in single quotes ('like this'); one matching pair of quotes
+# around a value is taken off when it is read, so a password is kept exactly.
 SOLIS_USERNAME=
 SOLIS_PASSWORD=
 

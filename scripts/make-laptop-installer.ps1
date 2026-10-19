@@ -54,8 +54,11 @@ Get-Content $devVars | ForEach-Object {
 $url    = $vars['SOLARLENS_URL']
 $token  = $vars['INGEST_TOKEN']
 $plants = $vars['SOLIS_PLANT_IDS']
-$solisUser = $vars['SOLIS_USERNAME']
-$solisPass = $vars['SOLIS_PASSWORD']
+# Setup writes the login in single quotes; one matching pair comes off here, as
+# in the relay, so the installer carries exactly the password that was typed.
+$unquote = { param($s) if ($s -match "^(['`"])(.*)\1$") { $matches[2] } else { $s } }
+$solisUser = & $unquote $vars['SOLIS_USERNAME']
+$solisPass = & $unquote $vars['SOLIS_PASSWORD']
 
 if (-not $url)   { Die 'SOLARLENS_URL is not set in .dev.vars.' }
 if (-not $token) { Die 'INGEST_TOKEN is not set in .dev.vars.' }
