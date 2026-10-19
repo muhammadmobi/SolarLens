@@ -374,8 +374,11 @@ try {
     $profileDir = if ($env:RELAY_PROFILE) { $env:RELAY_PROFILE } else { Join-Path $InstallDir '.relay-profile' }
     $hadSession = Test-Path (Join-Path $profileDir 'Default')
     $code = -1
-    if ($hadSession) {
-      Write-Host '    Checking the saved SolisCloud login in the background - no window'
+    # With the SolisCloud login saved, even a new laptop starts hidden: the
+    # relay logs in by itself, and opens a window only if SolisCloud asks for
+    # a puzzle or a code.
+    if ($hadSession -or ($SolisUser -and $SolisPassword)) {
+      Write-Host '    Checking the SolisCloud login in the background - no window'
       Write-Host '    unless SolisCloud wants you to log in.'
       $code = Invoke-RelayOnce
       if ($code -eq 0) { Ok 'The saved SolisCloud login works, and a reading is through' }

@@ -30,7 +30,8 @@ notice when a newer version is out.
   agreement as the owner asked, pressing Login. Only if SolisCloud asks for a
   puzzle or a code does a window open, filled in, for a person to answer it
   and press Login; the relay never answers those, and never sends the login a
-  second time. One attempt an hour at most. `make-laptop-installer.ps1`
+  second time. One attempt an hour at most, remembered across restarts, and a
+  new laptop with the login saved starts hidden too. `make-laptop-installer.ps1`
   carries the login into the installer it writes, and setup writes it to
   `.dev.vars` - plain text both, for the owner's own machines only.
 - **A proper icon for the guide.** The header's "?" is now an open book with

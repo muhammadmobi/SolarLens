@@ -232,7 +232,9 @@ Two behaviours to know before changing it:
   presses Login. If SolisCloud asks for a puzzle or a code, which no script
   answers, a window opens, filled in, for a person to finish and press Login
   (the relay does not send the login twice). One attempt an
-  hour, so a refused password is not tried until the account locks. Both
+  hour, kept in a file in the profile so a restart does not reset it, so a
+  refused password is not tried until the account locks. A new laptop with
+  the login saved starts hidden too. Both
   values are plain text in `.dev.vars` and in an installer made with them.
 - The relay reports its login's expiry after every cycle. The dashboard warns
   two days ahead, naming the computer.
