@@ -96,6 +96,18 @@ function Stop-HiddenRelay {
   Start-Sleep -Seconds 1
 }
 
+# Switch the task off while a relay is run here by hand, so neither its logon
+# start nor its ten-minute check starts a second relay on the same profile.
+# Returns whether it was switched off here - a task already disabled was paused
+# on purpose, and is not this script's to switch back on.
+# renew-solis-login.ps1 does the same.
+function Suspend-RelayTask {
+  $t = Get-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue
+  if (-not $t -or $t.State -eq 'Disabled') { return $false }
+  Disable-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue | Out-Null
+  return $true
+}
+
 # Run the relay for one cycle and return its exit code: 0 a reading went
 # through, 3 SolisCloud wants a login, anything else another failure. Hidden
 # unless -Visible. Alarm history and period totals are skipped - they add most
@@ -258,8 +270,11 @@ try {
   $fromB64 = { param($s) if ($s) { [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s)) } else { '' } }
   $SolisUser     = & $fromB64 $SolisUserB64
   $SolisPassword = & $fromB64 $SolisPasswordB64
-  if (-not $SolisUser)     { $SolisUser     = $existing['SOLIS_USERNAME'] }
-  if (-not $SolisPassword) { $SolisPassword = $existing['SOLIS_PASSWORD'] }
+  # The login is written below in single quotes; take one matching pair off
+  # when reading it back, the way the relay does, and nothing else.
+  $unquote = { param($s) if ($s -match "^\s*(['`"])(.*)\1\s*$") { $matches[2] } else { $s } }
+  if (-not $SolisUser)     { $SolisUser     = & $unquote $existing['SOLIS_USERNAME'] }
+  if (-not $SolisPassword) { $SolisPassword = & $unquote $existing['SOLIS_PASSWORD'] }
 
   if (-not $WorkerUrl) {
     $WorkerUrl = Read-Host '    Worker URL (e.g. https://solar-lens.<you>.workers.dev)'
@@ -285,9 +300,11 @@ try {
   )
   if ($PlantIds) { $lines += "SOLIS_PLANT_IDS=$PlantIds" }
   if ($SolisUser -and $SolisPassword) {
+    # In single quotes, which the relay takes off again, so a password that
+    # begins or ends with a quote or a space is not trimmed on the way.
     $lines += '# The SolisCloud login, typed into the login form when it runs out. Plain text: keep this file private.'
-    $lines += "SOLIS_USERNAME=$SolisUser"
-    $lines += "SOLIS_PASSWORD=$SolisPassword"
+    $lines += "SOLIS_USERNAME='$SolisUser'"
+    $lines += "SOLIS_PASSWORD='$SolisPassword'"
   }
   if ($UseMyChrome) {
     $lines += '# Attach to the Chrome you already have open rather than running one.'
@@ -344,7 +361,14 @@ try {
     # works, which is the usual case on a re-run, no window appears at all;
     # 2.4.0 opened one every time, which on a machine that needed nothing looked
     # like something going wrong. A window opens only when a login is needed.
+    #
+    # The task is switched off for the length of this step, and back on after:
+    # its ten-minute check would otherwise start a second relay beside the one
+    # run here, outside Task Scheduler, and that relay takes the profile back by
+    # closing this one's browser - mid-login, if a person is typing.
+    $suspended = Suspend-RelayTask
     Stop-HiddenRelay
+    try {
 
     $profileDir = if ($env:RELAY_PROFILE) { $env:RELAY_PROFILE } else { Join-Path $InstallDir '.relay-profile' }
     $hadSession = Test-Path (Join-Path $profileDir 'Default')
@@ -378,6 +402,10 @@ try {
         Die 'No reading was sent - the SolisCloud login did not complete. Run this again.'
       }
       Ok 'Logged in, and a reading is through'
+    }
+
+    } finally {
+      if ($suspended) { Enable-ScheduledTask -TaskName 'SolarLens relay' -ErrorAction SilentlyContinue | Out-Null }
     }
   }
 

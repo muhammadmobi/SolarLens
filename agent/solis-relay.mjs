@@ -71,7 +71,12 @@ function loadDevVars() {
   for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
     const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)$/.exec(line);
     if (!m) continue;
-    const value = m[2].trim().replace(/^["']|["']$/g, '');
+    // One matching pair of quotes around a value is taken off, and nothing
+    // else: setup writes the SolisCloud login in single quotes so that a
+    // password beginning or ending with a quote or a space arrives as typed.
+    const raw = m[2].trim();
+    const quoted = /^(["'])([\s\S]*)\1$/.exec(raw);
+    const value = quoted ? quoted[2] : raw;
     if (value && process.env[m[1]] === undefined) process.env[m[1]] = value;
   }
 }
@@ -381,8 +386,9 @@ async function ensureLoggedIn() {
 
 /**
  * Log in with the saved username and password, when there are any: fill both
- * in, tick the agreement, press Login. Returns whether the form was filled and
- * sent - not whether the login went through, which the caller watches for.
+ * in, tick the agreement, press Login - or, with `submit` false, leave Login
+ * for a person to press. Returns whether the form was filled (and sent) - not
+ * whether the login went through, which the caller watches for.
  *
  * The agreement box ("I have read and agree to Privacy Policy and User
  * Agreement") is ticked for the owner because the owner asked for it, on
@@ -396,7 +402,7 @@ async function ensureLoggedIn() {
  * a title, not a button). The username box is the form's text box that is not
  * the password, so a translated page still works.
  */
-async function fillLogin() {
+async function fillLogin({ submit = true } = {}) {
   if (!CAN_FILL) return false;
   try {
     const password = page.locator('input[type=password]').first();
@@ -407,7 +413,9 @@ async function fillLogin() {
     if ((await agree.count()) && !(await agree.evaluate((e) => e.classList.contains('is-checked')))) {
       await agree.click({ timeout: 10_000 });
     }
-    await page.locator('button.el-button--primary').filter({ hasText: /log\s?in|sign\s?in/i }).first().click({ timeout: 10_000 });
+    if (submit) {
+      await page.locator('button.el-button--primary').filter({ hasText: /log\s?in|sign\s?in/i }).first().click({ timeout: 10_000 });
+    }
     return true;
   } catch (e) {
     log(`could not fill in the login form (${e.message.split('\n')[0]}) - log in in the window`);
@@ -419,13 +427,14 @@ async function fillLogin() {
  * A hidden relay whose seven-day login has run out, with a saved username and
  * password. First it logs in by itself, still hidden - nobody sees anything.
  * Only if that does not go through (SolisCloud asks for a puzzle or a code, or
- * the password was refused) does a window open, filled in and sent, for a
- * person to finish; then it is hidden again. Before this, the relay could only
+ * the password was refused) does a window open, filled in but not sent, for a
+ * person to finish and press Login; then it is hidden again. Before this, the relay could only
  * say on the dashboard that a login was due, and the owner had to find and run
  * a file.
  *
  * One attempt an hour at most, so a refused password is not tried every five
- * minutes until SolisCloud locks the account, and a laptop nobody is at does
+ * minutes until SolisCloud locks the account - the window never presses Login
+ * itself, so that one attempt is the only one - and a laptop nobody is at does
  * not fill up with windows. Each window stays open for up to an hour; closing
  * it means "not now". The dashboard says "login expired" meanwhile, as before.
  */
@@ -449,7 +458,12 @@ async function autoLogin() {
   await loginInWindow();
 }
 
-/** The window: the login page, filled in and sent, kept open until the login goes through. */
+/**
+ * The window: the login page, filled in, kept open until the login goes
+ * through. Login is left for the person to press: the hidden attempt just
+ * before was this hour's one automatic try, and sending the same login again
+ * seconds later would make it two.
+ */
 async function loginInWindow() {
   await reportStatus('login-expired');
   await ctx?.close().catch(() => {});
@@ -459,8 +473,8 @@ async function loginInWindow() {
   try {
     await ensureBrowser(false);
     await page.goto(`${PORTAL}/login`, { waitUntil: 'domcontentloaded' }).catch(() => {});
-    const sent = await fillLogin();
-    log(`SolisCloud login needed - a window is open${sent ? ', logging in with the saved login' : ''}: if SolisCloud asks for a puzzle or a code, answer it there`);
+    const filled = await fillLogin({ submit: false });
+    log(`SolisCloud login needed - a window is open${filled ? ', with the saved login filled in: press Login' : ''}; if SolisCloud asks for a puzzle or a code, answer it there`);
     const until = Date.now() + WINDOW_OPEN_MS;
     while (Date.now() < until && !page.isClosed()) {
       await sleep(5000);

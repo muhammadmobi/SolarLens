@@ -216,7 +216,9 @@ Two behaviours to know before changing it:
   screen at every logon. The ten-minute check does nothing while the relay
   runs; it exists because a relay that stopped used to stay down until the
   next logon - once for nine days - since Task Scheduler's "restart on failure"
-  covers only a task that fails to start. Setup registers both.
+  covers only a task that fails to start. Setup registers both. Setup and
+  `renew-solis-login` switch the task off while they run a relay of their own,
+  and back on after, so the check cannot start a second relay mid-login.
 - **Always headless in the background**: the launcher forces it, whatever
   `.dev.vars` says.
 - **A SolisCloud web login lasts exactly seven days** and is not extended by
@@ -228,7 +230,8 @@ Two behaviours to know before changing it:
   carries them): when the login runs out, the relay logs in again, still
   hidden - fills both in, ticks the agreement box (the owner asked for that),
   presses Login. If SolisCloud asks for a puzzle or a code, which no script
-  answers, a window opens, filled in, for a person to finish. One attempt an
+  answers, a window opens, filled in, for a person to finish and press Login
+  (the relay does not send the login twice). One attempt an
   hour, so a refused password is not tried until the account locks. Both
   values are plain text in `.dev.vars` and in an installer made with them.
 - The relay reports its login's expiry after every cycle. The dashboard warns
