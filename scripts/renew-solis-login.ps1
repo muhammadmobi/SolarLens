@@ -64,8 +64,10 @@ $wasDisabled = $taskInfo -and $taskInfo.State -eq 'Disabled'
 # The finally below switches it back on, whatever happens in between.
 $suspended = $taskInfo -and -not $wasDisabled
 if ($suspended) { Disable-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue | Out-Null }
-if ($taskInfo) { Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue }
+# Everything after the switch-off is inside the try, stopping included, so a
+# failure anywhere still switches the task back on.
 try {
+if ($taskInfo) { Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue }
 # Stop the task first, then its wrapper, then node, then the relay's own Chrome:
 # a Chrome still holding the profile would stop the visible run from starting.
 foreach ($p in @(
