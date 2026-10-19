@@ -258,7 +258,7 @@ try {
   $devVars = Join-Path $InstallDir '.dev.vars'
   $existing = @{}
   if (Test-Path $devVars) {
-    Get-Content $devVars | ForEach-Object {
+    Get-Content $devVars -Encoding UTF8 | ForEach-Object {
       if ($_ -match '^([A-Z0-9_]+)=(.*)$') { $existing[$matches[1]] = $matches[2] }
     }
     Ok 'Found an existing .dev.vars - keeping what is already set'

@@ -455,10 +455,16 @@ async function autoLogin() {
   if (Date.now() - lastLoginAt() < LOGIN_EVERY_MS) {
     throw new Error('session expired - a login was already tried within the hour');
   }
-  // Written before Login is pressed, so a relay that dies mid-login still counts the try.
-  try { writeFileSync(LOGIN_STAMP, String(Date.now())); } catch (e) { log(`could not record the login attempt (${e.message})`); }
+  // Written before Login is pressed, so a relay that dies mid-login still
+  // counts the try. A try that cannot be recorded is not made: the limit would
+  // not hold, so the login goes to the window instead, filled in but not sent.
+  let recorded = true;
+  try { writeFileSync(LOGIN_STAMP, String(Date.now())); } catch (e) {
+    recorded = false;
+    log(`could not record the login attempt (${e.message}) - not logging in by itself`);
+  }
   // The page is on the login form already: that is how a login was found to be needed.
-  if (await fillLogin()) {
+  if (recorded && await fillLogin()) {
     const until = Date.now() + 20_000;
     while (Date.now() < until) {
       await sleep(1000);

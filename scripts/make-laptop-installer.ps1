@@ -47,7 +47,7 @@ $devVars = Join-Path $root '.dev.vars'
 if (-not (Test-Path $devVars)) { Die "No .dev.vars at $devVars - run this on the machine that already works." }
 
 $vars = @{}
-Get-Content $devVars | ForEach-Object {
+Get-Content $devVars -Encoding UTF8 | ForEach-Object {
   if ($_ -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)$') { $vars[$matches[1]] = $matches[2].Trim() }
 }
 
