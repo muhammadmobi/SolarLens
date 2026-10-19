@@ -44,6 +44,14 @@ SOLARLENS_URL=
 # including any shared into it - set this if the account can see someone else's.
 SOLIS_PLANT_IDS=
 
+# --- Optional: the SolisCloud web login, so the relay can log in by itself ---
+# When the relay's seven-day login runs out it logs in again with these, hidden.
+# A window opens only if SolisCloud asks for a puzzle or a code.
+# scripts/make-laptop-installer.ps1 carries them into the installer it writes.
+# PLAIN TEXT: anyone who can read this file can log in to your SolisCloud.
+SOLIS_USERNAME=
+SOLIS_PASSWORD=
+
 # Attach the relay to a Chrome you already have open, instead of it launching
 # its own. Requires that Chrome to have been started with
 #   chrome.exe --remote-debugging-port=9222

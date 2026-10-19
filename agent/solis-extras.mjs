@@ -101,6 +101,13 @@ export async function readPeriods(page, portal, plantId, { backfill = false, max
 
   // Walk back a year at a time with the chart's own "previous" button, as far
   // as the first year the Lifetime view reported, stopping at an empty year.
+  //
+  // Best effort, and never at the cost of what was read above. SolisCloud's
+  // October 2026 redesign dropped the button this looked for, and a click that
+  // could not find it threw away this month, this year and the lifetime with
+  // it - then the relay tried again every cycle, since a failed read is never
+  // marked done. Earlier years do not change once written, and the Worker keeps
+  // what it was sent before, so a backfill that stops early loses nothing new.
   if (backfill) {
     const years = (lifetime ?? []).map((p) => Number(p.year ?? String(p.dateStr ?? '').slice(0, 4))).filter(Boolean);
     const first = years.length ? Math.min(...years) : new Date().getFullYear() - maxYears;
@@ -108,7 +115,12 @@ export async function readPeriods(page, portal, plantId, { backfill = false, max
     for (let y = new Date().getFullYear() - 1, n = 0; y >= first && n < maxYears; y--, n++) {
       const wait = waitFor(page, '/api/chart/station/year', (b) => String(b.year) === String(y))
         .then((r) => r.json()).catch(() => null);
-      await previous.click({ timeout: 10_000 });
+      try {
+        await previous.click({ timeout: 10_000 });
+      } catch {
+        out.backfillStopped = `no "previous year" button on the chart - earlier years kept as already sent`;
+        break;
+      }
       const json = await wait;
       const points = Array.isArray(json?.data) ? json.data : [];
       if (!points.length) break;

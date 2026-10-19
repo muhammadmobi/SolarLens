@@ -21,6 +21,12 @@ param(
   [string] $WorkerUrl  = '',
   [string] $IngestToken = '',
   [string] $PlantIds   = '',
+  # The SolisCloud login, from an installer that carries one. Base64 only so a
+  # batch file cannot mangle its characters - that is not protection: it is
+  # written to .dev.vars as plain text, and the relay types it into the login
+  # form when the seven-day login runs out.
+  [string] $SolisUserB64     = '',
+  [string] $SolisPasswordB64 = '',
   [switch] $NoTask,
   # Use the Chrome you already have open, with the logins already in it,
   # instead of the agent running a second one of its own.
@@ -249,6 +255,11 @@ try {
   if (-not $WorkerUrl)   { $WorkerUrl   = $existing['SOLARLENS_URL'] }
   if (-not $IngestToken) { $IngestToken = $existing['INGEST_TOKEN'] }
   if (-not $PlantIds)    { $PlantIds    = $existing['SOLIS_PLANT_IDS'] }
+  $fromB64 = { param($s) if ($s) { [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($s)) } else { '' } }
+  $SolisUser     = & $fromB64 $SolisUserB64
+  $SolisPassword = & $fromB64 $SolisPasswordB64
+  if (-not $SolisUser)     { $SolisUser     = $existing['SOLIS_USERNAME'] }
+  if (-not $SolisPassword) { $SolisPassword = $existing['SOLIS_PASSWORD'] }
 
   if (-not $WorkerUrl) {
     $WorkerUrl = Read-Host '    Worker URL (e.g. https://solar-lens.<you>.workers.dev)'
@@ -273,6 +284,11 @@ try {
     "INGEST_TOKEN=$IngestToken"
   )
   if ($PlantIds) { $lines += "SOLIS_PLANT_IDS=$PlantIds" }
+  if ($SolisUser -and $SolisPassword) {
+    $lines += '# The SolisCloud login, typed into the login form when it runs out. Plain text: keep this file private.'
+    $lines += "SOLIS_USERNAME=$SolisUser"
+    $lines += "SOLIS_PASSWORD=$SolisPassword"
+  }
   if ($UseMyChrome) {
     $lines += '# Attach to the Chrome you already have open rather than running one.'
     $lines += "RELAY_CDP=http://127.0.0.1:$DebugPort"
@@ -284,7 +300,7 @@ try {
     $lines += 'RELAY_HEADLESS=1'
   }
   foreach ($k in $existing.Keys) {
-    if ($k -notin @('SOLARLENS_URL','INGEST_TOKEN','SOLIS_PLANT_IDS','RELAY_HEADLESS','RELAY_CDP')) {
+    if ($k -notin @('SOLARLENS_URL','INGEST_TOKEN','SOLIS_PLANT_IDS','SOLIS_USERNAME','SOLIS_PASSWORD','RELAY_HEADLESS','RELAY_CDP')) {
       $lines += "$k=$($existing[$k])"
     }
   }
@@ -418,14 +434,23 @@ try {
       @{ What = 'for the current user';     User = $null }
     )
 
+    # Logon starts the relay; a check every ten minutes starts it again if it
+    # has stopped. "Restart on failure" above covers only a task that fails to
+    # start - not a relay that starts and later exits with an error - so a
+    # relay that stopped stayed down until the next logon: on 27 September 2026
+    # one stopped and stayed down for nine days. While it runs, the check does
+    # nothing: a second copy is never started beside a running one (the
+    # settings' default, IgnoreNew). The interval has no end date.
+    $every10 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 10)
+
     $registered = $false
     foreach ($a in $attempts) {
       try {
         $p = @{
           TaskName = 'SolarLens relay'; Action = $action; Settings = $set; Force = $true
-          Description = 'Relays SolisCloud readings to the SolarLens Worker. Runs hidden.'
-          Trigger = if ($a.User) { New-ScheduledTaskTrigger -AtLogOn -User $a.User }
-                    else         { New-ScheduledTaskTrigger -AtLogOn }
+          Description = 'Relays SolisCloud readings to the SolarLens Worker. Runs hidden; started at logon, and again within ten minutes if it stops.'
+          Trigger = @($(if ($a.User) { New-ScheduledTaskTrigger -AtLogOn -User $a.User }
+                        else         { New-ScheduledTaskTrigger -AtLogOn }), $every10)
         }
         if ($a.User) {
           $p.Principal = New-ScheduledTaskPrincipal -UserId $a.User -LogonType Interactive -RunLevel Limited

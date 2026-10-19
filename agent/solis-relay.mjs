@@ -93,6 +93,15 @@ const INTERVAL_MS = Math.max(1, Number(process.env.RELAY_INTERVAL_MIN ?? 5)) * 6
 const HEADLESS = process.env.RELAY_HEADLESS === '1';
 const PROFILE = resolve(process.env.RELAY_PROFILE ?? '.relay-profile');
 const CDP = process.env.RELAY_CDP ?? '';
+// The SolisCloud username and password, if the owner chose to keep them here
+// (in .dev.vars, which setup writes from the installer). With them, a relay
+// whose seven-day login has run out opens a window on the login page with both
+// filled in, so the person only agrees to the terms, solves the puzzle and
+// presses Log in - nobody has to find and run a file first. Only ever typed
+// into SolisCloud's own login form; never logged, never sent anywhere else.
+const SOLIS_USERNAME = process.env.SOLIS_USERNAME ?? '';
+const SOLIS_PASSWORD = process.env.SOLIS_PASSWORD ?? '';
+const CAN_FILL = Boolean(SOLIS_USERNAME && SOLIS_PASSWORD);
 let attached = null;
 const PORTAL = 'https://www.soliscloud.com';
 
@@ -100,11 +109,19 @@ const PORTAL = 'https://www.soliscloud.com';
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A failure nobody was waiting for must not end the relay. Node stops the whole
+// process on an unhandled rejection, and this one runs hidden: a relay that
+// stops is down until something starts it again - one stopped on 27 September
+// 2026 with exit code 1 and stayed down for nine days. Every wait below handles
+// its own failure; this is the net under them, and it says what it caught.
+process.on('unhandledRejection', (e) => log(`ignored a failure nothing was waiting for: ${String(e?.message ?? e).split('\n')[0]}`));
+
 mkdirSync(PROFILE, { recursive: true });
 const firstRun = !existsSync(resolve(PROFILE, 'Default'));
 // Attached to someone's own Chrome, this profile folder is never used, so its
-// being empty says nothing about whether there is a login.
-if (HEADLESS && firstRun && !CDP) {
+// being empty says nothing about whether there is a login. With a saved
+// username and password a hidden first run is fine: it opens its own window.
+if (HEADLESS && firstRun && !CDP && !CAN_FILL) {
   console.error('No saved session yet - run once without RELAY_HEADLESS=1 and log in, then go headless.');
   process.exit(2);
 }
@@ -187,7 +204,7 @@ async function killStaleProfileHolders() {
  * (-UseMyChrome), or a Chrome of its own with a persistent profile folder,
  * which is where the SolisCloud login is kept between runs.
  */
-async function launchContext() {
+async function launchContext(headless = HEADLESS) {
   // Attach to a browser that is already running, rather than starting one.
   // Its profile - and so its logins - are whatever that browser already has.
   if (CDP) {
@@ -198,7 +215,7 @@ async function launchContext() {
     return existing;
   }
   return chromium.launchPersistentContext(PROFILE, {
-    headless: HEADLESS,
+    headless,
     viewport: { width: 1280, height: 800 },
     ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
     args: ['--disable-blink-features=AutomationControlled'],
@@ -223,14 +240,18 @@ async function clearStaleSingletonFiles() {
   return cleared;
 }
 
-/** Make sure there is an open page to work in, relaunching the browser if it was closed. */
-async function ensureBrowser() {
+/**
+ * Make sure there is an open page to work in, relaunching the browser if it
+ * was closed. `headless` false opens a window even for a hidden relay - only
+ * ever to let a person log in.
+ */
+async function ensureBrowser(headless = HEADLESS) {
   if (page && !page.isClosed()) return;
   if (ctx) { await ctx.close().catch(() => {}); log('browser was closed - relaunching'); }
 
   if (CDP) {
     try {
-      ctx = await launchContext();
+      ctx = await launchContext(headless);
     } catch (e) {
       throw new Error(
         `${CDP}: could not attach - ${e.message}\n` +
@@ -253,7 +274,7 @@ async function ensureBrowser() {
     const delays = [2000, 8000];
     for (let attempt = 0; ; attempt++) {
       try {
-        ctx = await launchContext();
+        ctx = await launchContext(headless);
         if (attempt) log(`browser started on attempt ${attempt + 1}`);
         break;
       } catch (e) {
@@ -345,8 +366,11 @@ async function ensureLoggedIn() {
     await sleep(500);
   }
   if (!needed) return;
+  if (HEADLESS && !CDP && CAN_FILL) return autoLogin();
   if (HEADLESS) throw new Error('session expired - run headed once to log in again');
-  log('Please log in to SolisCloud in the Chrome window. Waiting…');
+  log(await fillLogin()
+    ? 'Logging in with the saved login. If SolisCloud asks for a puzzle or a code, answer it in the window. Waiting…'
+    : 'Please log in to SolisCloud in the Chrome window. Waiting…');
   const until = Date.now() + 15 * 60_000;
   while (Date.now() < until) {
     await sleep(5000);
@@ -356,28 +380,156 @@ async function ensureLoggedIn() {
 }
 
 /**
+ * Log in with the saved username and password, when there are any: fill both
+ * in, tick the agreement, press Login. Returns whether the form was filled and
+ * sent - not whether the login went through, which the caller watches for.
+ *
+ * The agreement box ("I have read and agree to Privacy Policy and User
+ * Agreement") is ticked for the owner because the owner asked for it, on
+ * 17 October 2026: it is their account, and they tick it at every login. A
+ * puzzle or a verification code, should SolisCloud show one, is different - it
+ * is SolisCloud's check that a person is there, and the relay never answers it:
+ * it leaves it to a person, in a window.
+ *
+ * The form, as of October 2026: a "Username/Email" box, a "Password" box, the
+ * agreement checkbox and an orange Login button (the "Login" above the form is
+ * a title, not a button). The username box is the form's text box that is not
+ * the password, so a translated page still works.
+ */
+async function fillLogin() {
+  if (!CAN_FILL) return false;
+  try {
+    const password = page.locator('input[type=password]').first();
+    await password.waitFor({ timeout: 15_000 });
+    await page.locator('input.el-input__inner:not([type=password])').first().fill(SOLIS_USERNAME, { timeout: 10_000 });
+    await password.fill(SOLIS_PASSWORD, { timeout: 10_000 });
+    const agree = page.locator('.el-checkbox').first();
+    if ((await agree.count()) && !(await agree.evaluate((e) => e.classList.contains('is-checked')))) {
+      await agree.click({ timeout: 10_000 });
+    }
+    await page.locator('button.el-button--primary').filter({ hasText: /log\s?in|sign\s?in/i }).first().click({ timeout: 10_000 });
+    return true;
+  } catch (e) {
+    log(`could not fill in the login form (${e.message.split('\n')[0]}) - log in in the window`);
+    return false;
+  }
+}
+
+/**
+ * A hidden relay whose seven-day login has run out, with a saved username and
+ * password. First it logs in by itself, still hidden - nobody sees anything.
+ * Only if that does not go through (SolisCloud asks for a puzzle or a code, or
+ * the password was refused) does a window open, filled in and sent, for a
+ * person to finish; then it is hidden again. Before this, the relay could only
+ * say on the dashboard that a login was due, and the owner had to find and run
+ * a file.
+ *
+ * One attempt an hour at most, so a refused password is not tried every five
+ * minutes until SolisCloud locks the account, and a laptop nobody is at does
+ * not fill up with windows. Each window stays open for up to an hour; closing
+ * it means "not now". The dashboard says "login expired" meanwhile, as before.
+ */
+const LOGIN_EVERY_MS = 60 * 60_000;
+const WINDOW_OPEN_MS = 60 * 60_000;
+let lastLoginAt = 0;
+async function autoLogin() {
+  if (Date.now() - lastLoginAt < LOGIN_EVERY_MS) {
+    throw new Error('session expired - a login was already tried within the hour');
+  }
+  lastLoginAt = Date.now();
+  // The page is on the login form already: that is how a login was found to be needed.
+  if (await fillLogin()) {
+    const until = Date.now() + 20_000;
+    while (Date.now() < until) {
+      await sleep(1000);
+      if (!(await onLoginPage().catch(() => true))) { log('logged in by itself, hidden - session saved'); return; }
+    }
+  }
+  log('the hidden login did not go through - opening a window for a person');
+  await loginInWindow();
+}
+
+/** The window: the login page, filled in and sent, kept open until the login goes through. */
+async function loginInWindow() {
+  await reportStatus('login-expired');
+  await ctx?.close().catch(() => {});
+  ctx = null;
+  page = null;
+  let done = false;
+  try {
+    await ensureBrowser(false);
+    await page.goto(`${PORTAL}/login`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+    const sent = await fillLogin();
+    log(`SolisCloud login needed - a window is open${sent ? ', logging in with the saved login' : ''}: if SolisCloud asks for a puzzle or a code, answer it there`);
+    const until = Date.now() + WINDOW_OPEN_MS;
+    while (Date.now() < until && !page.isClosed()) {
+      await sleep(5000);
+      if (!(await onLoginPage().catch(() => true))) { done = true; break; }
+    }
+  } finally {
+    // Hidden again either way. Closing the window cleanly is also what writes
+    // the new login to the profile, for the hidden browser to find.
+    await ctx?.close().catch(() => {});
+    ctx = null;
+    page = null;
+    await ensureBrowser();
+  }
+  if (!done) throw new Error('session expired - the login window was closed or left for an hour');
+  log('logged in - session saved');
+}
+
+/**
+ * The plant's own page, newest address first.
+ *
+ * SolisCloud moved it in October 2026, from /station/stationDetails/
+ * generalSituation/<id> to /overview/plantStation/details/overview/<id>. The
+ * old address is gone from the portal's app entirely, and a relay that knew
+ * only that one sat waiting for figures that never came - every cycle, with a
+ * fresh login or without one. Both are tried, newest first, so a portal that
+ * has not moved yet, or moves back, still works.
+ */
+const PLANT_PAGES = [
+  (id) => `${PORTAL}/overview/plantStation/details/overview/${id}`,
+  (id) => `${PORTAL}/station/stationDetails/generalSituation/${id}`,
+];
+
+/**
  * Read one plant the way a person would: open its page, and keep the answers
  * the portal's own scripts fetch - the plant detail and today's curve. The
  * portal signs those requests itself, which is the whole reason this relay
  * drives a real browser.
  */
 async function snapshot(plantId) {
-  // Navigating to the plant page makes the portal fetch detailMix with a
-  // correctly signed request; we simply wait for that response.
-  const wait = page.waitForResponse((r) => r.url().endsWith('/api/station/detailMix') && r.request().method() === 'POST', { timeout: 30_000 });
-  // The same page draws today's curve, so the chart call arrives alongside it.
-  // Catching it costs nothing and fills in the hours this agent was not
-  // running: the energy was generated either way, we simply were not watching.
-  // Never fatal - a missing chart must not cost us the snapshot.
-  const chart = page
-    .waitForResponse((r) => r.url().includes('/api/chart/station/day'), { timeout: 25_000 })
-    .then((r) => r.json())
-    .catch(() => null);
-  await page.goto(`${PORTAL}/station/stationDetails/generalSituation/${plantId}`, { waitUntil: 'domcontentloaded' });
-  const res = await wait;
-  const j = await res.json();
-  if (!j?.data) throw new Error(`detailMix for ${plantId}: ${j?.msg ?? 'no data'}`);
-  return { detail: j.data, chart };
+  let lastError = null;
+  for (const pageFor of PLANT_PAGES) {
+    // Navigating to the plant page makes the portal fetch detailMix with a
+    // correctly signed request; we simply wait for that response. The wait is
+    // given its own failure handler before the page is opened: when the page
+    // itself fails to open - no network yet, just after logon - nobody would
+    // ever await it, and a rejection nobody awaits ends the whole relay.
+    const wait = page
+      .waitForResponse((r) => r.url().endsWith('/api/station/detailMix') && r.request().method() === 'POST', { timeout: 30_000 })
+      .then((r) => r.json(), (e) => ({ failed: e }));
+    // The same page draws today's curve, so the chart call arrives alongside it.
+    // Catching it costs nothing and fills in the hours this agent was not
+    // running: the energy was generated either way, we simply were not watching.
+    // Never fatal - a missing chart must not cost us the snapshot.
+    const chart = page
+      .waitForResponse((r) => r.url().includes('/api/chart/station/day'), { timeout: 25_000 })
+      .then((r) => r.json())
+      .catch(() => null);
+    try {
+      await page.goto(pageFor(plantId), { waitUntil: 'domcontentloaded' });
+    } catch (e) {
+      lastError = e;
+      continue;
+    }
+    const j = await wait;
+    if (j?.failed) { lastError = j.failed; continue; }
+    if (!j?.data) throw new Error(`detailMix for ${plantId}: ${j?.msg ?? 'no data'}`);
+    return { detail: j.data, chart };
+  }
+  throw new Error(`the plant page sent no figures - SolisCloud may have moved it again (${String(lastError?.message ?? lastError).split('\n')[0]})`);
 }
 
 /** Push today's curve, so the graph covers the whole day and not just uptime. */
@@ -501,11 +653,12 @@ async function extras(plantId) {
   if (now - (lastPeriods.get(plantId) ?? 0) >= EXTRAS.periodsEveryMs) {
     const first = !lastPeriods.has(plantId);
     let stored = 0;
-    for (const { which, points } of await readPeriods(page, PORTAL, plantId, { backfill: first })) {
+    const periods = await readPeriods(page, PORTAL, plantId, { backfill: first });
+    for (const { which, points } of periods) {
       stored += (await ingest('/api/ingest/periods', { provider: 'soliscloud', plantId, which, points })).stored ?? 0;
     }
     lastPeriods.set(plantId, now);
-    log(`periods ${plantId}: ${stored} totals${first ? ' (every year)' : ''}`);
+    log(`periods ${plantId}: ${stored} totals${first ? ' (every year)' : ''}${periods.backfillStopped ? ` - ${periods.backfillStopped}` : ''}`);
   }
 }
 

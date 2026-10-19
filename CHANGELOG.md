@@ -18,6 +18,16 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **The relay logs in by itself.** SolisCloud's web login lasts seven days,
+  and renewing it meant noticing the dashboard's warning, then finding and
+  running a file. With the SolisCloud username and password in `.dev.vars`
+  (`SOLIS_USERNAME`, `SOLIS_PASSWORD`), a hidden relay whose login has run
+  out logs in again on its own, still hidden - filling both in, ticking the
+  agreement as the owner asked, pressing Login. Only if SolisCloud asks for a
+  puzzle or a code does a window open, filled in, for a person to answer it;
+  the relay never answers those. One attempt an hour at most. `make-laptop-installer.ps1`
+  carries the login into the installer it writes, and setup writes it to
+  `.dev.vars` - plain text both, for the owner's own machines only.
 - **A proper icon for the guide.** The header's "?" is now an open book with
   the word *Guide* beside it - drawn in the text colour, so it follows the theme
   and inverts while the guide is open - and the book alone on a phone, where the
@@ -82,6 +92,26 @@ checkout of any tag says which release it is.
 
 ### Fixed
 
+- **SolisCloud moved its plant page, and the relay finds it again.** In October
+  2026 the portal dropped `/station/stationDetails/generalSituation/<id>`, the
+  page the relay opened to read a plant, for
+  `/overview/plantStation/details/overview/<id>`. A relay that knew only the old
+  address waited every cycle for figures that never came - with a fresh login
+  or without - so no Solis reading arrived from 15 October. It now opens the
+  new page, and the old one only if the new one sends nothing.
+- **A relay that stops starts again.** A page that failed to open - no network
+  yet, just after logon - left a wait nobody handled, and that ended the whole
+  relay about thirty seconds later. Windows' "restart on failure" covers only a
+  task that fails to start, so the relay stayed down until the next logon - once
+  for nine days. No wait is left unhandled now, a failure nothing was waiting
+  for is logged instead of ending the relay, and the installer adds a check
+  every ten minutes that starts the relay again if it has stopped: run it once
+  on each relay laptop.
+- **The vendor's period totals arrive again.** The redesign also dropped the
+  chart's "previous year" button. Looking for it threw away the month, the year
+  and the lifetime already read, and was tried again every cycle; the walk back
+  through earlier years now stops where the button is missing and keeps the
+  rest - the earlier years were sent long ago and do not change.
 - **The page is no wider than a phone.** The tab bar could not shrink, and on a
   phone it made every page wider than the screen - "Devices" was cut off at the
   edge and "Historical Data" broke over two lines - while the overview's
