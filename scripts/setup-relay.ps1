@@ -367,8 +367,9 @@ try {
     # run here, outside Task Scheduler, and that relay takes the profile back by
     # closing this one's browser - mid-login, if a person is typing.
     $suspended = Suspend-RelayTask
-    Stop-HiddenRelay
     try {
+    # Inside the try, so a failure while stopping still switches the task back on.
+    Stop-HiddenRelay
 
     $profileDir = if ($env:RELAY_PROFILE) { $env:RELAY_PROFILE } else { Join-Path $InstallDir '.relay-profile' }
     $hadSession = Test-Path (Join-Path $profileDir 'Default')
