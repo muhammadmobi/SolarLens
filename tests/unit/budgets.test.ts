@@ -49,7 +49,7 @@ const { HOURLY, createHarness, bearer } = await import('../helpers/worker');
 const { addDay, addSun, addSystem, dayNumber, isoOf } = await import('../helpers/solar-days');
 const { addChannel, parseChannel } = await import('../../src/channels');
 const { subscribe } = await import('../../src/push');
-const { upsertLocation } = await import('../../src/weather');
+const { PLACES_PER_RUN, refreshWeather, upsertLocation } = await import('../../src/weather');
 type Harness = ReturnType<typeof createHarness>;
 
 /** The Free plan's limit on D1 queries in one invocation. */
@@ -134,6 +134,20 @@ describe('D1 queries in one invocation', () => {
     // An ordinary hour after that: the weather and the housekeeping.
     await at(MONDAY_0807 + 2 * 3600);
     expect((await counted(h, () => h.cron(HOURLY))).length).toBeLessThanOrEqual(D1_PER_INVOCATION - 20);
+  });
+
+  it('fetches the weather inside it, however many systems are placed', async () => {
+    await start();
+    for (let i = 0; i < 30; i++) await upsertLocation(h.env.DB, `made-up:station:${i}`, { lat: i + 1, lng: i + 1 });
+    let fetches = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      fetches++;
+      return Response.json({ hourly: { time: [MONDAY_0807 - 420], shortwave_radiation: [300], temperature_2m: [20], cloud_cover: [10] } });
+    }));
+    const run = await counted(h, () => refreshWeather(h.env.DB, MONDAY_0807));
+    // Thirty-one positions, ROOF and GARAGE sharing one: a few fetched now, each with one statement for its systems.
+    expect(fetches).toBe(PLACES_PER_RUN);
+    expect(run.length).toBe(PLACES_PER_RUN + 2);
   });
 
   it("stores a relay's backfilled day inside the limit, however much of it is new or already stored", async () => {

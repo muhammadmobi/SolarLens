@@ -371,7 +371,7 @@ export function figuresIn(t: string): Args | null {
     const m = re.exec(t);
     if (!m) return null;
     const n = Number(m[1]);
-    return /^w|watt/.test(m[2] ?? '') ? n / 1000 : n;
+    return /^(?:w|watts?)$/.test(m[2] ?? '') ? n / 1000 : n;
   };
   const UNIT = '\\s*(kwh|mwh|kw|w|watts?|%|percent|units?)?';
   let above = amount(new RegExp(`\\b(?:above|over|more than|greater than|higher than|exceed\\w*|at least|beyond)\\s+(-?\\d+(?:\\.\\d+)?)${UNIT}`));

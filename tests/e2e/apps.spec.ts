@@ -13,6 +13,8 @@ import { NOW, devices, deviceHistory, inverters, series } from '../fixtures/dash
 
 const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
 const APPROVAL = '/oauth/authorize?response_type=code&client_id=made-up-client&state=s';
+/** A text matched as itself inside a RegExp: every character a pattern gives a meaning to, escaped. */
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 interface World { signedIn: 'owner' | null; apps: Record<string, unknown>[]; deleted: string[] }
 
@@ -86,7 +88,7 @@ test.describe("going back to an app's approval page", () => {
     await page.goto(`/?next=${encodeURIComponent(APPROVAL)}#/settings`);
     await page.locator('#pw').fill('correct horse battery');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`${APPROVAL.replace(/[?]/g, '\\?')}$`));
+    await expect(page).toHaveURL(new RegExp(`${escapeRegExp(APPROVAL)}$`));
     await expect(page.getByRole('heading', { name: 'The approval page' })).toBeVisible();
   });
 

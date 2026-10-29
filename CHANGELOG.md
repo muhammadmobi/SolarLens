@@ -155,7 +155,8 @@ because of the login - though nothing locks until the owner turns it on.
   card for up to five places that get the same alerts as a phone - told once
   each, one post a run however many - and a summary every Monday. Each is
   tested the moment it is added, and Settings shows how its last post went, in
-  the service's own words. The token or address posting takes is encrypted
+  the service's own words - with anything of the token, chat, topic or address
+  it echoed back taken out. The token or address posting takes is encrypted
   with AES-GCM under a key derived from `SECRET_KEY` (or `API_TOKEN` without
   one), never served and never logged; only `https://` to a named host is accepted; Discord is told to ping
   nobody and Telegram's HTML is escaped. A channel taking alerts counts as a
@@ -207,7 +208,9 @@ because of the login - though nothing locks until the owner turns it on.
 - **Output measured against the weather.** Each system's position is read
   from its vendor's plant record and kept for the owner alone, and every hour
   the Worker asks Open-Meteo - at the position rounded to about a kilometre -
-  for the sunlight, temperature and cloud there. Each system learns its own
+  for the sunlight, temperature and cloud there: once for all the systems at
+  one position, and at most six positions an hour, so a run stays inside the
+  free plan's limits however many systems there are. Each system learns its own
   performance ratio from its last fortnight's sunny days (the median, so one
   odd day does not move it). The day curve carries a dashed line of what the
   sun allowed; the system's page has an *Against the weather* card; and an
@@ -543,7 +546,12 @@ From a review of the whole repository, before the release:
   version.
 
 - **The page escapes the apostrophe too**, so text is safe in an attribute
-  quoted either way.
+  quoted either way. The link in a Telegram alert escapes the double quote.
+
+- **Dependencies brought up to date.** Hono 4.13.14, past an advisory on its
+  `serveStatic` (GHSA-5r4p-p66f-jhc7), which SolarLens does not use - but what
+  ships is clean again; and wrangler 4.155, with the `undici` and Vite under
+  it, in the tools that build and test.
 
 - **Who may change what, tested**: `tests/unit/access.test.ts` reads every
   write route from the source and fails if one is not placed - the owner's, a

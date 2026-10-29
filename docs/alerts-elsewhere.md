@@ -94,7 +94,9 @@ an automation with a webhook trigger receives it as `trigger.json`.
 
 Settings shows each place's state: *delivered 2 h ago*, or *failing 3 times in
 a row: HTTP 401: Invalid Webhook Token* - the service's own words where it gives
-them, or a few of ours. A failed post is not tried again; the next alert or
+them, or a few of ours. Anything of your token, chat, topic or address that a
+service echoes back is taken out before the words are kept. A failed post is
+not tried again; the next alert or
 summary goes as normal, and *Send a test* tells you when it works again.
 
 ## How the secrets are kept

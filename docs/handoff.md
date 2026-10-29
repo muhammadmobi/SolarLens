@@ -90,8 +90,7 @@ website; and the local branches already merged, which can go.
 
 **Every week:** renew a SolisCloud login when the dashboard says (section 7).
 
-**Next:** a dependency update in one pull request (wrangler, for `undici`), and
-the items left on purpose in section 14.
+**Next:** the items left on purpose in section 14.
 
 Rewrite this part whenever it stops being true: it is the one place in this
 file that describes a moment rather than the system.
@@ -188,7 +187,7 @@ rate per address when the `RATE_LIMIT` binding is set.
 | `src/auth/routes.ts` | The sign-in routes under `/auth`, Settings, and share links at `/s/`. A password keyed before `SECRET_KEY` was set is moved over the next time it signs in (`passwordMatches`). |
 | `src/auth/webauthn.ts` | Passkeys: the CBOR, the keys and the two ceremonies, verified with WebCrypto. A passkey must be unlocked - a fingerprint, a face or the PIN - not only touched. |
 | `src/auth/crypto.ts` | Tokens, hashes, HMAC, sealing and the password, all WebCrypto - and the key secret every key comes from: `keySecret` (`SECRET_KEY`, else `API_TOKEN`), with `previousKeySecret` for what was keyed with `API_TOKEN` before `SECRET_KEY` was set. |
-| `src/weather.ts` | Each system's position (from the vendor's plant record, owner-only) and its hourly weather from Open-Meteo, fetched by the hourly cron. |
+| `src/weather.ts` | Each system's position (from the vendor's plant record, owner-only) and its hourly weather from Open-Meteo, fetched by the hourly cron: once per position however many systems share it, and at most `PLACES_PER_RUN` positions a run, so the run's queries and fetches stay bounded. |
 | `src/settings.ts` | The owner's settings in `app_settings`: the tariff and the systems' groups, each checked (`parseTariff`, `parseGroups`) before it is kept. Groups are stored by real id and served by alias. The page does the money sums (`valueOf` in `public/index.html`). |
 | `src/expected.ts` | What each system should make of its sun: its performance ratio learned from its recent sunny days, and today's expected output. |
 | `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, and sends the raw payload only as its alert fields and a cleaned `telemetry` copy. |
@@ -622,11 +621,6 @@ purpose. `docs/feature-gaps.md` is the honest list. SolarMan alarm detail and no
   `node scripts/make-vapid-key.mjs` has run, the Alerts tab says notifications to
   a closed browser are not set up - which is the state to check first when a
   phone is not being told anything.
-- **The screenshot comparison has nothing to compare with yet.** No picture is
-  committed under `tests/visual/__screenshots__/linux/`, so each run records
-  its own and passes. The last step before 3.0 is merged adds the files of a
-  run's **visual-baselines** artifact to that folder (section 1); from then on
-  a view that changes fails the job.
 - **On GitHub, outside the code:** Pages is not on yet, so the demo and the
   README's link to it answer 404 until it is (section 11 says how), and the
   repository's About box - description, website, topics - is empty.

@@ -297,8 +297,8 @@ export function testMessage(c: { alerts: boolean | number; weekly: boolean | num
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-/** Telegram's HTML wants these three escaped, and nothing else. */
-const html = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** Telegram's HTML wants these three escaped in text, and the double quote too inside an attribute - the link's href. */
+const html = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const NTFY_TAGS: Record<Message['kind'], string> = { alert: 'warning', summary: 'sunny', test: 'white_check_mark' };
 const DISCORD_COLOURS: Record<Message['kind'], number> = { alert: 0xd64545, summary: 0xf0a030, test: 0x3c9d5d };
 
@@ -360,16 +360,28 @@ const HINTS: Record<number, string> = {
  * Telegram's `description`, Discord's `message`, ntfy's `error` - cut to a few
  * plain words. A generic webhook's answer is not read at all: it could echo
  * anything.
+ *
+ * The others could echo what they were sent, and the words are kept on the
+ * channel's row and shown in Settings. So before anything is cut, out comes
+ * every value of the channel's config - the token, the chat, the topic, the
+ * address - and any long unbroken run, which no service's words are and a key
+ * echoed in some form of its own would be.
  */
-async function refusal(kind: ChannelKind, res: Response): Promise<string> {
-  if (kind === 'webhook') { await res.body?.cancel(); return ''; }
+async function refusal(config: ChannelConfig, res: Response): Promise<string> {
+  if (config.kind === 'webhook') { await res.body?.cancel(); return ''; }
   const text = (await res.text().catch(() => '')).slice(0, 2000);
   let said: unknown;
   try {
     const j = JSON.parse(text) as Record<string, unknown>;
-    said = kind === 'telegram' ? j.description : kind === 'discord' ? j.message : j.error;
+    said = config.kind === 'telegram' ? j.description : config.kind === 'discord' ? j.message : j.error;
   } catch { return ''; }
-  return typeof said === 'string' ? said.replace(/[^\w .,:'()-]/g, '').slice(0, 80).trim() : '';
+  if (typeof said !== 'string') return '';
+  let words = said;
+  for (const [k, v] of Object.entries(config)) {
+    // A value of a character or three names nothing, and taking it out would break the words apart.
+    if (k !== 'kind' && typeof v === 'string' && v.length >= 4) words = words.split(v).join(' ');
+  }
+  return words.replace(/\S{24,}/g, ' ').replace(/[^\w .,:'()-]/g, '').replace(/ {2,}/g, ' ').slice(0, 80).trim();
 }
 
 /**
@@ -405,7 +417,7 @@ export async function resealChannels(env: Env): Promise<void> {
 /**
  * Post one message to one channel, and record how it went on the channel's
  * row: when it last worked, or the last failure and how many in a row. The
- * failure is a status and a few words, never the address.
+ * failure is a status and a few words, never the address or the token.
  */
 export async function deliver(env: Env, row: ChannelRow, msg: Message, now = nowSec()): Promise<{ ok: boolean; error?: string }> {
   const config = await configOf(env, row);
@@ -421,7 +433,7 @@ export async function deliver(env: Env, row: ChannelRow, msg: Message, now = now
       const res = await fetch(url, { ...init, signal: AbortSignal.timeout(POST_TIMEOUT_MS) });
       status = res.status;
       if (res.ok) await res.body?.cancel();
-      else said = await refusal(row.kind, res);
+      else said = await refusal(config, res);
     } catch (e) {
       // The error's own message can carry the address, so only its kind is kept.
       failure = e instanceof Error && e.name === 'TimeoutError' ? 'no answer in 10 s' : 'could not connect';

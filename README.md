@@ -861,7 +861,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**898 unit tests**, **596 end-to-end tests** (298 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**902 unit tests**, **596 end-to-end tests** (298 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -1095,7 +1095,7 @@ or a SolisCloud login, so a fork gets the same checks.
 | **End-to-end tests** | Dashboard regressions on desktop and mobile Chrome. On failure the screenshots and traces are attached. |
 | **Build check** | A Worker that would not bundle, found by `wrangler deploy --dry-run`, which uploads nothing. |
 | **Integration (real Worker)** | What only workerd can show: the page from the assets binding with its security headers, cookies surviving the header rebuild, the password and passkeys in workerd's WebCrypto, and the deploy's own smoke test passing against a real Worker. Started by wrangler on a throwaway local database with made-up tokens - `npm run test:integration`. |
-| **Screenshot comparison** | A view that looks different from its recorded picture - a colour gone, a card collapsed - at a fixed moment of the demo. Pictures are recorded on Linux in CI (`tests/visual/__screenshots__/linux/`); a view without one gets one recorded and the run says so, and after that any difference fails, with before, after and the difference attached. None is committed yet: until a run's **visual-baselines** artifact is added to that folder, each run records its own pictures and so compares nothing. |
+| **Screenshot comparison** | A view that looks different from its recorded picture - a colour gone, a card collapsed - at a fixed moment of the demo. Pictures are recorded on Linux in CI and committed under `tests/visual/__screenshots__/linux/`; any difference fails, with before, after and the difference attached. A view without a picture fails too: the run records one and attaches it as the **visual-baselines** artifact, to be looked at and committed. |
 | **Lighthouse** | The demo scoring under 0.95 for accessibility or 0.9 for best practices (performance under 0.8 is a warning). The reports are attached to the run, not sent anywhere. |
 | **Privacy, attribution and headers** | The four guards below. |
 | **Relay scripts (Windows)** | PowerShell that will not parse, analyser errors, and a relay that hangs instead of refusing when its settings are missing. |

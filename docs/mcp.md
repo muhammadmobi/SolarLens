@@ -110,7 +110,9 @@ approval page does not.
 ## The protocol, for the curious
 
 Streamable HTTP in its simplest form: each JSON-RPC message is POSTed to `/mcp`
-and answered with JSON. There is no event stream and no session, since the
+and answered with JSON. A batch carries up to 50 messages; a larger one is
+refused whole, with an `Invalid Request` error that says so, rather than
+answered in part. There is no event stream and no session, since the
 server never speaks first; `GET` and `DELETE` answer `405`. It speaks protocol
 versions `2025-06-18`, `2025-03-26` and `2024-11-05`, and answers `initialize`,
 `ping`, `tools/list` - each tool with its arguments as JSON Schema and marked
