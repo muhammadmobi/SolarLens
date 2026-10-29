@@ -98,7 +98,7 @@ describe('arguments', () => {
     expect(s.properties.from.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
     expect((jsonSchemaOf(toolByName('performance_trend')!) as { properties: Record<string, unknown> }).properties.weeks)
       .toMatchObject({ type: 'integer', minimum: 8, maximum: 26 });
-    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'energy', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
+    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'energy', 'power_day', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
   });
 });
 
@@ -426,6 +426,149 @@ describe('report', () => {
     expect(r.title).toBe('Report: Roof');
     expect(r.sections?.map((s) => s.tool)).toEqual(['energy', 'stats', 'faults', 'performance_trend']);
     expect(r.rows).toEqual(expect.arrayContaining([['Best day', 'Sat 1 Aug 2026: 20 kWh'], ['Worst day', 'Sat 1 Aug 2026: 20 kWh']]));
+  });
+});
+
+/** Readings as given: a day, a clock time on UTC (the systems here keep it), watts, and the day counter. */
+async function addReadings(id: string, points: [string, string, number, number | null][]) {
+  for (const [iso, hhmm, w, kwh] of points) {
+    const ts = dayNumber(iso) * DAY + Number(hhmm.slice(0, 2)) * 3600 + Number(hhmm.slice(3, 5)) * 60;
+    await h.env.DB.prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, today_kwh, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', ?3, ?4, '{}', 0)")
+      .bind(id, ts, w, kwh).run();
+  }
+}
+
+/** Sun 27 Sep: a cloud at 12:30 takes the power from 4 kW to 1 kW, one reading every quarter of an hour. */
+const CLOUDY: [string, number, number][] = [
+  ['11:45', 2000, 10], ['12:00', 3000, 10.6], ['12:15', 4000, 11.5], ['12:30', 1000, 12.1], ['12:45', 3500, 12.7],
+  ['13:00', 3000, 13.5], ['13:15', 2500, 14.2], ['13:30', 2000, 14.8], ['13:45', 1500, 15.2], ['14:00', 1000, 15.5], ['14:15', 500, 15.7],
+];
+
+describe('power_day', () => {
+  it('gives what was made between two times, from the day counter, and how steady the power was', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addReadings(ROOF, CLOUDY.map(([t, w, k]): [string, string, number, number] => ['2026-09-27', t, w, k]));
+    const r = await run('power_day', { date: '2026-09-27', start: '12:00', end: '14:00' });
+    expect(r.period).toEqual({ from: '2026-09-27', to: '2026-09-27', label: 'Sun 27 Sep 2026, 12:00–14:00' });
+    // 15.5 at 14:00 less 10.6 at 12:00; one fall of a quarter of the peak or more (4 kW to 1 kW);
+    // 9 kW of rises and falls against 4 kW for one smooth rise and fall.
+    expect(r.rows).toEqual([['Roof', 4.9, 2.39, 4, '12:15', 1, 1, 3, 2.3, '12:00–14:00', 9]]);
+    expect(r.facts).toMatchObject({ made_kwh: 4.9, peak_at: '12:15', sharp_drops: 1, biggest_drop_at: '12:30', up_and_down: 2.3 });
+    expect(r.summary).toBe('Roof made 4.9 kWh between 12:00 and 14:00, 2.39 kW on average while making power, highest 4 kW at 12:15: '
+      + '1 sharp drop (the biggest 3 kW at 12:30), going up and down 2.3 times as much as a smooth stretch.');
+    expect(r.sections?.[0]).toMatchObject({ title: 'Hour by hour', columns: ['Hour', 'Roof (kW)'], rows: [['12:00', 2.88], ['13:00', 2.25], ['14:00', 1]] });
+    noIds(r);
+  });
+
+  it('takes the whole day when no time is named, and says when it was making power', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addReadings(ROOF, CLOUDY.map(([t, w, k]): [string, string, number, number] => ['2026-09-27', t, w, k]));
+    const r = await run('power_day', { date: 'yesterday' });
+    expect(r.facts).toMatchObject({ made_kwh: 15.7, making_from: '11:45', making_to: '14:15', up_and_down: 1.9, readings: 11 });
+    expect(r.summary).toContain('making power from 11:45 to 14:15');
+  });
+
+  it('says so when a time has no readings, and refuses a time that runs backwards or a day to come', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addReadings(ROOF, CLOUDY.map(([t, w, k]): [string, string, number, number] => ['2026-09-27', t, w, k]));
+    const r = await run('power_day', { date: '2026-09-27', start: '20:00', end: '22:00' });
+    expect(r.summary).toBe('Roof: no readings between 20:00 and 22:00.');
+    // At 09:00, ten o'clock has not come yet today.
+    expect((await run('power_day', { start: '10:00', end: '12:00' })).summary).toBe('It is not yet 10:00 today where Roof is.');
+    await expect(run('power_day', { start: '16:00', end: '14:00' })).rejects.toThrow('comes after its start');
+    await expect(run('power_day', { date: '2026-09-29' })).rejects.toThrow('has not happened yet');
+    await expect(run('power_day', { start: '2pm' })).rejects.toThrow('right form');
+  });
+
+  it('adds systems together, and reads a system with no day counter from its power, from the first reading it has', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    await addReadings(ROOF, CLOUDY.map(([t, w, k]): [string, string, number, number] => ['2026-09-27', t, w, k]));
+    // Garage keeps no day counter, misses one power figure, and its readings begin and end inside the time.
+    await addReadings(GARAGE, [['2026-09-27', '12:40', null as unknown as number, null], ['2026-09-27', '12:50', 1000, null], ['2026-09-27', '13:00', 1200, null], ['2026-09-27', '13:30', 800, null]]);
+    const r = await run('power_day', { date: '2026-09-27', start: '12:00', end: '14:00' });
+    // 12:40-12:50 at 500 W on average and 12:50-13:00 at 1100 W: 267 Wh; 13:00-13:30 is too far apart to count.
+    expect(r.facts).toMatchObject({ s1_made_kwh: 4.9, s2_made_kwh: 0.3, total_made_kwh: 5.2, s2_peak_at: '13:00', s2_sharp_drops: 0, s2_biggest_drop_kw: null, s2_up_and_down: 0.8 });
+    expect(r.summary.startsWith('Together 5.2 kWh between 12:00 and 14:00 on Sun 27 Sep 2026. Roof made 4.9 kWh')).toBe(true);
+    expect(r.summary).toContain('Garage made 0.3 kWh between 12:00 and 14:00, 1 kW on average while making power, highest 1.2 kW at 13:00: steady, with no sharp drops.');
+    expect(r.notes).toEqual(expect.arrayContaining(["Garage's readings that day begin at 12:40, so it is counted from then.", "Garage's readings stop at 13:30."]));
+    expect(r.sections?.[0].columns).toEqual(['Hour', 'All systems (kW)', 'Roof (kW)', 'Garage (kW)']);
+    expect(r.sections?.[0].rows).toEqual([['12:00', 3.38, 2.88, 0.5], ['13:00', 3.25, 2.25, 1], ['14:00', 1, 1, null]]);
+  });
+
+  it('says a stretch made no power, and refuses a date that is not one', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addReadings(ROOF, [['2026-09-27', '20:00', 0, 30], ['2026-09-27', '20:15', 0, 30]]);
+    const r = await run('power_day', { date: '2026-09-27', start: '19:00', end: '21:00' });
+    expect(r.summary).toBe('Roof made no power between 19:00 and 21:00.');
+    expect(r.facts).toMatchObject({ made_kwh: 0, peak_at: null, making_from: null, average_kw: null });
+    await expect(run('power_day', { date: '2026-13-45' })).rejects.toThrow('A date is written YYYY-MM-DD');
+  });
+});
+
+describe('outages', () => {
+  it('finds each stretch of daylight with no readings, the one still going, and the last power', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    const every10 = (iso: string, from: number, to: number, w: number) =>
+      Array.from({ length: (to - from) / 10 + 1 }, (_, i) => [iso, `${String(Math.floor((from + i * 10) / 60)).padStart(2, '0')}:${String((from + i * 10) % 60).padStart(2, '0')}`, w, null] as [string, string, number, null]);
+    // Sunday: 07:00 to 11:00, nothing until 13:00, then to 19:00 - dark from 17:00. Monday from 06:30 to 08:00, then nothing.
+    await addReadings(ROOF, [...every10('2026-09-27', 420, 660, 2000), ...every10('2026-09-27', 780, 1020, 2000), ...every10('2026-09-27', 1030, 1140, 0),
+      ...every10('2026-09-28', 390, 480, 500)]);
+    const r = await run('outages', {});
+    expect(r.period?.label).toBe('the last 7 days (22 – 28 Sep 2026)');
+    expect(r.rows).toEqual([
+      ['Roof', 'Mon 28 Sep 2026 08:00', 'not yet', '1 h'],
+      ['Roof', 'Sun 27 Sep 2026 11:00', 'Sun 27 Sep 2026 13:00', '2 h'],
+    ]);
+    expect(r.facts).toMatchObject({ reporting_now: 'no', quiet_since: 'Mon 28 Sep 2026 08:00', last_power_at: 'Mon 28 Sep 2026 08:00', last_power_kw: 0.5, outages: 2 });
+    // The night between them, 19:00 to 06:30, is not an outage.
+    expect(r.summary).toBe('Roof has not reported since Mon 28 Sep 2026 08:00, 1 h ago, in daylight. The vendor may be down, or the logger may have lost its network. '
+      + 'It last made power at Mon 28 Sep 2026 08:00 (0.5 kW). In the last 7 days (22 – 28 Sep 2026) it went quiet in daylight 2 times, 3 h of daylight in all; '
+      + 'the longest from Sun 27 Sep 2026 11:00 to Sun 27 Sep 2026 13:00.');
+    noIds(r);
+  });
+
+  it('says a system is reporting, one has never reported, and reads daylight from the sunlight', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    await addSun(h.env.DB, ROOF, '2026-09-28', 5);
+    await addReadings(ROOF, Array.from({ length: 36 }, (_, i): [string, string, number, null] =>
+      ['2026-09-28', `${String(6 + Math.floor(i / 12)).padStart(2, '0')}:${String((i % 12) * 5).padStart(2, '0')}`, 1500, null]));
+    const r = await run('outages', {});
+    expect(r.facts).toMatchObject({ s1_reporting_now: 'yes', s1_outages: 0, s2_reporting_now: 'no', s2_last_reading: null, s2_last_power_at: null });
+    expect(r.summary).toBe('Roof is reporting now (last reading 08:55). It last made power at Mon 28 Sep 2026 08:55 (1.5 kW). '
+      + 'In the last 7 days (22 – 28 Sep 2026) it never went quiet in daylight. '
+      + 'Garage has not reported at all. It made no power in the last 7 days (22 – 28 Sep 2026). In the last 7 days (22 – 28 Sep 2026) it never went quiet in daylight.');
+  });
+
+  it('lists the 20 most recent stretches when there are more', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    // Two readings a day, at 07:00 and noon: every afternoon and every morning is a stretch of daylight without one.
+    const days = Array.from({ length: 12 }, (_, i) => isoOf(dayNumber('2026-09-16') + i));
+    await addReadings(ROOF, days.flatMap((d): [string, string, number, null][] => [[d, '07:00', 2000, null], [d, '12:00', 2000, null]]));
+    const r = await run('outages', { from: '2026-09-16', to: '2026-09-27' });
+    expect(r.rows).toHaveLength(20);
+    expect(r.notes.at(-1)).toMatch(/^The 20 most recent of 2\d are listed\.$/);
+    expect(r.rows[0]).toEqual(['Roof', 'Sun 27 Sep 2026 12:00', 'not yet', '5 h']);
+  });
+
+  it('calls silence after dark expected for a system with no battery, and points a relay-fed one at the relay by day', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5, provider: 'soliscloud' });
+    const hours = Array.from({ length: 13 }, (_, i) => ['2026-09-27', `${String(7 + i).padStart(2, '0')}:00`, i < 10 ? 3000 : 0, null] as [string, string, number, null]);
+    await addReadings(ROOF, hours.flatMap(([d, t, w]) => [[d, t, w, null], [d, t.replace(':00', ':20'), w, null], [d, t.replace(':00', ':40'), w, null]] as [string, string, number, null][]));
+    const night = await runTool(h.env.DB, 'outages', {}, Date.UTC(2026, 8, 27, 22) / 1000);
+    if ('error' in night) throw new Error(night.error);
+    expect(night.result.summary).toContain('has not reported since Sun 27 Sep 2026 19:40, 2 h 20 min ago: it went quiet after dark, when an inverter without a battery switches off, so this is expected until sunrise.');
+    expect(night.result.summary).toContain('It last made power at Sun 27 Sep 2026 16:40 (3 kW).');
+    const morning = await runTool(h.env.DB, 'outages', {}, Date.UTC(2026, 8, 28, 10) / 1000);
+    if ('error' in morning) throw new Error(morning.error);
+    expect(morning.result.summary).toContain('after dark, and it has not come back. Its figures come through the relay: check the relay laptop is on and its SolisCloud login is current (Devices tab).');
+    // Days later, the silence is said in days, and its daylight in hours.
+    const later = await runTool(h.env.DB, 'outages', {}, Date.UTC(2026, 8, 30, 12) / 1000);
+    if ('error' in later) throw new Error(later.error);
+    expect(later.result.summary).toContain('has not reported since Sun 27 Sep 2026 19:40, 2 days 16 h ago');
+    expect(later.result.facts.daylight_without_readings).toBe('25 h');
+    await expect(run('outages', { from: '2026-07-01', to: '2026-09-27' })).rejects.toThrow('a month at most');
   });
 });
 

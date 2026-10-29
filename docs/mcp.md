@@ -9,11 +9,12 @@ https://<your SolarLens>/mcp
 
 Settings (the gear) → **Connected apps** shows it, with a Copy button.
 
-The app gets the same nine read-only tools as the assistant on the Ask tab
+The app gets the same eleven read-only tools as the assistant on the Ask tab
 (see [ask-solarlens.md](ask-solarlens.md#the-tools)): what each system is doing
-now, energy over any period, systems compared per kWp, statistics, faults, why a
-day was low, whether a system is slowly making less, a full report on a period,
-and how to do something in SolarLens. SolarLens works out every figure, and each
+now, whether it is offline and since when, energy over any period, a day's power
+hour by hour and between two times, systems compared per kWp, statistics,
+faults, why a day was low, whether a system is slowly making less, a full report
+on a period, and how to do something in SolarLens. SolarLens works out every figure, and each
 answer says the period it covers and how fresh its data is. An app like Claude
 then works as a chatbot over your systems: it holds the conversation, and asks
 SolarLens for the figures.
@@ -57,7 +58,7 @@ Changing `API_TOKEN` does not disconnect apps: their tokens are their own.
 
 ## What an app can do - and cannot
 
-It can read, through the nine tools, and nothing more. It cannot change a
+It can read, through the eleven tools, and nothing more. It cannot change a
 setting, sign anyone out, poll a vendor, or read a password, a token, a
 channel's secret or where the systems are. Its token opens `/mcp` and nothing
 else - not the dashboard's own `/api` routes.

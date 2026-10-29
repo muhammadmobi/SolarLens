@@ -3314,8 +3314,10 @@
    */
   const ASK_EXAMPLES = [
     'A report on last month',
-    'Which month produced the most this year?',
     'How much did I export last week?',
+    'How much did I make between 2pm and 4pm today?',
+    'How steady was the power today?',
+    'Since when has a system been offline?',
     'Compare my systems per kWp last month',
     'Statistics for the last 30 days',
     'Why was yesterday low?',
@@ -3407,12 +3409,12 @@
 
   /**
    * Bars for a result over time - energy per day, week, month or year; the
-   * weekly ratio - from its first figure. The drawing stretches to its box, so
+   * weekly ratio; a day's power hour by hour - from its first figure. The drawing stretches to its box, so
    * the first and last labels sit beneath it as text, where stretching cannot
    * reach them.
    */
   function miniChart(p) {
-    if (!['energy', 'performance_trend'].includes(p.tool) || p.rows.length < 3) return '';
+    if (!['energy', 'performance_trend', 'power_day'].includes(p.tool) || p.rows.length < 3) return '';
     const col = p.rows[0].findIndex((v, k) => k > 0 && p.rows.some((r) => typeof r[k] === 'number'));
     if (col < 1) return '';
     const values = p.rows.map((r) => (typeof r[col] === 'number' ? r[col] : 0));

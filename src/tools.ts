@@ -121,9 +121,14 @@ const clock = (ts: number, off: number) => {
 };
 
 /** "3 h 10 min", "45 min". */
+/** A length of time as a person says it: "45 min", "3 h 15 min", "35 h", "3 days 17 h". */
 const duration = (s: number) => {
   const m = Math.round(s / 60);
-  return m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`;
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 10) return `${h} h${m % 60 ? ` ${m % 60} min` : ''}`;
+  if (h < 48) return `${h} h`;
+  return `${Math.floor(h / 24)} days${h % 24 ? ` ${h % 24} h` : ''}`;
 };
 
 export const RANGES = [
@@ -150,6 +155,7 @@ export const DEFAULT_RANGE: Record<string, Range> = {
   faults: 'last_30_days',
   stats: 'last_30_days',
   report: 'last_month',
+  outages: 'last_7_days',
 };
 
 /**
@@ -887,6 +893,327 @@ const performanceTrend: Tool = {
   },
 };
 
+// ---------------------------------------------------------------- a day's power
+
+/** Minutes past midnight, and back: "14:05" is 845. */
+const minutesOf = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+const hhmmOf = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+/** Watts as kW for a sentence: "2.35 kW". */
+const kw = (w: number) => `${r2(w / 1000)} kW`;
+/** A reading under this share of the day's highest is not making power: a trickle at dawn. */
+const MAKING_SHARE = 0.02;
+/** A fall of this share of the day's highest power, from one reading to the next, is a sharp drop. */
+const SHARP_DROP = 0.25;
+/** Readings further apart than this are not "one to the next". */
+const STEP_S = 20 * 60;
+/** Output going up and down less than this many times a smooth rise and fall is steady. */
+const STEADY_UP_DOWN = 1.3;
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const powerDay: Tool = {
+  name: 'power_day',
+  description: "A day's power, from every reading: what each system made between two times of that day, its average and highest power then and when, "
+    + 'when it was making power, and how steady it was - sharp drops, the biggest fall, how much it went up and down - with the day hour by hour. '
+    + 'For "between 2pm and 4pm", "this afternoon", "power fluctuation today", "when was the peak", "how stable was the output".',
+  params: {
+    date: { type: 'string', pattern: /^(today|yesterday|\d{4}-\d{2}-\d{2})$/, description: 'The day, YYYY-MM-DD, or today (the default) or yesterday.', optional: true },
+    start: { type: 'string', pattern: TIME, description: "From, HH:MM on the 24-hour clock where the panels are; the day's start if left out.", optional: true },
+    end: { type: 'string', pattern: /^(([01]\d|2[0-3]):[0-5]\d|24:00)$/, description: "To, HH:MM; the day's end - or now, today - if left out.", optional: true },
+    system: systemParam,
+  },
+  async run({ db, now }, args) {
+    const all = await loadSystems(db);
+    const chosen = pickSystems(all, args.system);
+    const off = zoneOf(all);
+    const today = dayNo(now, off);
+    const asked = String(args.date ?? 'today');
+    const d = asked === 'today' ? today : asked === 'yesterday' ? today - 1 : noOf(asked);
+    if (!Number.isFinite(d)) throw new ToolError('A date is written YYYY-MM-DD.');
+    if (d > today) throw new ToolError('That day has not happened yet.');
+    const a = args.start ? minutesOf(String(args.start)) : 0;
+    const b = args.end ? minutesOf(String(args.end)) : 24 * 60;
+    if (b <= a) throw new ToolError('The end of the time comes after its start: 14:00 to 16:00.');
+    const windowed = a > 0 || b < 24 * 60;
+    const day = isoDay(d);
+    const label = `${dayWords(day, true)}${windowed ? `, ${hhmmOf(a)}–${hhmmOf(b)}` : ''}`;
+    // The day, and a margin either side for plants on other clocks than the first.
+    const points = await series(db, d * DAY - off - DAY, (d + 1) * DAY - off + DAY);
+
+    const facts: ToolResult['facts'] = {};
+    const lines: string[] = [];
+    const notes: string[] = [];
+    const hourly = new Map<number, Map<string, number[]>>();   // hour -> system -> watts
+    const made: number[] = [];
+    let notYet = 0;
+    const rows = chosen.map((s) => {
+      const o = s.off ?? off;
+      const k = chosen.length === 1 ? '' : `${s.alias}_`;
+      const dayStart = d * DAY - o;
+      const from = dayStart + a * 60;
+      const to = Math.min(dayStart + b * 60, now);
+      const mine = points.filter((p) => p.inverter_id === s.id && p.ts >= dayStart && p.ts < dayStart + DAY);
+      const inside = mine.filter((p) => p.ts >= from && p.ts <= to);
+      if (to <= from) {
+        notYet++;
+        lines.push(`${s.name}: it is not yet ${hhmmOf(a)} there.`);
+        Object.assign(facts, { [`${k}made_kwh`]: null, [`${k}readings`]: 0 });
+        return [s.name, null, null, null, null, null, null, null, null, null, 0];
+      }
+      if (!inside.length) {
+        lines.push(`${s.name}: no readings ${windowed ? `between ${hhmmOf(a)} and ${hhmmOf(b)}` : 'that day'}.`);
+        Object.assign(facts, { [`${k}made_kwh`]: null, [`${k}readings`]: 0 });
+        return [s.name, null, null, null, null, null, null, null, null, null, 0];
+      }
+      // Made: the vendor's own day counter at the end, less what it said at the start - 0 at midnight.
+      const counterAt = (t: number) => {
+        let v: number | null = null;
+        for (const p of mine) {
+          if (p.ts > t) break;
+          if (p.today_kwh != null) v = p.today_kwh;
+        }
+        return v;
+      };
+      const before = a === 0 ? 0 : counterAt(from);
+      const startCount = before ?? inside[0].today_kwh;
+      const endCount = counterAt(to);
+      let got: number;
+      if (endCount != null && startCount != null) got = Math.max(0, endCount - startCount);
+      else {
+        // No counter: each step's average power for its time, added up.
+        let wh = 0;
+        for (let i = 1; i < inside.length; i++) {
+          const dt = inside[i].ts - inside[i - 1].ts;
+          if (dt <= STEP_S) wh += (((inside[i].ac_power_w ?? 0) + (inside[i - 1].ac_power_w ?? 0)) / 2) * (dt / 3600);
+        }
+        got = wh / 1000;
+      }
+      made.push(got);
+      if (windowed && before == null && inside[0].ts - from > STEP_S) {
+        notes.push(`${s.name}'s readings that day begin at ${clock(inside[0].ts, o)}, so it is counted from then.`);
+      }
+      if (windowed && to - inside[inside.length - 1].ts > STEP_S) {
+        notes.push(`${s.name}'s readings stop at ${clock(inside[inside.length - 1].ts, o)}.`);
+      }
+
+      const watts = inside.map((p) => p.ac_power_w ?? 0);
+      let top = 0;
+      watts.forEach((w, i) => { if (w > watts[top]) top = i; });
+      const peak = watts[top];
+      // The scale is the system's own highest that day: steady for what it does, whatever its size.
+      const dayPeak = Math.max(0, ...mine.map((p) => p.ac_power_w ?? 0));
+      const making = inside.filter((p) => (p.ac_power_w ?? 0) > dayPeak * MAKING_SHARE && (p.ac_power_w ?? 0) > 0);
+      const firstOn = making.length ? making[0].ts : null;
+      const lastOn = making.length ? making[making.length - 1].ts : null;
+      const during = firstOn != null && lastOn != null ? inside.filter((p) => p.ts >= firstOn && p.ts <= lastOn).map((p) => p.ac_power_w ?? 0) : [];
+      const average = during.length ? during.reduce((x, w) => x + w, 0) / during.length : null;
+      const lowest = during.length ? Math.min(...during) : null;
+      let drops = 0, biggest = 0, travel = 0;
+      let biggestAt: number | null = null;
+      for (let i = 1; i < inside.length; i++) {
+        if (inside[i].ts - inside[i - 1].ts > STEP_S) continue;
+        travel += Math.abs(watts[i] - watts[i - 1]);
+        const fall = watts[i - 1] - watts[i];
+        if (dayPeak > 0 && fall >= dayPeak * SHARP_DROP) drops++;
+        if (fall > biggest) { biggest = fall; biggestAt = inside[i].ts; }
+      }
+      // Up and down: every rise and fall added together, against one smooth rise to the highest and fall back. 1 is smooth.
+      const smooth = (peak - watts[0]) + (peak - watts[watts.length - 1]);
+      const upDown = smooth > 0 && peak > 0 ? r1(travel / smooth) : null;
+      for (const p of inside) {
+        const h = Math.floor(((((p.ts + o) % DAY) + DAY) % DAY) / 3600);
+        const byHour = hourly.get(h) ?? new Map<string, number[]>();
+        byHour.set(s.id, [...(byHour.get(s.id) ?? []), p.ac_power_w ?? 0]);
+        hourly.set(h, byHour);
+      }
+      const peakAt = clock(inside[top].ts, o);
+      Object.assign(facts, {
+        [`${k}made_kwh`]: r1(got),
+        [`${k}average_kw`]: average != null ? r2(average / 1000) : null,
+        [`${k}peak_kw`]: r2(peak / 1000),
+        [`${k}peak_at`]: peak > 0 ? peakAt : null,
+        [`${k}lowest_while_making_kw`]: lowest != null ? r2(lowest / 1000) : null,
+        [`${k}sharp_drops`]: drops,
+        [`${k}biggest_drop_kw`]: biggestAt != null ? r2(biggest / 1000) : null,
+        [`${k}biggest_drop_at`]: biggestAt != null ? clock(biggestAt, o) : null,
+        [`${k}up_and_down`]: upDown,
+        [`${k}making_from`]: firstOn != null ? clock(firstOn, o) : null,
+        [`${k}making_to`]: lastOn != null ? clock(lastOn, o) : null,
+        [`${k}readings`]: inside.length,
+      });
+      const when = windowed ? `between ${hhmmOf(a)} and ${hhmmOf(b)}` : 'that day';
+      if (peak <= 0) {
+        lines.push(`${s.name} made no power ${when}.`);
+      } else {
+        const steady = drops === 0 && (upDown == null || upDown < STEADY_UP_DOWN)
+          ? 'steady, with no sharp drops'
+          : `${drops ? `${drops} sharp drop${drops === 1 ? '' : 's'}${biggestAt != null ? ` (the biggest ${kw(biggest)} at ${clock(biggestAt, o)})` : ''}` : 'no sharp drops'}`
+            + (upDown != null ? `, going up and down ${upDown} times as much as a smooth ${windowed ? 'stretch' : 'day'}` : '');
+        lines.push(`${s.name} made ${kwh(got)} ${when}${average != null ? `, ${kw(average)} on average while making power` : ''}, highest ${kw(peak)} at ${peakAt}`
+          + `${!windowed && firstOn != null ? `, making power from ${clock(firstOn, o)} to ${clock(lastOn!, o)}` : ''}: ${steady}.`);
+      }
+      return [s.name, r1(got), average != null ? r2(average / 1000) : null, r2(peak / 1000), peak > 0 ? peakAt : null,
+        lowest != null ? r2(lowest / 1000) : null, drops, biggestAt != null ? r2(biggest / 1000) : null, upDown,
+        firstOn != null ? `${clock(firstOn, o)}–${clock(lastOn!, o)}` : null, inside.length];
+    });
+
+    const multi = chosen.length > 1;
+    const together = made.reduce((x, v) => x + v, 0);
+    if (multi && made.length) facts.total_made_kwh = r1(together);
+    if (d === today) notes.unshift(`Today is not over: up to ${clock(now, off)}.`);
+    notes.push('Times are on the clock where the panels are. What was made between two times is the system\'s own day counter at the end, less what it said at the start.');
+    notes.push("A sharp drop is a fall of a quarter or more of the day's highest power from one reading to the next: a passing cloud, or the inverter cutting out. "
+      + 'Up and down adds every rise and fall together, against one smooth rise to the highest and fall back: 1 is smooth.');
+    const freshness = await freshnessOf(db, chosen, now);
+    const period = { from: day, to: day, label };
+    const hourRows = [...hourly.keys()].sort((x, y) => x - y).map((h) => {
+      const per = chosen.map((s) => {
+        const v = hourly.get(h)!.get(s.id);
+        return v?.length ? r2(v.reduce((x, w) => x + w, 0) / v.length / 1000) : null;
+      });
+      const sum = sumOrNull(per);
+      return [`${String(h).padStart(2, '0')}:00`, ...(multi ? [sum != null ? r2(sum) : null] : []), ...per];
+    });
+    return {
+      tool: 'power_day',
+      title: 'Power through the day',
+      period,
+      columns: ['System', 'Made (kWh)', 'Average while making (kW)', 'Highest (kW)', 'Highest at', 'Lowest while making (kW)', 'Sharp drops', 'Biggest drop (kW)', 'Up and down (1 = smooth)', 'Making power', 'Readings'],
+      rows,
+      facts,
+      notes,
+      summary: notYet === chosen.length
+        ? `It is not yet ${hhmmOf(a)} today where ${multi ? 'the panels are' : `${chosen[0].name} is`}.`
+        : `${multi && windowed && made.length === chosen.length ? `Together ${kwh(together)} between ${hhmmOf(a)} and ${hhmmOf(b)} on ${dayWords(day, true)}. ` : ''}${lines.join(' ')}`,
+      freshness,
+      ...(hourRows.length >= 3 ? {
+        sections: [{
+          tool: 'power_day', title: 'Hour by hour', period,
+          columns: ['Hour', ...(multi ? ['All systems (kW)'] : []), ...chosen.map((s) => `${s.name} (kW)`)],
+          rows: hourRows, facts: {}, notes: ["Each hour's average power, from the readings in it."],
+          summary: `Average power hour by hour, ${label}.`, freshness,
+        }],
+      } : {}),
+    };
+  },
+};
+
+// ---------------------------------------------------------------- outages
+
+/** Sunlight above this, W/m2, is day: a system silent then has stopped, not gone to sleep. */
+const DAYLIGHT_WM2 = 100;
+/** A day and a time on a plant's clock: "Sun 27 Sep 2026 19:10". */
+const at = (ts: number, off: number) => `${dayWords(isoDay(dayNo(ts, off)), true)} ${clock(ts, off)}`;
+
+const outages: Tool = {
+  name: 'outages',
+  description: 'When each system stopped reporting and when it came back: whether it is reporting now and since when not, the last time it made power, '
+    + 'and each stretch of daylight with no readings over a period - the last 7 days unless one is named, a month at most. Silence at night is not counted. '
+    + 'For "since when is it offline", "when did it stop working", "when did it last generate", "how often does it drop out".',
+  params: { ...periodParams, system: systemParam },
+  async run({ db, now }, args) {
+    const all = await loadSystems(db);
+    const chosen = pickSystems(all, args.system);
+    const off = zoneOf(all);
+    const p = resolvePeriod(args, now, off, DEFAULT_RANGE.outages);
+    if (noOf(p.to) - noOf(p.from) > 31) throw new ToolError('Ask about a month at most: every reading in it is looked at.');
+    // The period, and a day either side for plants on other clocks than the first.
+    const from = noOf(p.from) * DAY - off - DAY;
+    const until = Math.min((noOf(p.to) + 1) * DAY - off + DAY, now);
+    const [live, points, weather] = await Promise.all([latest(db), series(db, from, until), weatherSince(db, from)]);
+
+    const facts: ToolResult['facts'] = {};
+    const lines: string[] = [];
+    const rows: { ts: number; row: (string | number | null)[] }[] = [];
+    for (const s of chosen) {
+      const o = s.off ?? off;
+      const k = chosen.length === 1 ? '' : `${s.alias}_`;
+      const r = live.find((x) => x.id === s.id);
+      const on = !!r?.ts && now - r.ts <= STALE_AFTER_S && r.status !== 'offline';
+      const seen = points.filter((x) => x.inverter_id === s.id);
+      // Daylight at a moment: the sunlight at the system's position that hour, or 07:00-17:00 where there is none.
+      const sun = new Map(weather.filter((w) => w.inverter_id === s.id && w.ghi_wm2 != null).map((w) => [w.ts, w.ghi_wm2 as number]));
+      const light = (ts: number) => {
+        const ghi = sun.get(Math.floor(ts / 3600) * 3600 + 3600);
+        if (ghi != null) return ghi >= DAYLIGHT_WM2;
+        const m = ((((ts + o) % DAY) + DAY) % DAY) / 60;
+        return m >= 7 * 60 && m < 17 * 60;
+      };
+      const periodStart = noOf(p.from) * DAY - o;
+      const periodEnd = Math.min((noOf(p.to) + 1) * DAY - o, now);
+      const daylightIn = (x: number, y: number) => {
+        let lit = 0;
+        for (let t = Math.max(x, periodStart); t < Math.min(y, periodEnd); t += 300) if (light(t)) lit += Math.min(300, Math.min(y, periodEnd) - t);
+        return lit;
+      };
+      // Each silence longer than GAP_S; it counts when it takes more than that of daylight. One through a night is one.
+      const times = seen.map((x) => x.ts);
+      const lastSeen = times.length ? times[times.length - 1] : r?.ts ?? null;
+      const silences: [number, number | null][] = [];
+      for (let i = 1; i < times.length; i++) if (times[i] - times[i - 1] > GAP_S) silences.push([times[i - 1], times[i]]);
+      if (!on && lastSeen != null && now - lastSeen > GAP_S) silences.push([lastSeen, null]);
+      const found = silences
+        .map(([x, y]) => ({ from: x, to: y, lit: daylightIn(x, y ?? now) }))
+        .filter((g) => g.lit > GAP_S);
+      const lost = found.reduce((x, g) => x + g.lit, 0);
+      const longest = found.reduce<typeof found[number] | null>((x, g) => (!x || g.lit > x.lit ? g : x), null);
+      for (const g of found) rows.push({ ts: g.from, row: [s.name, at(g.from, o), g.to ? at(g.to, o) : 'not yet', duration(g.lit)] });
+
+      const powered = seen.filter((x) => (x.ac_power_w ?? 0) > 0);
+      const lastPower = powered.length ? { ts: powered[powered.length - 1].ts, w: powered[powered.length - 1].ac_power_w ?? 0 }
+        : r?.ts && (r.ac_power_w ?? 0) > 0 ? { ts: r.ts, w: r.ac_power_w ?? 0 } : null;
+      Object.assign(facts, {
+        [`${k}reporting_now`]: on ? 'yes' : 'no',
+        [`${k}last_reading`]: r?.ts ? at(r.ts, o) : null,
+        [`${k}quiet_since`]: !on && lastSeen != null ? at(lastSeen, o) : null,
+        [`${k}last_power_at`]: lastPower ? at(lastPower.ts, o) : null,
+        [`${k}last_power_kw`]: lastPower ? r2(lastPower.w / 1000) : null,
+        [`${k}outages`]: found.length,
+        [`${k}daylight_without_readings`]: found.length ? duration(lost) : null,
+      });
+
+      let said: string;
+      if (lastSeen == null) said = `${s.name} has not reported at all.`;
+      else if (on) said = `${s.name} is reporting now (last reading ${clock(lastSeen, o)}).`;
+      else {
+        const darkThen = !light(lastSeen);
+        const darkNow = !light(now);
+        const battery = r?.battery_soc != null;
+        said = `${s.name} has not reported since ${at(lastSeen, o)}, ${duration(now - lastSeen)} ago`;
+        if (darkThen && darkNow && !battery) said += ': it went quiet after dark, when an inverter without a battery switches off, so this is expected until sunrise.';
+        else {
+          said += darkThen ? ', after dark, and it has not come back' : ', in daylight';
+          said += s.provider === 'soliscloud'
+            ? '. Its figures come through the relay: check the relay laptop is on and its SolisCloud login is current (Devices tab).'
+            : '. The vendor may be down, or the logger may have lost its network.';
+        }
+      }
+      said += lastPower ? ` It last made power at ${at(lastPower.ts, o)} (${kw(lastPower.w)}).` : ` It made no power in ${p.label}.`;
+      said += found.length
+        ? ` In ${p.label} it went quiet in daylight ${found.length === 1 ? 'once' : `${found.length} times`}, ${duration(lost)} of daylight in all${found.length > 1 && longest ? `; the longest from ${at(longest.from, o)} to ${longest.to ? at(longest.to, o) : 'now'}` : ''}.`
+        : ` In ${p.label} it never went quiet in daylight.`;
+      lines.push(said);
+    }
+
+    const shown = rows.sort((x, y) => y.ts - x.ts).slice(0, 20).map((x) => x.row);
+    const notes = [
+      'A stretch counts when a system sends nothing for more than 30 minutes of daylight - by the sunlight at its position, or 07:00 to 17:00 where there is no weather yet. Silence at night is not counted.',
+      'Times are on the clock where the panels are.',
+    ];
+    if (rows.length > 20) notes.push(`The 20 most recent of ${rows.length} are listed.`);
+    return {
+      tool: 'outages',
+      title: 'Outages',
+      period: p,
+      columns: ['System', 'Went quiet', 'Came back', 'Daylight without readings'],
+      rows: shown,
+      facts,
+      notes,
+      summary: lines.join(' '),
+      freshness: await freshnessOf(db, chosen, now),
+    };
+  },
+};
+
 // ---------------------------------------------------------------- stats
 
 const statsTool: Tool = {
@@ -1059,7 +1386,7 @@ const appHelp: Tool = {
 // ---------------------------------------------------------------- the list
 
 /** Every tool, in the order a person would reach for them. */
-export const TOOLS: readonly Tool[] = [statusNow, energy, compareSystems, statsTool, faults, dayReport, performanceTrend, reportTool, appHelp];
+export const TOOLS: readonly Tool[] = [statusNow, outages, energy, powerDay, compareSystems, statsTool, faults, dayReport, performanceTrend, reportTool, appHelp];
 
 export const toolByName = (name: unknown): Tool | undefined => TOOLS.find((t) => t.name === name);
 

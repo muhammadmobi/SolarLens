@@ -5,6 +5,8 @@ up:
 
 - *"How much did I export last week?"* … *"and the week before?"*
 - *"Which month produced the most this year?"*
+- *"How much did I make between 2pm and 4pm today?"*, *"How steady was the power today?"*
+- *"Since when has Solis been offline?"*, *"When did it last generate?"*
 - *"Compare my systems per kWp last month"*
 - *"Statistics for the last 30 days"* - the average and median day, the best and
   worst, how much days vary, capacity factor, low days
@@ -57,10 +59,20 @@ SolarLens reads the question itself. It works out:
 
 - the kind of question from its words: a report, statistics, a comparison,
   faults, why a day was low, a slow decline, right now, energy made, sold,
-  bought or used, or how to use the app;
+  bought or used, how steady the power was, whether a system is offline and
+  since when, or how to use the app;
 - the period: *last week*, *this year*, *in May*, *21 September*, *2025*, a
   date;
-- the system, by its name or its short name.
+- a time of day: *between 2pm and 4pm*, *2-4pm*, *from 14:00 to 16:30*,
+  *after 3pm*, *this afternoon*;
+- the system, by its name, its short name, or a word only its name has -
+  *orchard* for a system called *Orchard Hybrid*.
+
+It forgives typing slips in the words it routes on - *genration*,
+*fluctarion*, *septmber*, *yesterady* - and a time of day needs no
+"between" at all: *2pm aand 4pm* is enough. The words it mends were chosen
+because nothing common in English sits near them, so *expected* is never read
+as *exported*, nor *warning* as *morning*.
 
 A follow-up works the same way. *"And the one before?"* steps back a whole
 month, year or week - or as many days again. *"For the garage?"* keeps the
@@ -71,7 +83,9 @@ period and changes the system. The answer is the figures' own sentences.
 | Tool | Answers |
 |---|---|
 | `status_now` | what each system is doing right now: power, today so far, battery, whether it is reporting |
+| `outages` | whether each system is reporting now and, if not, since when; the last time it made power; and each stretch of daylight with no readings over a period - silence at night, when an inverter without a battery switches off, is not counted. A relay-fed system that went quiet is pointed at its relay |
 | `energy` | energy over any period - made, used by the house, bought and sold - in total or per day, week, month or year, for one system or all; the best and lowest period - day by day, from days wholly recorded for every system; with a tariff set, the money saved and CO₂ avoided |
+| `power_day` | a day's power, from every reading: what each system made between two times of that day (from its own day counter), its average and highest power and when, when it was making power, and how steady it was - sharp drops (a fall of a quarter of the day's highest or more from one reading to the next), the biggest fall, and how much it went up and down against one smooth rise and fall - with the day hour by hour |
 | `compare_systems` | every system side by side per kWp of panels over a period, best first |
 | `stats` | each system's days over a period: how many were recorded, the total, the average and median day, the best and worst, the spread (standard deviation), kWh per kWp, capacity factor, low days (under half the median), and the average day against as many days just before. Whole days only: today is left out, and so is a day with too few readings to be whole (under 60) - a system's first evening, or a relay off for most of the day - which the answer names |
 | `faults` | the faults the vendors recorded over a period, which are still active, and the most common |
@@ -83,8 +97,9 @@ period and changes the system. The answer is the figures' own sentences.
 A period is a named one - today, yesterday, this or last week, month or year,
 the last 7 or 30 days, the last 12 months - or two dates. Weeks run Monday to
 Sunday, and days are the plants' own. With no period named, `energy` and
-`compare_systems` cover this month, `faults` and `stats` the last 30 days, and
-a `report` last month. The same tools are served without a model at
+`compare_systems` cover this month, `faults` and `stats` the last 30 days,
+`outages` the last 7 days, and a `report` last month; `power_day` takes one
+day, today unless named, and times of day as HH:MM on the plant's clock. The same tools are served without a model at
 `GET /api/tools` and `GET /api/tools/<name>?<arguments>`. The MCP server offers
 the same tools to AI apps outside SolarLens.
 

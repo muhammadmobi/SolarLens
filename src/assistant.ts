@@ -86,6 +86,108 @@ const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 
 const pad = (n: number) => String(n).padStart(2, '0');
 const lastOfMonth = (y: number, m: number) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
 
+/**
+ * The words the reader routes on, so that a near miss - "genration",
+ * "fluctarion", "septmber", "yesterady" - is read as the word meant. Chosen
+ * because nothing common in English sits near them: a general spell-mender
+ * would read "expected" as "exported", or "warning" as "morning". A word of
+ * five or six letters may be one letter out, a longer one two.
+ */
+const MENDABLE = [
+  'generation', 'generated', 'generating', 'production', 'produced', 'producing', 'fluctuation', 'fluctuations', 'fluctuating',
+  'yesterday', 'statistics', 'comparison', 'consumption', 'inverter', 'afternoon', 'between',
+  'january', 'february', 'august', 'september', 'october', 'november', 'december',
+];
+
+/** How many letters apart two words are - added, dropped or changed - or more than most when further. */
+function distance(a: string, b: string, most: number): number {
+  if (Math.abs(a.length - b.length) > most) return most + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, cur[j]);
+    }
+    if (best > most) return most + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** A question as the reader takes it: lower case, "p.m." as "pm", and near misses of the words it routes on mended. */
+export function mend(text: string): string {
+  return text.toLowerCase().replace(/\b([ap])\.\s?m\b\.?/g, '$1m').replace(/[a-z]{5,}/g, (w) => {
+    if (MENDABLE.includes(w)) return w;
+    const most = w.length >= 7 ? 2 : 1;
+    let best = w;
+    let near = most + 1;
+    for (const v of MENDABLE) {
+      const d = distance(w, v, most);
+      if (d < near) { best = v; near = d; }
+    }
+    return best;
+  });
+}
+
+const hm = (m: number) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+
+/**
+ * The part of a day a question names, on the 24-hour clock: "between 2pm and
+ * 4pm", "2-4pm", "from 14:00 to 16:30", "after 3pm", "before 11am", "at 2pm"
+ * (the hour from then), "this afternoon". Null when it names none.
+ */
+export function timesIn(text: string): { start: string; end: string } | null {
+  const t = mend(text);
+  const found: { m: number; at: number }[] = [];
+  for (const x of t.matchAll(/\b(\d{1,2})(?::([0-5]\d))?\s*(am|pm)\b|\b([01]?\d|2[0-3]):([0-5]\d)\b|\b(noon|midday|midnight)\b/g)) {
+    if (x[1]) {
+      const h = Number(x[1]);
+      if (h < 1 || h > 12) continue;
+      found.push({ m: ((h % 12) + (x[3] === 'pm' ? 12 : 0)) * 60 + Number(x[2] ?? 0), at: x.index ?? 0 });
+    } else if (x[4]) found.push({ m: Number(x[4]) * 60 + Number(x[5]), at: x.index ?? 0 });
+    else found.push({ m: x[6] === 'midnight' ? 0 : 12 * 60, at: x.index ?? 0 });
+  }
+  // "between 2 and 4pm", "2-4pm": the bare hour takes the other's half of the day, unless that puts it after it.
+  const pair = /\b(\d{1,2})\s*(?:and|to|till|until|-|–)\s*(\d{1,2})\s*(am|pm)\b/.exec(t);
+  if (pair && found.length === 1 && Number(pair[1]) >= 1 && Number(pair[1]) <= 12) {
+    let s = ((Number(pair[1]) % 12) + (pair[3] === 'pm' ? 12 : 0)) * 60;
+    if (s >= found[0].m) s -= 12 * 60;
+    if (s >= 0) found.unshift({ m: s, at: pair.index });
+  }
+  if (found.length >= 2) {
+    // Midnight second is the day's end: "from 10pm to midnight". Given the wrong way round, the earlier is the start.
+    let [x, y] = [found[0].m, found[1].m || 24 * 60];
+    if (x > y) [x, y] = [y, x];
+    return x < y ? { start: hm(x), end: hm(y) } : null;
+  }
+  if (found.length === 1) {
+    const x = found[0];
+    const before = t.slice(0, x.at);
+    if (/\b(after|since|from)\s*$/.test(before)) return { start: hm(x.m), end: '24:00' };
+    if (/\b(before|until|till|by|up to)\s*$/.test(before)) return x.m > 0 ? { start: '00:00', end: hm(x.m) } : null;
+    return { start: hm(x.m), end: x.m + 60 >= 24 * 60 ? '24:00' : hm(x.m + 60) };
+  }
+  if (/\bmorning\b/.test(t)) return { start: '06:00', end: '12:00' };
+  if (/\bafternoon\b/.test(t)) return { start: '12:00', end: '17:00' };
+  if (/\bevening\b/.test(t)) return { start: '17:00', end: '21:00' };
+  return null;
+}
+
+/** One day a period names, for the tools that take a day: today, yesterday or its date - else the fallback. */
+const dateOf = (period: Args | null, fallback: string): string => {
+  if (!period) return fallback;
+  if (period.range === 'today' || period.range === 'yesterday') return String(period.range);
+  return period.from && period.from === period.to ? String(period.from) : fallback;
+};
+
+/** The tools that look at one day, and the day each looks at when none is named. */
+const DATE_TOOLS: Record<string, string> = { day_report: 'yesterday', power_day: 'today' };
+
+/** Words that name no one system, even when a system's name has them. */
+const NOT_A_NAME = new Set(['system', 'systems', 'solar', 'plant', 'plants', 'panel', 'panels', 'inverter', 'inverters', 'power', 'energy', 'array', 'station', 'site', 'total', 'the']);
+
 /** The period a question names - a named one, a month by name, a date, a year - or null. */
 export function periodIn(text: string, today: string): Args | null {
   const t = text.toLowerCase();
@@ -117,22 +219,36 @@ export function periodIn(text: string, today: string): Args | null {
   return null;
 }
 
-/** The system a question names - the longest name it contains - or null. */
+/**
+ * The system a question names: the longest name it contains, its alias, or a
+ * word of just one system's name - "orchard" for Orchard Hybrid, "riverside"
+ * for Riverside Ongrid. Null when it names none, or only a word systems share.
+ */
 function systemIn(text: string, systems: Sys[]): Sys | null {
   const t = text.toLowerCase();
-  return [...systems].sort((a, b) => b.name.length - a.name.length).find((s) => t.includes(s.name.toLowerCase()))
-    ?? systems.find((s) => new RegExp(`\\b${s.alias}\\b`).test(t)) ?? null;
+  const full = [...systems].sort((a, b) => b.name.length - a.name.length).find((s) => t.includes(s.name.toLowerCase()));
+  if (full) return full;
+  const alias = systems.find((s) => new RegExp('\\b' + s.alias + '\\b').test(t));
+  if (alias) return alias;
+  const words = new Set(t.split(/[^\p{L}\p{N}]+/u));
+  const own = (s: Sys) => s.name.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3 && !NOT_A_NAME.has(w));
+  const hits = systems.filter((s) => own(s).some((w) => words.has(w) && systems.filter((x) => own(x).includes(w)).length === 1));
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /** What a question is about, from its words. */
 function kindOf(t: string): string | null {
   if (/\b(how (do|can|to|should)|where (is|do|can|are|should)|set ?up|turn (on|off)|enable|disable|install|connect)\b/.test(t)) return 'help';
   if (/\b(report|summar(y|ise|ize))\b/.test(t)) return 'report';
+  // Offline, not working, since when, when it last made power - before "why", since "why is it offline?" is this.
+  if (/\b(of+\s?-?line|not (working|reporting|running|generating|producing|online)|stop(ped|s)?|stop working|outages?|downtime|no (data|readings)|since when|from when|went (off|down|quiet|dark)|c[ao]me back|last (reading|report\w*|seen|gen[a-z]*r[a-z]*t\w*|produc\w*|made|power|worked))\b/.test(t)) return 'outage';
   if (/\bwhy\b/.test(t)) return 'why';
   if (/\b(degrad\w*|declin\w*|dirty|trend|health|getting worse|losing|slowly)\b/.test(t)) return 'trend';
   if (/\b(faults?|alarms?|errors?|warnings?)\b/.test(t)) return 'faults';
   if (/\b(compare|comparison|per kwp|which system|best system|worst system)\b/.test(t)) return 'compare';
-  if (/\b(stats?|statistic\w*|average|mean|median|capacity factor|specific yield|consistent|variab\w*)\b/.test(t)) return 'stats';
+  // How the power went through a day: its swings, dips and peak. Over many days, that is the statistics.
+  if (/\b(fluc\w*|swing\w*|spikes?|dips?|dipped|choppy|stable|steady|unstable|stability|curve|profile|variab\w*|variation|vary|varies|varied|peak(ed|s)?|highest power|max(imum)? power|min(imum)? power)\b/.test(t)) return 'power';
+  if (/\b(stats?|statistic\w*|average|mean|median|capacity factor|specific yield|consistent)\b/.test(t)) return 'stats';
   if (/\b(export\w*|sold|sell\w*|feed[- ]?in)\b/.test(t)) return 'exported';
   if (/\b(import\w*|bought|buy|from the grid)\b/.test(t)) return 'imported';
   // "How do I use..." is help, caught above; any other "use" is the house's.
@@ -175,18 +291,25 @@ export function periodBefore(p: Period, range?: unknown): Args {
  * first call to what it names. Null when nothing in it says what is wanted.
  */
 export function guessCalls(question: string, systems: Sys[], now: number, off: number, previous: Call[] = []): Call[] | null {
-  const t = question.toLowerCase();
+  const t = mend(question);
   const today = isoDay(dayNo(now, off));
   const period = periodIn(t, today);
-  const system = systemIn(t, systems);
+  const system = systemIn(question, systems);
   const named = (a: Args = {}): Args => ({ ...a, ...(period ?? {}), ...(system ? { system: system.name } : {}) });
   const kind = kindOf(t);
   const last = previous[0];
+  // Part of a day - "between 2pm and 4pm", "this afternoon" - is the day's power, whatever the words say of energy.
+  const times = timesIn(t);
+  if (times && (!kind || ['energy', 'power', 'now', 'stats', 'exported', 'imported', 'used'].includes(kind))) {
+    const keep = !kind && last?.tool === 'power_day' ? last.args : {};
+    return [{ tool: 'power_day', args: { ...keep, date: dateOf(period, String(keep.date ?? 'today')), ...times, ...(system ? { system: system.name } : {}) } }];
+  }
   if (last && (!kind || (kind === 'energy' && /^\s*(and|what about|how about|or)\b/.test(t)))) {
     const { range: _r, from: _f, to: _t, date: _d, ...rest } = last.args;
+    const dayOfTool = DATE_TOOLS[last.tool];
     if (/\b(before|previous|prior|earlier)\b/.test(t) && !period) {
-      if (last.tool === 'day_report') {
-        const at = typeof last.args.date === 'string' ? last.args.date : 'yesterday';
+      if (dayOfTool) {
+        const at = typeof last.args.date === 'string' ? last.args.date : dayOfTool;
         const n = at === 'today' ? dayNo(now, off) : at === 'yesterday' ? dayNo(now, off) - 1 : Date.parse(`${at}T00:00:00Z`) / DAY_MS;
         return [{ tool: last.tool, args: { ...rest, date: isoDay(n - 1), ...(system ? { system: system.name } : {}) } }];
       }
@@ -197,13 +320,21 @@ export function guessCalls(question: string, systems: Sys[], now: number, off: n
       return [{ tool: last.tool, args: { ...rest, ...periodBefore(p, range), ...(system ? { system: system.name } : {}) } }];
     }
     if (period || system) {
-      if (last.tool === 'day_report') return [{ tool: last.tool, args: { ...rest, date: period?.from ?? (period?.range === 'today' ? 'today' : 'yesterday'), ...(system ? { system: system.name } : {}) } }];
+      // A day tool keeps its day, and its hours, unless the follow-up names another.
+      if (dayOfTool) return [{ tool: last.tool, args: { ...rest, date: dateOf(period, String(last.args.date ?? dayOfTool)), ...(system ? { system: system.name } : {}) } }];
       return [{ tool: last.tool, args: { ...rest, ...(period ?? { range: last.args.range, from: last.args.from, to: last.args.to }), ...(system ? { system: system.name } : {}) } }]
         .map((c) => ({ ...c, args: Object.fromEntries(Object.entries(c.args).filter(([, v]) => v !== undefined)) as Args }));
     }
   }
   switch (kind) {
     case 'help': return [{ tool: 'app_help', args: { question } }];
+    case 'outage': return [{ tool: 'outages', args: named() }];
+    case 'power': {
+      // A day's power for a day; across many days, how the days varied.
+      const days = !!period && dateOf(period, '') === '';
+      if (days || /\b(weeks?|months?|years?)\b/.test(t)) return [{ tool: 'stats', args: named() }];
+      return [{ tool: 'power_day', args: { date: dateOf(period, 'today'), ...(system ? { system: system.name } : {}) } }];
+    }
     case 'report': return [{ tool: 'report', args: named() }];
     case 'why': return [{ tool: 'day_report', args: { date: period?.from && period.from === period.to ? period.from : period?.range === 'today' ? 'today' : 'yesterday', ...(system ? { system: system.name } : {}) } }];
     case 'trend': return [{ tool: 'performance_trend', args: system ? { system: system.name } : {} }];
@@ -235,6 +366,8 @@ async function understandingPrompt(systems: Sys[], today: string): Promise<strin
     'For a follow-up ("and the month before?", "what about the garage?"), take the previous tools and change only what the follow-up changes.',
     `For a period, use "range" when one of ${RANGES.join(', ')} fits; otherwise "from" and "to" as YYYY-MM-DD.`,
     'Name a system exactly as listed, or leave "system" out for all of them.',
+    'For part of a day - "between 2pm and 4pm", "this afternoon" - or how the power moved through a day - fluctuation, dips, the peak - use power_day, with start and end as HH:MM on the 24-hour clock.',
+    'For whether a system is working or offline, since when, and when it last made power, use outages.',
     'Answer with JSON only: {"calls": [{"tool": "<name>", "args": {...}}], "reply": "<text>"}.',
     'Leave "calls" empty only for a greeting or when you must ask back; then "reply" is one or two sentences, and never states a figure.',
   ].join('\n');

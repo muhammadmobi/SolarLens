@@ -9,7 +9,7 @@
  * when one is set. Workers AI and any other server are scripts here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkTurns, converse, guessCalls, periodBefore, periodIn, type Reply } from '../../src/assistant';
+import { checkTurns, converse, guessCalls, mend, periodBefore, periodIn, timesIn, type Call, type Reply } from '../../src/assistant';
 import { hasAi, providerOf } from '../../src/ai';
 import { setRequired } from '../../src/auth/sessions';
 import type { Env } from '../../src/db';
@@ -105,6 +105,73 @@ describe('reading a question without a model', () => {
     expect(guess('and the week before?', [{ tool: 'energy', args: { from: '2026-09-01', to: '2026-09-07' } }] as never)).toEqual([{ tool: 'energy', args: { from: '2026-08-25', to: '2026-08-31' } }]);
     // A question with a kind of its own is not a follow-up.
     expect(guess('any faults last week?', before)).toEqual([{ tool: 'faults', args: { range: 'last_week' } }]);
+  });
+});
+
+describe('the questions an owner asks of a day, as typed', () => {
+  // Two made-up systems, named the way owners name them: a brand or place, and what the inverter is.
+  const SITES: Sys[] = [
+    { id: 'soliscloud:plant:gamma', alias: 's1', name: 'Riverside Ongrid', provider: 'soliscloud', kwp: 12, off: 0 },
+    { id: 'solarman:station:delta', alias: 's2', name: 'Orchard Hybrid', provider: 'solarman', kwp: 3.5, off: 0 },
+  ];
+  const ask = (q: string, previous: Call[] = []) => guessCalls(q, SITES, NOW, 0, previous);
+
+  it('reads them as they were asked: a time of day, one word of a name, and the typing', () => {
+    expect(ask('how much genration is done bewtwwn 2pm aand 4pm today ?')).toEqual([{ tool: 'power_day', args: { date: 'today', start: '14:00', end: '16:00' } }]);
+    expect(ask('what is power fluctarion today')).toEqual([{ tool: 'power_day', args: { date: 'today' } }]);
+    expect(ask('what is power fluctuations today on orchard invertor?')).toEqual([{ tool: 'power_day', args: { date: 'today', system: 'Orchard Hybrid' } }]);
+    expect(ask('from when riverside is not working?')).toEqual([{ tool: 'outages', args: { system: 'Riverside Ongrid' } }]);
+    expect(ask('last genrated riverside pv and whn it was ofline?')).toEqual([{ tool: 'outages', args: { system: 'Riverside Ongrid' } }]);
+    expect(ask('was the orchard offline yesterday?')).toEqual([{ tool: 'outages', args: { range: 'yesterday', system: 'Orchard Hybrid' } }]);
+    expect(ask('how much did I make this afternoon?')).toEqual([{ tool: 'power_day', args: { date: 'today', start: '12:00', end: '17:00' } }]);
+  });
+
+  it('reads the ways a time of day is said', () => {
+    expect(timesIn('between 2 and 4pm')).toEqual({ start: '14:00', end: '16:00' });
+    expect(timesIn('from 11 to 2pm')).toEqual({ start: '11:00', end: '14:00' });
+    expect(timesIn('from 14:00 to 16:30')).toEqual({ start: '14:00', end: '16:30' });
+    expect(timesIn('after 3 p.m.')).toEqual({ start: '15:00', end: '24:00' });
+    expect(timesIn('before 11am')).toEqual({ start: '00:00', end: '11:00' });
+    expect(timesIn('at noon')).toEqual({ start: '12:00', end: '13:00' });
+    expect(timesIn('this afternoon')).toEqual({ start: '12:00', end: '17:00' });
+    expect(timesIn('the last 30 days')).toBeNull();
+    expect(timesIn('on 2026-09-21')).toBeNull();
+  });
+
+  it('mends the words it routes on, and never a word that is another', () => {
+    expect(mend('genration yesterady septmber statistcs')).toBe('generation yesterday september statistics');
+    expect(mend('expected warning general outline')).toBe('expected warning general outline');
+  });
+
+  it('reads the edges of a time of day', () => {
+    expect(timesIn('at 13pm')).toBeNull();
+    expect(timesIn('from 10pm to midnight')).toEqual({ start: '22:00', end: '24:00' });
+    expect(timesIn('from 4pm to 2pm')).toEqual({ start: '14:00', end: '16:00' });
+    expect(timesIn('between 2 and 4am')).toEqual({ start: '02:00', end: '04:00' });
+    expect(timesIn('until noon')).toEqual({ start: '00:00', end: '12:00' });
+    expect(timesIn('before midnight')).toBeNull();
+    expect(timesIn('at 11:30pm')).toEqual({ start: '23:30', end: '24:00' });
+    expect(timesIn('this morning')).toEqual({ start: '06:00', end: '12:00' });
+    expect(timesIn('this evening')).toEqual({ start: '17:00', end: '21:00' });
+  });
+
+  it('takes a date, a system and the day before for the tools that look at one day', () => {
+    expect(ask('power fluctuation on 21 september')).toEqual([{ tool: 'power_day', args: { date: '2026-09-21' } }]);
+    expect(ask('how much did the orchard make between 2pm and 4pm yesterday?')).toEqual([{ tool: 'power_day', args: { date: 'yesterday', start: '14:00', end: '16:00', system: 'Orchard Hybrid' } }]);
+    expect(ask('and the day before?', [{ tool: 'power_day', args: {} }] as Call[])).toEqual([{ tool: 'power_day', args: { date: '2026-09-27' } }]);
+    expect(ask('and for the orchard?', [{ tool: 'day_report', args: { date: '2026-09-21' } }] as Call[])).toEqual([{ tool: 'day_report', args: { date: '2026-09-21', system: 'Orchard Hybrid' } }]);
+    expect(ask('and the month before, for the orchard?', [{ tool: 'energy', args: { range: 'last_month' } }] as Call[])).toEqual([{ tool: 'energy', args: { from: '2026-07-01', to: '2026-07-31', system: 'Orchard Hybrid' } }]);
+    expect(ask('how much did I buy from the grid last week?')).toEqual([{ tool: 'energy', args: { measure: 'imported', range: 'last_week' } }]);
+  });
+
+  it("keeps a day's hours through a follow-up, and moves the day or the system", () => {
+    const before = [{ tool: 'power_day', args: { date: 'today', start: '14:00', end: '16:00' } }] as Call[];
+    expect(ask('and yesterday?', before)).toEqual([{ tool: 'power_day', args: { date: 'yesterday', start: '14:00', end: '16:00' } }]);
+    expect(ask('and for the orchard?', before)).toEqual([{ tool: 'power_day', args: { date: 'today', start: '14:00', end: '16:00', system: 'Orchard Hybrid' } }]);
+    expect(ask('and between 4pm and 6pm?', before)).toEqual([{ tool: 'power_day', args: { date: 'today', start: '16:00', end: '18:00' } }]);
+    expect(ask('and the day before?', before)).toEqual([{ tool: 'power_day', args: { date: '2026-09-27', start: '14:00', end: '16:00' } }]);
+    // Across many days, fluctuation is how the days varied: the statistics.
+    expect(ask('how much did output fluctuate this month?')).toEqual([{ tool: 'stats', args: { range: 'this_month' } }]);
   });
 });
 

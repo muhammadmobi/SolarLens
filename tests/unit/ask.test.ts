@@ -104,7 +104,7 @@ describe('asking', () => {
     expect(ai.calls[0].model).toBe(DEFAULT_MODEL);
     expect(choosing.messages[0].content).toContain('Today is Mon 28 Sep 2026 (2026-09-28)');
     expect(choosing.messages[0].content).toContain('"Roof" (5 kWp), "Garage" (4 kWp)');
-    for (const t of ['status_now', 'energy', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']) expect(choosing.messages[0].content).toContain(`- ${t}:`);
+    for (const t of ['status_now', 'outages', 'energy', 'power_day', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']) expect(choosing.messages[0].content).toContain(`- ${t}:`);
     expect(choosing.messages[1]).toEqual({ role: 'user', content: 'How much did I export last week?' });
     expect(choosing.response_format).toMatchObject({ type: 'json_schema', json_schema: { properties: { calls: { type: 'array' } } } });
     // What it was shown to word: the question and the Worker's figures, not a database.
@@ -247,7 +247,7 @@ describe('the routes', () => {
     const now = Math.floor(Date.now() / 1000);
     await lastWeek(h.env.DB, now);
     const list = (await (await h.fetch('/api/tools')).json()) as { tools: { name: string; input_schema: { type: string } }[] };
-    expect(list.tools.map((t) => t.name)).toEqual(['status_now', 'energy', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
+    expect(list.tools.map((t) => t.name)).toEqual(['status_now', 'outages', 'energy', 'power_day', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
     expect(list.tools[1].input_schema.type).toBe('object');
     const ran = await h.fetch('/api/tools/compare_systems?range=last_week');
     expect(ran.status).toBe(200);
