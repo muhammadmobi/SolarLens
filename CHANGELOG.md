@@ -20,7 +20,7 @@ checkout of any tag says which release it is.
 
 - **SolarLens as an MCP server**, at `/mcp`: AI apps outside SolarLens -
   Claude, an IDE, anything that speaks the Model Context Protocol - ask the
-  same fifteen read-only questions as the assistant, from the same tools, whether
+  same sixteen read-only questions as the assistant, from the same tools, whether
   the relay laptops are on or off, and so work as a chatbot over the owner's
   systems. Streamable HTTP with JSON answers; protocol
   versions 2025-06-18, 2025-03-26 and 2024-11-05. Protected by OAuth 2.1 tied to
@@ -47,11 +47,20 @@ checkout of any tag says which release it is.
   named ("which hours do I buy from the grid?") - anything the inverter shows
   (each string's voltage, current and power with a weak string named, the
   grid's voltage and frequency, the power factor, its temperature, the
-  battery's own readings), and how to do something in the app. A
-  question about tomorrow is told plainly that there is no forecast. Read
-  without a model, a question may name a time of day, a system by one word of
-  its name, and carry typing slips in the words it is routed on. A model
-  chooses up to three of fifteen read-only tools and fills in their arguments, which are checked like
+  battery's own readings), what the house draws and which way the grid flows
+  now, any other figure the records hold - a total, an average, the highest or
+  lowest and when, how many days it was above or below an amount, the first or
+  last time, by hour, weekday, day, week, month or year, and what each inverter
+  has made since it was installed ("how many days was the battery full?",
+  "when did I first buy more than 2 kW?") - what a word means (kWp,
+  performance ratio, self-consumption, SOC, MPPT and more), and how to do
+  something in the app. A question about tomorrow is told plainly that there
+  is no forecast. Any question may be asked, in any words: read without a
+  model, a question may name a time of day, a system by one word of its name,
+  two periods to set side by side, or two or three questions at once, carry
+  short forms and typing slips in the words it is routed on, and still be
+  answered when no reading fits - with how the systems are doing. A model
+  chooses up to three of sixteen read-only tools and fills in their arguments, which are checked like
   any input; the Worker computes every figure; the model words them, and words
   stating a number the figures do not hold are replaced by the tools' own. Each
   answer shows its tables, a chart where one helps - lines for a graph, bars

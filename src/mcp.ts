@@ -47,6 +47,7 @@ const TITLES: Record<string, string> = {
   performance_trend: 'Slow decline',
   stats: 'Statistics',
   analysis: 'An analysis: what stands out, and what to do',
+  figures: 'Any figure the records hold',
   report: 'A full report',
   app_help: 'How to use SolarLens',
 };

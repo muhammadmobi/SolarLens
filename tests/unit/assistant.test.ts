@@ -9,7 +9,7 @@
  * when one is set. Workers AI and any other server are scripts here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { checkTurns, converse, guessCalls, mend, periodBefore, periodIn, timesIn, type Call, type Reply } from '../../src/assistant';
+import { checkTurns, converse, figuresIn, guessCalls, mend, periodBefore, periodIn, secondPeriodIn, timesIn, type Call, type Reply } from '../../src/assistant';
 import { hasAi, providerOf } from '../../src/ai';
 import { setRequired } from '../../src/auth/sessions';
 import type { Env } from '../../src/db';
@@ -228,6 +228,114 @@ describe('the questions an owner asks of a day, as typed', () => {
   });
 });
 
+describe('any question, written every which way', () => {
+  // The same two made-up systems; the questions are an owner's, not the examples'.
+  const SITES: Sys[] = [
+    { id: 'soliscloud:plant:gamma', alias: 's1', name: 'Riverside Ongrid', provider: 'soliscloud', kwp: 12, off: 0 },
+    { id: 'solarman:station:delta', alias: 's2', name: 'Orchard Hybrid', provider: 'solarman', kwp: 3.5, off: 0 },
+  ];
+  const ask = (q: string) => guessCalls(q, SITES, NOW, 0, []);
+  const tools = (q: string) => ask(q)?.map((c) => c.tool) ?? null;
+
+  it('finds what answers each question about the systems, whatever its words', () => {
+    const bank: [string, string[]][] = [
+      ['how much solar did we generate in august', ['energy']], ['total units produced this year', ['energy']], ['what was todays generation', ['energy']],
+      ['is my output normal', ['analysis']], ['did we make more this week than last week', ['energy', 'energy']], ['whats the most i ever made in a day', ['figures']],
+      ['what is my average consumption per day', ['figures']], ['am i buying more than selling', ['figures', 'figures']], ['how many days was the battery full', ['figures']],
+      ['when was the battery last below 50%', ['figures']], ['average battery charge last week', ['figures']], ['what hour do we produce the most', ['chart']],
+      ['how much load at night', ['chart']], ['what is the load now', ['status_now']], ['when did i first buy more than 2 kw this week', ['figures']],
+      ['how often did i sell more than 3kw', ['figures']], ['which weekday do we use the most', ['figures']], ['is the wifi of the logger ok', ['outages']],
+      ['what is the pv2 current', ['inverter']], ['tips to save more', ['analysis']], ['total generation since installation', ['figures']],
+      ['what is kwp', ['app_help']], ['difference between kw and kwh', ['app_help']], ['what is the pv1 voltage', ['inverter']],
+      ['tell me everything about orchard', ['analysis']], ['how much did i make yesterday and what is the battery now', ['energy', 'battery']],
+      ['genration tody', ['energy']], ['batery %', ['battery']], ['solar', ['figures']], ['status', ['status_now']],
+      // The most sold at once, the fastest discharge, the lowest daily peak: figures no other tool keeps - but the battery now is the battery's.
+      ['what was the highest export power this month', ['figures']], ['highest discharge rate this week', ['figures']], ['lowest daily peak each week', ['figures']],
+      ['when did the battery last discharge at more than 1 kw', ['figures']], ['is the battery discharging now', ['battery']], ['which hour do we use the most energy', ['chart']],
+    ];
+    for (const [q, want] of bank) expect(tools(q), q).toEqual(want);
+    // Nothing to look up: a greeting, thanks, who it is - each has its own reply (below).
+    for (const q of ['hello', 'thanks', 'who are you']) expect(ask(q), q).toBeNull();
+  });
+
+  it('reads the figure a question asks for: the measure, how, by what, and the amount in its unit', () => {
+    expect(ask('how many days was the battery full')).toEqual([{ tool: 'figures', args: { measure: 'battery_high', stat: 'count', above: 97 } }]);
+    expect(ask('when was the battery last below 50%')).toEqual([{ tool: 'figures', args: { measure: 'battery_charge', stat: 'last', below: 50 } }]);
+    expect(ask('when did i first buy more than 2 kw this week')).toEqual([{ tool: 'figures', args: { measure: 'grid', stat: 'first', above: 2, range: 'this_week' } }]);
+    // Selling is grid power below zero; watts are kilowatts over a thousand.
+    expect(ask('how often did i sell more than 3kw')).toEqual([{ tool: 'figures', args: { measure: 'grid', stat: 'count', below: -3 } }]);
+    expect(ask('how often did the load go over 1500 watts')).toEqual([{ tool: 'figures', args: { measure: 'load', stat: 'count', above: 1.5 } }]);
+    // "Ever" reaches as far as a day's figure does; since it was installed is each inverter's own counter.
+    expect(ask('whats the most i ever made in a day')).toEqual([{ tool: 'figures', args: { measure: 'made', stat: 'highest', range: 'last_12_months' } }]);
+    expect(ask('how much has riverside made in its life')).toEqual([{ tool: 'figures', args: { measure: 'lifetime_made', stat: 'total', system: 'Riverside Ongrid' } }]);
+    expect(ask('which weekday do we use the most')).toEqual([{ tool: 'figures', args: { measure: 'used', by: 'weekday' } }]);
+    expect(ask('am i buying more than selling last month')).toEqual([
+      { tool: 'figures', args: { measure: 'bought', stat: 'total', range: 'last_month' } }, { tool: 'figures', args: { measure: 'sold', stat: 'total', range: 'last_month' } },
+    ]);
+    // Two periods set against each other are each looked at; a second question about now keeps to now.
+    expect(ask('did we make more this week than last week')).toEqual([{ tool: 'energy', args: { range: 'this_week' } }, { tool: 'energy', args: { range: 'last_week' } }]);
+    expect(ask('how much did i make yesterday and what is the battery now')).toEqual([{ tool: 'energy', args: { range: 'yesterday' } }, { tool: 'battery', args: {} }]);
+    // Selling is below zero, so the most sold is the lowest; the hours a house uses most are its load's.
+    expect(ask('what was the highest export power this month')).toEqual([{ tool: 'figures', args: { measure: 'grid', stat: 'lowest', below: 0, range: 'this_month' } }]);
+    expect(ask('which hour do we use the most energy')).toEqual([{ tool: 'chart', args: { metric: 'load', profile: 'hour_of_day', range: 'last_7_days' } }]);
+    // A question about the systems no other reading fits is answered with how they are doing.
+    expect(ask('tell me everything about orchard')).toEqual([{ tool: 'analysis', args: { system: 'Orchard Hybrid' } }]);
+    expect(ask('what is going on with riverside today')).toEqual([{ tool: 'status_now', args: { system: 'Riverside Ongrid' } }]);
+    expect(ask('what colour is the sky')).toBeNull();
+  });
+
+  it('reads the measure, the way and the step from words of every kind', () => {
+    const cases: [string, Record<string, unknown> | null][] = [
+      // The battery: energy in and out, its power either way, its lowest and highest day.
+      ['how much energy was charged into the battery last week', { measure: 'battery_in', stat: 'total' }],
+      ['how much energy has the battery discharged each month', { measure: 'battery_out', stat: 'total', by: 'month' }],
+      ['highest battery power this week', { measure: 'battery_power', stat: 'highest' }],
+      ['max charging rate', { measure: 'battery_power', stat: 'highest' }],
+      // Discharging is battery power below zero, so the most of it is the lowest figure.
+      ['highest discharge rate', { measure: 'battery_power', stat: 'lowest', below: 0 }],
+      ['when was the battery discharging at more than 2 kw', { measure: 'battery_power', below: -2 }],
+      ['how many days was the battery empty', { measure: 'battery_low', stat: 'count', below: 21 }],
+      ['lowest daily battery charge each week', { measure: 'battery_low', stat: 'lowest', by: 'week' }],
+      // The grid: energy or power, bought or sold - selling is below zero too.
+      ['average grid import in kw', { measure: 'grid', stat: 'average' }],
+      ['highest export power', { measure: 'grid', stat: 'lowest', below: 0 }],
+      ['when did i last sell more than 1 kw', { measure: 'grid', stat: 'last', below: -1 }],
+      ['how much energy did i sell', { measure: 'sold', stat: 'total' }],
+      ['total units bought this year', { measure: 'bought', stat: 'total' }],
+      ['the highest grid import each month', { measure: 'bought', stat: 'highest', by: 'month' }],
+      ['what time of day is the grid used the most', { measure: 'grid', by: 'hour_of_day' }],
+      // The house.
+      ['average house load in watts', { measure: 'load', stat: 'average' }],
+      ['how much did the house use each week', { measure: 'used', stat: 'total', by: 'week' }],
+      ['average daily consumption by weekday', { measure: 'used', stat: 'average', by: 'weekday' }],
+      // What was made: a day's peak, the power at a moment, the energy.
+      ['lowest daily peak each week', { measure: 'peak_power', stat: 'lowest', by: 'week' }],
+      ['the peak each day', { measure: 'peak_power', by: 'day' }],
+      ['what was the highest power this week', { measure: 'power', stat: 'highest' }],
+      ['monthly production', { measure: 'made', by: 'month' }],
+      ['yearly generation', { measure: 'made', by: 'year' }],
+      ['lowest solar day this month', { measure: 'made', stat: 'lowest' }],
+      ['how many days did we make over 20 kwh', { measure: 'made', stat: 'count', above: 20 }],
+      ['what colour is the sky', null],
+    ];
+    for (const [q, want] of cases) expect(figuresIn(q), q).toEqual(want);
+  });
+
+  it('writes out short forms, mends two letters swapped, and reads a period however it is written', () => {
+    expect(mend('batery tody avg wk yday')).toBe('battery today average week yesterday');
+    expect(mend('yetserday gneeration')).toBe('yesterday generation');
+    expect(periodIn('what was todays generation', '2026-09-28')).toEqual({ range: 'today' });
+    expect(periodIn('show last weeks chart', '2026-09-28')).toEqual({ range: 'last_week' });
+    expect(periodIn('did the battery run out last night', '2026-09-28')).toEqual({ range: 'yesterday' });
+    // The first period named is the one meant: "August this year" is August.
+    expect(periodIn('how much in august this year', '2026-09-28')).toEqual({ from: '2026-08-01', to: '2026-08-31' });
+    expect(periodIn('what did we make on 3rd september 2026', '2026-09-28')).toEqual({ from: '2026-09-03', to: '2026-09-03' });
+    expect(secondPeriodIn('did we make more this week than last week', '2026-09-28')).toEqual({ range: 'last_week' });
+    expect(secondPeriodIn('august compared with july', '2026-09-28')).toEqual({ from: '2026-07-01', to: '2026-07-31' });
+    expect(secondPeriodIn('how much this week', '2026-09-28')).toBeNull();
+  });
+});
+
 describe('the conversation, as sent', () => {
   it('is turns of either role, the last one the owner\'s, cut to length', () => {
     expect(checkTurns([{ role: 'user', content: '  how  much? ' }])).toEqual([{ role: 'user', content: 'how much?' }]);
@@ -264,6 +372,13 @@ describe('a turn', () => {
   let h: Harness;
   afterEach(() => h.close());
   const turn = async (messages: unknown, useModel = true) => (await converse(h.env, { messages }, useModel, NOW)).body as Reply;
+
+  it('answers a greeting, thanks and who it is as such, with what it can do', async () => {
+    h = createHarness();
+    expect((await turn([{ role: 'user', content: 'Hello' }], false)).answer).toMatch(/^Hello! I can analyse how your systems are doing/);
+    expect((await turn([{ role: 'user', content: 'thanks a lot' }], false)).answer).toBe("You're welcome. Ask anything else about your systems whenever you like.");
+    expect((await turn([{ role: 'user', content: 'who are you?' }], false)).answer).toMatch(/^I am SolarLens's assistant, and every figure I give is worked out from your own systems' records\./);
+  });
 
   it('answers two periods compared in one message, and words them from both', async () => {
     const ai = scripted([
@@ -318,7 +433,7 @@ describe('a turn', () => {
     h = createHarness({ AI: scripted([{ response: { calls: [], reply: 'Hello! Your systems made 1234.5 kWh this year.' } }, { response: { calls: [], reply: 'Hello! Ask me about your systems.' } }]).AI });
     const invented = await turn([{ role: 'user', content: 'Hi there' }]);
     expect(invented).toMatchObject({ kind: 'chat', worded: 'solarlens' });
-    expect(invented.answer).toMatch(/^I can analyse how your systems are doing/);
+    expect(invented.answer).toMatch(/^Hello! I can analyse how your systems are doing/);
     expect(await turn([{ role: 'user', content: 'Hi there' }])).toMatchObject({ kind: 'chat', worded: 'model', answer: 'Hello! Ask me about your systems.' });
   });
 

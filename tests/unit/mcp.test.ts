@@ -59,7 +59,7 @@ describe('the tools', () => {
   it('lists each with its arguments as JSON Schema, marked read-only', async () => {
     const { body } = await send(call(3, 'tools/list'));
     const tools = body!.result.tools as Record<string, any>[];
-    expect(tools.map((t) => t.name)).toEqual(['status_now', 'outages', 'inverter', 'energy', 'power_day', 'chart', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'analysis', 'report', 'app_help']);
+    expect(tools.map((t) => t.name)).toEqual(['status_now', 'outages', 'inverter', 'energy', 'power_day', 'chart', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'analysis', 'figures', 'report', 'app_help']);
     expect(tools[3]).toMatchObject({
       title: 'Energy over a period', inputSchema: { type: 'object', additionalProperties: false },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
