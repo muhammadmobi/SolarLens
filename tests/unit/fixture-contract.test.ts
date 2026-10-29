@@ -235,12 +235,19 @@ describe('the demo matches what the Worker sends', () => {
     const box: { SolarLensDemo?: { demoChat(body: unknown, now: number): Record<string, unknown> } } = {};
     new Function('globalThis', 'window', 'document', src)(box, undefined, undefined);
     const real = (await (await h.fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'How much did I make last week?' }] }) })).json()) as Record<string, unknown>;
-    for (const q of ['a report on last month', 'how do I set up alerts?', 'how much last week?']) {
+    for (const q of ['a report on last month', 'how do I set up alerts?', 'how much last week?', 'graph PV against load today']) {
       const mine = box.SolarLensDemo!.demoChat({ messages: [{ role: 'user', content: q }] }, Math.floor(Date.now() / 1000));
       expect(fields(mine), q).toEqual(fields(real));
     }
     const report = box.SolarLensDemo!.demoChat({ messages: [{ role: 'user', content: 'a report' }] }, Math.floor(Date.now() / 1000)) as { results: { sections?: unknown[] }[] };
     expect(report.results[0].sections?.length).toBeGreaterThan(0);
+    // A graph is the chart tool's result, with what the page needs to draw it.
+    const ask = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'graph PV against load today' }] }) };
+    const realGraph = (await (await h.fetch('/api/chat', ask)).json()) as { results: Record<string, unknown>[] };
+    const graph = box.SolarLensDemo!.demoChat({ messages: [{ role: 'user', content: 'graph PV against load today' }] }, Math.floor(Date.now() / 1000)) as { results: Record<string, unknown>[] };
+    expect(realGraph.results[0].tool).toBe('chart');
+    expect(fields(graph.results[0])).toEqual(fields(realGraph.results[0]));
+    expect((graph.results[0].rows as unknown[]).length).toBeGreaterThan(2);
   });
 
   it("its one-question answers - a question, and \"Why?\" - have the Worker's shape", async () => {

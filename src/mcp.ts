@@ -36,6 +36,8 @@ export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const TITLES: Record<string, string> = {
   status_now: 'Right now',
   outages: 'Outages, and the last power',
+  inverter: 'What the inverter shows',
+  chart: 'A chart of any measure',
   energy: 'Energy over a period',
   power_day: "A day's power, hour by hour",
   battery: 'The battery',

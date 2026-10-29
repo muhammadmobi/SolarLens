@@ -4,8 +4,9 @@
  * The Worker is stubbed as everywhere in this suite; tests/unit/assistant.test.ts
  * and its neighbours hold the understanding, the tools and the agents. These
  * hold the page: a message sent with the conversation before it, and its answer
- * shown with its evidence - the figures, a chart where one helps, a report's
- * parts, the period, how fresh the data was and who worded it; the examples; a
+ * shown with its evidence - the figures, a chart where one helps (bars, or
+ * lines for a chart of any measure), a report's parts, the period, how fresh
+ * the data was and who worded it; the examples; a
  * new conversation, and one that survives a reload; a report downloaded as a
  * page of its own; what each kind of reader is told about the model; the
  * weekly report and each system's health; "Why?" beside a low day; and a
@@ -35,6 +36,17 @@ function reply(over: Record<string, unknown> = {}) {
     used: 3, limit: 100, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', provider: 'workers-ai', ...over,
   };
 }
+
+/** A chart of two measures on the average day, the second missing one hour, in the shape the chart tool gives it. */
+const chartResult = {
+  tool: 'chart', title: 'Grid power and house load, on an average day',
+  period: { from: '2026-09-21', to: '2026-09-27', label: 'the last 7 days (21 – 27 Sep 2026)' },
+  columns: ['Hour', 'Grid power (kW)', 'House load (kW)'],
+  rows: [['00:00', 0.4, 0.5], ['06:00', 0.1, 0.6], ['12:00', -1.2, 0.8], ['18:00', 0.8, null], ['23:00', 0.3, 0.4]],
+  facts: { points: 5 }, notes: ['Grid power is above zero while buying from the grid, and below zero while selling to it.'],
+  summary: 'On an average day over the last 7 days (21 – 27 Sep 2026), you buy from the grid at 00:00–07:00, 18:00–24:00 (most at 18:00, 800 W), and sell to it at 12:00 (most at 12:00, 1.2 kW).',
+  freshness: { newest: NOW - 120, offline: [] }, chart: { kind: 'line', columns: [1, 2] },
+};
 
 const reportReply = () => reply({
   kind: 'report', answer: 'Last week in short: 1260 kWh made.\nThe Hybrid led per kWp.\n- No faults were recorded.',
@@ -172,6 +184,36 @@ test.describe('the conversation', () => {
     expect(html).toContain('<td>1,234.5</td>');
     expect(html).toContain('the words by @cf/meta/llama-3.3-70b-instruct-fp8-fast');
     expect(html).not.toContain('<script');
+  });
+
+  test('draws a chart answer as lines on one scale, zero marked, and keeps the drawing in a download; a chart of days as bars', async ({ page }) => {
+    const world = await stub(page);
+    world.replies.push({ status: 200, body: reply({ answer: chartResult.summary, calls: [{ tool: 'chart', args: { metric: 'grid', versus: 'load', profile: 'hour_of_day' } }], results: [chartResult] }) });
+    await page.goto('/#/ask');
+    await ready(page);
+    await ask(page, 'When do I buy from the grid, against the load?');
+    const bot = lastBot(page);
+    await expect(bot.locator('details.evidence summary')).toHaveText(['Grid power and house load, on an average day · the last 7 days (21 – 27 Sep 2026)']);
+    await expect(bot.locator('.minichart svg path')).toHaveCount(2);
+    await expect(bot.locator('.minichart svg line.zero')).toHaveCount(1);
+    await expect(bot.locator('.minichart svg')).toHaveAttribute('aria-label', 'Grid power (kW) and House load (kW), 00:00 to 23:00');
+    // The load has no reading at 18:00: its line breaks there, rather than joining across.
+    expect((await bot.locator('.minichart path.s1').getAttribute('d'))!.match(/M/g)).toHaveLength(2);
+    await expect(bot.locator('.minichart figcaption span')).toHaveText(['00:00', 'Grid power (kW) House load (kW) · -1.2 to 0.8', '23:00']);
+    const [download] = await Promise.all([page.waitForEvent('download'), bot.getByRole('button', { name: 'Download' }).click()]);
+    const html = readFileSync((await download.path())!, 'utf8');
+    expect(html).toContain('<path class="s0"');
+    expect(html).toContain('<line class="zero"');
+    expect(html).not.toContain('<script');
+
+    // One measure day by day is bars.
+    world.replies.push({ status: 200, body: reply({ answer: 'Power made, day by day.', results: [{
+      ...chartResult, title: 'Power made, day by day', columns: ['Day', 'Power made (kW)'], chart: { kind: 'bar', columns: [1] },
+      rows: [['Mon 21 Sep 2026', 1.2], ['Tue 22 Sep 2026', 0.9], ['Wed 23 Sep 2026', 1.4], ['Thu 24 Sep 2026', 1.1]],
+    }] }) });
+    await ask(page, 'Plot the power each day');
+    await expect(lastBot(page).locator('.minichart svg rect')).toHaveCount(4);
+    await expect(lastBot(page).locator('.minichart svg path')).toHaveCount(0);
   });
 
   test('keeps an answer as text, never markup, in the page and in a download', async ({ page }) => {

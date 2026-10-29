@@ -135,6 +135,18 @@ export const HELP: readonly HelpEntry[] = [
     where: '#/ask',
   },
   {
+    topic: 'Graphs and charts',
+    words: ['graph', 'graphs', 'chart', 'charts', 'plot', 'draw', 'visualise', 'visualize', 'timeframe', 'pattern'],
+    answer: 'Ask tab: ask for a graph in plain words - "graph PV against load today", "plot the battery charge this week", "which hours do I buy from the grid?" - and the answer draws it, over up to three months, with Download to keep it. The Power tab has each day\'s curve, and Historical Data each day\'s energy.',
+    where: '#/ask',
+  },
+  {
+    topic: 'PV strings and voltages',
+    words: ['string', 'pv1', 'pv2', 'pv3', 'pv4', 'mppt', 'voltage', 'volts', 'amps', 'frequency', 'phase', 'phases', 'bms', 'factor'],
+    answer: 'Each system\'s own page (tap it on the Overview): its PV strings - voltage, current and power - the AC side with its phases, frequency and power factor, the temperature, the DC bus, and the battery\'s own readings, as the inverter last reported them. Or ask "what is the PV1 voltage?" or "is a string down?".',
+    where: '#/',
+  },
+  {
     topic: 'The health check',
     words: ['health', 'decline', 'degrade', 'degrading', 'dirty', 'clean', 'cleaning', 'trend', 'slowly', 'worse'],
     answer: 'Every Monday each system\'s output is set against the sunlight on its panels over twelve weeks. A fall of 8% or more - dirt, shade, a failing panel or a string down - is flagged on the Ask tab and told like any other alert.',

@@ -20,7 +20,7 @@ checkout of any tag says which release it is.
 
 - **SolarLens as an MCP server**, at `/mcp`: AI apps outside SolarLens -
   Claude, an IDE, anything that speaks the Model Context Protocol - ask the
-  same twelve read-only questions as the assistant, from the same tools, whether
+  same fourteen read-only questions as the assistant, from the same tools, whether
   the relay laptops are on or off, and so work as a chatbot over the owner's
   systems. Streamable HTTP with JSON answers; protocol
   versions 2025-06-18, 2025-03-26 and 2024-11-05. Protected by OAuth 2.1 tied to
@@ -41,16 +41,23 @@ checkout of any tag says which release it is.
   last made power and why (its datalogger offline, or the relay silent or its
   login run out), the battery's charge and what it took in and gave out, the
   money saved, how much was used at home, how many days made more than an
-  amount, an inverter's temperature, and how to do something in the app. A
+  amount, a graph of power, load, grid, battery power or charge over up to
+  three months - every 15 minutes, hour, day or week, a second measure beside
+  the first ("PV against load"), or the average day hour by hour with the hours
+  named ("which hours do I buy from the grid?") - anything the inverter shows
+  (each string's voltage, current and power with a weak string named, the
+  grid's voltage and frequency, the power factor, its temperature, the
+  battery's own readings), and how to do something in the app. A
   question about tomorrow is told plainly that there is no forecast. Read
   without a model, a question may name a time of day, a system by one word of
   its name, and carry typing slips in the words it is routed on. A model
-  chooses up to three of twelve read-only tools and fills in their arguments, which are checked like
+  chooses up to three of fourteen read-only tools and fills in their arguments, which are checked like
   any input; the Worker computes every figure; the model words them, and words
   stating a number the figures do not hold are replaced by the tools' own. Each
-  answer shows its tables, a chart where one helps, the period, how fresh the
-  data was and who worded it, and **Download** keeps it as a page of its own -
-  a report prints to a PDF. The model is Workers AI by default (Llama 3.3 70B),
+  answer shows its tables, a chart where one helps - lines for a graph, bars
+  for energy - the period, how fresh the data was and who worded it, and
+  **Download** keeps it as a page of its own with its charts - a report prints
+  to a PDF. The model is Workers AI by default (Llama 3.3 70B),
   or any server that speaks OpenAI's chat API - OpenAI, Groq, OpenRouter, or a
   model of the owner's own behind a tunnel - with `AI_BASE_URL`, `AI_MODEL`
   and `AI_API_KEY`. Anyone who can see the dashboard can ask: someone signed in
