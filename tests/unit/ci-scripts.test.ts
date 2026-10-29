@@ -2,14 +2,42 @@
  * Two of the CI scripts decide something on the owner's behalf, so what they
  * decide is pinned here: when the production watcher opens an issue, and when
  * the owner's own pull request is approved. So is how the wrangler wrapper
- * hands wrangler its arguments, which the deploy's rollback depends on.
+ * hands wrangler its arguments, which the deploy's rollback depends on, and
+ * how the deploy reads which commit is serving, which its relay note depends on.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DB_WARN_MB, STALE_MIN, judge } from '../../scripts/ci/watch.mjs';
 import { OWNER, type PullRequestState, readiness } from '../../scripts/ci/approve-if-ready.mjs';
+import { commitOf, jsonIn, liveVersion, messageFor } from '../../scripts/ci/worker-version.mjs';
 import { WRANGLER_CLI, wranglerArgs } from '../../scripts/wrangler.mjs';
+
+describe('the version serving, and the commit it records', () => {
+  const SHA = 'a'.repeat(40);
+
+  it('takes the version at 100% of the newest deployment, out of wrangler banner and all', () => {
+    const raw = `banner line\n${JSON.stringify([
+      { versions: [{ version_id: 'old', percentage: 100 }] },
+      { versions: [{ version_id: 'canary', percentage: 10 }, { version_id: 'main', percentage: 100 }] },
+    ])}\nanother line`;
+    expect(liveVersion(jsonIn(raw) as never)).toBe('main');
+    expect(liveVersion([])).toBeNull();
+  });
+
+  it('reads back the commit the deploy wrote, and nothing from a version that has none', () => {
+    expect(commitOf({ annotations: { 'workers/message': messageFor(SHA) } })).toBe(SHA);
+    expect(commitOf({ annotations: { 'workers/triggered_by': 'upload' } })).toBeNull();
+    expect(commitOf({ annotations: { 'workers/message': 'Smoke test failed for abc123' } })).toBeNull();
+    expect(commitOf(null)).toBeNull();
+    expect(commitOf(jsonIn(`x\n{"annotations":{"workers/message":"${messageFor(SHA)}"}}\n`, '{', '}') as never)).toBe(SHA);
+  });
+
+  it('is written by the deploy in the very form it is read back in', () => {
+    const workflow = readFileSync('.github/workflows/deploy.yml', 'utf8');
+    expect(workflow).toContain(`--message "${messageFor('$SHA')}"`);
+  });
+});
 
 describe('the wrangler wrapper', () => {
   it('hands wrangler every argument whole: a rollback message keeps its spaces', () => {

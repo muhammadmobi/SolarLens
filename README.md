@@ -861,7 +861,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**906 unit tests**, **596 end-to-end tests** (298 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**909 unit tests**, **596 end-to-end tests** (298 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -1246,8 +1246,10 @@ reviewer, and nothing deploys until someone approves the run on GitHub.
 6. **If any of that fails, the previous version is put back automatically** and
    the run is marked failed, with the reason in its log.
 7. **The run's summary says whether the relay computers need updating**, when
-   anything since the last successful deploy touched `agent/`, the relay
-   scripts or a `.cmd` - every commit a merge brought, not only its last.
+   anything since the version that was serving touched `agent/`, the relay
+   scripts or a `.cmd` - every commit a merge brought, not only its last. Each
+   deploy records its commit on the Worker version it makes, which is how the
+   next one knows what was serving.
 
 `.github/workflows/pages.yml` publishes the demo to GitHub Pages when `public/` or `demo/`
 changes - see [The demo on GitHub Pages](#the-demo-on-github-pages).
@@ -1523,7 +1525,7 @@ solar-lens/
 │   ├── ci/smoke.mjs             asks the live site whether the deploy worked
 │   ├── ci/watch.mjs             the production watcher: opens and closes its issue
 │   ├── ci/approve-if-ready.mjs  approves the owner's own pull request when it is ready
-│   ├── ci/worker-version.mjs    the version now serving, for a rollback
+│   ├── ci/worker-version.mjs    the version now serving, for a rollback, and the commit it was built from
 │   ├── ci/release-notes.mjs     the changelog section, if the release is ready
 │   ├── setup-relay.ps1          installs the relay on a machine, start to finish
 │   ├── renew-solis-login.ps1    renews the login and restarts the hidden relay
