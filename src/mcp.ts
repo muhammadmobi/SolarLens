@@ -139,9 +139,12 @@ async function answer(env: Env, m: unknown, now: number): Promise<Rpc | null> {
   }
 }
 
+/** The most messages one batch may carry. */
+export const MAX_BATCH = 50;
+
 /**
  * Answer a request to /mcp, already authorised. A POST carries one message or
- * a batch; the answers go back as JSON, or 202 with no body when there is
+ * a batch of up to MAX_BATCH; the answers go back as JSON, or 202 with no body when there is
  * nothing to answer. Nothing is ever sent unasked, so GET, which would open an
  * event stream for that, is refused, as is DELETE: there is no session to end.
  */
@@ -156,8 +159,13 @@ export async function handleMcp(env: Env, req: Request, now = nowSec()): Promise
   const batch = Array.isArray(payload);
   const messages = batch ? (payload as unknown[]) : [payload];
   if (batch && !messages.length) return Response.json(fail(null, -32600, 'Invalid Request'), { status: 400 });
+  // A larger batch is refused whole, and says why: answering only the first
+  // MAX_BATCH would leave the rest without an answer and the client none the wiser.
+  if (messages.length > MAX_BATCH) {
+    return Response.json(fail(null, -32600, `Invalid Request: a batch carries at most ${MAX_BATCH} messages`), { status: 400 });
+  }
   const out: Rpc[] = [];
-  for (const m of messages.slice(0, 50)) {
+  for (const m of messages) {
     const r = await answer(env, m, now);
     if (r) out.push(r);
   }

@@ -261,10 +261,17 @@ describe('posting', () => {
     const stored = await getChannel(h.env.DB, tg.id);
     expect(stored).toMatchObject({ failures: 1, last_error_at: NOW });
     expect(stored!.last_error).not.toContain('<');
+    expect(stored!.last_error).toBe('HTTP 400: Bad Request: chat not found');   // the echoed token gone, every part of it
+
+    // Echoed as it was sent, or in a form of its own, no part of a token or an address is kept.
+    stubServices(400, JSON.stringify({ description: `Bad Request: chat -4242 not found for bot${TG_TOKEN.replace(':', '%3A')}` }));
+    expect((await deliver(h.env, tg, testMessage(tg, NOW), NOW)).error).toBe('HTTP 400: Bad Request: chat not found for');
 
     const dc = await add({ kind: 'discord', url: DISCORD });
     stubServices(401, JSON.stringify({ message: 'Invalid Webhook Token', code: 50027 }));
     expect((await deliver(h.env, dc, testMessage(dc, NOW), NOW)).error).toBe('HTTP 401: Invalid Webhook Token');
+    stubServices(404, JSON.stringify({ message: `Unknown Webhook ${DISCORD}` }));
+    expect((await deliver(h.env, dc, testMessage(dc, NOW), NOW)).error).toBe('HTTP 404: Unknown Webhook');
 
     // A webhook's answer is not read at all: it could echo anything.
     const hook = await add({ kind: 'webhook', url: HOOK });

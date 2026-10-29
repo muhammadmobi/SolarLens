@@ -13,12 +13,13 @@ import { HYBRID, NOW, SOLIS, deviceHistory, devices, historyRows, inverters, ser
 
 const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-/** Today's expected output for the SolisCloud fixture plant: a clear-sky bell up to now. */
+/**
+ * Today's expected output for the SolisCloud fixture plant: a clear-sky bell over the twelve hours up
+ * to now. Counted back from now, so the line has its points whatever the hour the suite runs at:
+ * counted on from 07:00, a run at 07:24 had one point, and one point draws no line.
+ */
 function expected(expectedKwh = 60, over: Record<string, unknown> = {}) {
-  const start = new Date(); start.setHours(0, 0, 0, 0);
-  const t0 = Math.floor(start.getTime() / 1000);
-  const hours = Array.from({ length: 12 }, (_, i) => ({ ts: t0 + (7 + i) * 3600, expected_w: Math.round(9000 * Math.sin((Math.PI * (i + 0.5)) / 12)) }))
-    .filter((h) => h.ts <= NOW);
+  const hours = Array.from({ length: 12 }, (_, i) => ({ ts: NOW - (11 - i) * 3600, expected_w: Math.round(9000 * Math.sin((Math.PI * (i + 0.5)) / 12)) }));
   return { now: NOW, systems: [{ inverter_id: SOLIS, ratio: 0.81, learned: true, days: 9, sun_kwh_m2: 6.2, expected_kwh: expectedKwh, hours, ...over }] };
 }
 

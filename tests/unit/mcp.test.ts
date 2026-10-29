@@ -10,7 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { handleMcp, negotiate, resultText } from '../../src/mcp';
+import { MAX_BATCH, handleMcp, negotiate, resultText } from '../../src/mcp';
 import type { ToolResult } from '../../src/tools';
 import { createHarness, type Harness } from '../helpers/worker';
 import { addDay, addSystem, isoOf } from '../helpers/solar-days';
@@ -105,6 +105,14 @@ describe('everything else', () => {
   it('answers a batch with a batch, leaving out what needs no answer', async () => {
     const { body } = await send([call(10, 'ping'), { jsonrpc: '2.0', method: 'notifications/initialized' }, call(11, 'tools/list')]);
     expect((body as unknown as { id: number }[]).map((m) => m.id)).toEqual([10, 11]);
+  });
+
+  it('refuses a batch too large to answer whole, rather than answer part of it', async () => {
+    const full = await send(Array.from({ length: MAX_BATCH }, (_, i) => call(i, 'ping')));
+    expect(full.body).toHaveLength(MAX_BATCH);
+    const over = await send(Array.from({ length: MAX_BATCH + 1 }, (_, i) => call(i, 'ping')));
+    expect(over).toMatchObject({ status: 400, body: { jsonrpc: '2.0', id: null, error: { code: -32600 } } });
+    expect(over.body!.error.message).toContain(`at most ${MAX_BATCH}`);
   });
 
   it('opens no event stream and keeps no session: GET and DELETE are refused', async () => {

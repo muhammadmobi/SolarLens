@@ -167,23 +167,24 @@ jobs:
       - run: npx playwright install --with-deps chrome
       - name: Compare with the recorded pictures
         run: |
-          before=$(ls tests/visual/__screenshots__/linux 2>/dev/null | wc -l)
-          # First pass: record a picture for any view that has none. Playwright
-          # marks such a test failed while writing it, so this pass is not the
-          # verdict...
-          npx playwright test -c playwright.visual.config.ts --update-snapshots=missing --reporter=dot || true
-          # ...this one is: every view now has a picture, and only a real
-          # difference from it fails.
-          npx playwright test -c playwright.visual.config.ts
-          after=$(ls tests/visual/__screenshots__/linux | wc -l)
+          before=$(find tests/visual/__screenshots__/linux -maxdepth 1 -type f 2>/dev/null | wc -l)
+          # Every view is compared with its picture in the repository. A view
+          # with none fails too: Playwright records one and marks the test
+          # failed, so a new view - or a picture gone missing - can never pass
+          # by being compared with itself. The recorded picture goes up with
+          # the visual-baselines artifact, to be looked at and committed.
+          status=0
+          npx playwright test -c playwright.visual.config.ts --update-snapshots=missing || status=$?
+          after=$(find tests/visual/__screenshots__/linux -maxdepth 1 -type f | wc -l)
           if [ "$after" -gt "$before" ]; then
             {
-              echo "### New screenshot baselines recorded"
+              echo "### Views with no picture to compare with"
               echo
-              echo "$((after - before)) view(s) had no picture to compare with, so one was recorded."
-              echo "Download the **visual-baselines** artifact and add its files to \`tests/visual/__screenshots__/linux/\`."
+              echo "$((after - before)) view(s) had no picture in the repository, so the check failed and one was recorded."
+              echo "Download the **visual-baselines** artifact, look at each new picture, and commit it under \`tests/visual/__screenshots__/linux/\`."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+          exit "$status"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

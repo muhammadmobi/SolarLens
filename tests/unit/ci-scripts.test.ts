@@ -108,6 +108,15 @@ describe("approving the owner's own pull request", () => {
     expect(readiness(ready({ reviews: [] })).ready).toBe(false);
   });
 
+  it('holds back while Copilot asks for changes to the newest commit, whatever became of its threads', () => {
+    const asked = { author: 'copilot-pull-request-reviewer', state: 'CHANGES_REQUESTED', commit: HEAD };
+    expect(readiness(ready({ reviews: [asked] })).why.join()).toMatch(/asked for changes/);
+    // Its last word on the commit is what counts: a later review that asks for nothing lets it through.
+    expect(readiness(ready({ reviews: [asked, { ...asked, state: 'COMMENTED' }] })).ready).toBe(true);
+    // And one asking for changes to an older commit says nothing about this one.
+    expect(readiness(ready({ reviews: [{ ...asked, commit: 'older' }, { ...asked, state: 'COMMENTED' }] })).ready).toBe(true);
+  });
+
   it('waits while a review thread is open, and approves a commit only once', () => {
     expect(readiness(ready({ openThreads: 2 })).why.join()).toMatch(/2 review thread/);
     expect(readiness(ready({ approvedAtHead: true })).why.join()).toMatch(/already approved/);

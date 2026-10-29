@@ -9,7 +9,8 @@
  * - the pull request is the owner's own, and not a draft;
  * - it does not say "do not merge" in its title or description;
  * - every check on its newest commit has finished, and none failed;
- * - Copilot has reviewed that newest commit, not an older one;
+ * - Copilot has reviewed that newest commit, not an older one, and did not
+ *   ask for changes to it;
  * - no review thread is still open.
  *
  * Anyone else's pull request is left for the owner to review. Run by
@@ -39,8 +40,11 @@ export function readiness(pr) {
   if (!pr.checks.length) why.push('no checks have run on its newest commit');
   if (pending.length) why.push(`${pending.length} check(s) still running: ${pending.map((c) => c.name).join(', ')}`);
   if (failed.length) why.push(`${failed.length} check(s) failed: ${failed.map((c) => c.name).join(', ')}`);
-  const copilot = pr.reviews.filter((r) => COPILOT.test(r.author));
-  if (!copilot.some((r) => r.commit === pr.head)) why.push('Copilot has not reviewed its newest commit');
+  // Copilot's reviews of the newest commit, oldest first: the last one is its word on it, and one
+  // asking for changes holds the approval back even once its threads are resolved.
+  const copilot = pr.reviews.filter((r) => COPILOT.test(r.author) && r.commit === pr.head);
+  if (!copilot.length) why.push('Copilot has not reviewed its newest commit');
+  else if (copilot[copilot.length - 1].state === 'CHANGES_REQUESTED') why.push('Copilot asked for changes to its newest commit');
   if (pr.openThreads > 0) why.push(`${pr.openThreads} review thread(s) still open`);
   if (pr.approvedAtHead) why.push('it is already approved at this commit');
   return { ready: why.length === 0, why };

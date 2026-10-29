@@ -154,6 +154,17 @@ export async function chat(
 }
 
 /**
+ * The address without the slashes it ends in. Counted off the end rather than
+ * matched with /\/+$/, which takes time growing with the square of a long run
+ * of slashes that is not at the end.
+ */
+function withoutTrailingSlashes(s: string): string {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(0, end);
+}
+
+/**
  * The same call to a server that speaks OpenAI's chat completions. JSON is
  * asked for as a JSON object, which such servers widely support, and read
  * leniently all the same. Errors name the status only - never the address,
@@ -162,7 +173,7 @@ export async function chat(
 async function chatExternal(
   env: Env, messages: ChatMessage[], opts: { schema?: Record<string, unknown>; maxTokens?: number },
 ): Promise<{ text: string; json: unknown }> {
-  const res = await fetch(`${env.AI_BASE_URL!.replace(/\/+$/, '')}/chat/completions`, {
+  const res = await fetch(`${withoutTrailingSlashes(env.AI_BASE_URL!)}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(env.AI_API_KEY ? { authorization: `Bearer ${env.AI_API_KEY}` } : {}) },
     body: JSON.stringify({

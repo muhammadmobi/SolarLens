@@ -10,7 +10,7 @@
  * Open-Meteo is stubbed; nothing here reaches the network.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FIRST_DAYS, WEATHER_KEEP_S, fetchWeather, locationOf, locations, parseWeather, refreshWeather, storeWeather, upsertLocation, weatherSince } from '../../src/weather';
+import { FIRST_DAYS, PLACES_PER_RUN, WEATHER_KEEP_S, fetchWeather, locationOf, locations, parseWeather, refreshWeather, storeWeather, upsertLocation, weatherSince } from '../../src/weather';
 import { TYPICAL_RATIO, expectedToday } from '../../src/expected';
 import { createTestD1, type TestD1 } from '../helpers/d1';
 import { HOURLY, agentsDone, bearer, createHarness } from '../helpers/worker';
@@ -84,16 +84,38 @@ describe('the weather kept', () => {
     await upsertLocation(d1!.db, 'inv', HERE);
     d1!.raw.prepare('INSERT INTO weather_hourly (inverter_id, ts, ghi_wm2) VALUES (?, ?, ?)').run('old', now - WEATHER_KEEP_S - 10, 1);
     const days: string[] = [];
+    // As Open-Meteo answers on the hour: the hour that has just ended, and the next one, forecast.
     const fetcher = (async (url: string) => {
       days.push(new URL(url).searchParams.get('past_days')!);
-      return new Response(JSON.stringify({ hourly: { time: [now - 3600, now + 3600], shortwave_radiation: [400, 500] } }));
+      return new Response(JSON.stringify({ hourly: { time: [now, now + 3600], shortwave_radiation: [400, 500] } }));
     }) as unknown as typeof fetch;
     await refreshWeather(d1!.db, now, fetcher);
-    await refreshWeather(d1!.db, now + 60, fetcher);        // not due yet
+    await refreshWeather(d1!.db, now + 60, fetcher);        // not due yet: the hour gone is kept
     await refreshWeather(d1!.db, now + 3700, fetcher);      // an hour on
     expect(days).toEqual([String(FIRST_DAYS), '1']);
     const kept = await weatherSince(d1!.db, 0);
-    expect(kept.map((r) => r.inverter_id)).toEqual(['inv', 'inv']);   // the forecast hour and the old one are not
+    expect(kept.map((r) => [r.inverter_id, r.ts])).toEqual([['inv', now], ['inv', now + 3600]]);   // the year-old hour is not
+  });
+
+  it('fetches a position once for all the systems at it, and only a few positions a run', async () => {
+    d1 = createTestD1();
+    const now = 1000 * 3600;
+    await upsertLocation(d1!.db, 'a', HERE);
+    await upsertLocation(d1!.db, 'b', { lat: HERE.lat + 0.001, lng: HERE.lng });   // the same, rounded
+    for (let i = 0; i < PLACES_PER_RUN + 2; i++) await upsertLocation(d1!.db, `far-${i}`, { lat: i + 1, lng: i + 1 });
+    const asked: string[] = [];
+    const fetcher = (async (url: string) => {
+      asked.push(new URL(url).searchParams.get('latitude')!);
+      return new Response(JSON.stringify({ hourly: { time: [now], shortwave_radiation: [300] } }));
+    }) as unknown as typeof fetch;
+    await refreshWeather(d1!.db, now, fetcher);
+    expect(asked).toHaveLength(PLACES_PER_RUN);
+    await refreshWeather(d1!.db, now + 60, fetcher);        // the rest, in the run after
+    expect(asked).toHaveLength(PLACES_PER_RUN + 3);
+    expect(new Set(asked).size).toBe(asked.length);         // no position asked for twice
+    const kept = (await weatherSince(d1!.db, 0)).map((r) => r.inverter_id);
+    expect(kept).toHaveLength(PLACES_PER_RUN + 4);          // every system, a and b from one answer
+    expect(kept).toEqual(expect.arrayContaining(['a', 'b']));
   });
 
   it('carries on with the others when one position fails', async () => {
