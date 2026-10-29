@@ -59,8 +59,9 @@ test('says which release it describes, and names the systems it is describing', 
   await stubApi(page);
   await page.goto('/#/guide');
   await expect(page.locator('.guide .ver')).toHaveText(`SolarLens ${VERSION}`);
-  // The card is about the release line, 3.0, whatever fix of it is running.
-  await expect(page.locator('.guide')).toContainText(`What is new in ${VERSION.split('.').slice(0, 2).join('.')}`);
+  // The card is about the release line, 3.0, whatever fix of it is running -
+  // its heading exactly, so a heading naming the full version fails here.
+  await expect(page.locator('.guide h2', { hasText: 'What is new in' })).toHaveText(`What is new in ${VERSION.split('.').slice(0, 2).join('.')}`);
 
   const systems = page.locator('.guide .systems span');
   await expect(systems).toHaveCount(2);

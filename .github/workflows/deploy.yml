@@ -20,8 +20,6 @@ on:
 
 permissions:
   contents: read
-  # The relay note at the end asks which commit the last successful deploy ran.
-  actions: read
 
 # One deploy at a time, and never cancel one half-way.
 #
@@ -88,6 +86,13 @@ jobs:
             echo "Could not read the version now serving: this run cannot roll itself back." \
               >> "$GITHUB_STEP_SUMMARY"
           fi
+          # And the commit it was deployed from, which the relay note at the end
+          # compares with. A version deployed before deploys recorded one has
+          # none; the note falls back to the last release tag.
+          if commit=$(node scripts/ci/worker-version.mjs --commit); then
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            echo "Serving commit: $commit"
+          fi
 
       # A restore point, before anything changes the database. D1 keeps thirty
       # days of history (Time Travel) whatever this does; the bookmark is the
@@ -120,8 +125,13 @@ jobs:
       - name: Apply database migrations
         run: npm run db:remote
 
+      # The new version records the commit it was built from - the whole of it
+      # in its message, which the next deploy reads back (worker-version.mjs
+      # --commit), and the short form as its tag, for the dashboard's list.
       - name: Deploy the Worker
-        run: npm run deploy
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: npm run deploy -- --tag "${SHA:0:12}" --message "From commit $SHA"
 
       - name: Ask the live site whether it works
         id: smoke
@@ -141,28 +151,25 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The relay laptops run their own copy of the relay code, so the summary
-      # says when a deploy changed it. It compares with what was live before
+      # says when a deploy changed it. It compares with what was serving before
       # this deploy, not with the commit before this one: "Rebase and merge"
       # brings a pull request's commits to main in one push, and the 3.0.0
       # merge was twenty-seven of them, with the relay's setup changed in an
-      # early one that HEAD^..HEAD never saw. The version remembered above is a
-      # Worker version, which names no commit, so the commit comes from the last
-      # Deploy run that succeeded, with the last release tag behind it. GitHub
-      # records a run that Checks started against main as it stood when Checks
-      # finished - the commit it deployed, unless a second merge landed while
-      # those checks ran.
+      # early one that HEAD^..HEAD never saw. What was serving is read from the
+      # version itself (the commit each deploy records on it), so it is right
+      # after a rollback or a re-run of an older deploy too; a version from
+      # before deploys recorded one falls back to the last release tag.
       - name: Say whether the relay computers need updating
         if: success()
         env:
-          GH_TOKEN: ${{ github.token }}
+          LIVE: ${{ steps.before.outputs.commit }}
         run: |
-          live=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?status=success&per_page=10" \
-            --jq "[.workflow_runs[] | select(.id != $GITHUB_RUN_ID)][0].head_sha // empty" 2>/dev/null || true)
+          live="$LIVE"
           if [ -n "$live" ] && git cat-file -e "$live^{commit}" 2>/dev/null; then
-            echo "Comparing with $live, the commit of the last successful deploy"
+            echo "Comparing with $live, the commit the version serving before this deploy was built from"
           else
             live=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
-            echo "Could not read the commit of the last successful deploy; comparing with the last release tag instead: ${live:-there is none}"
+            echo "The version serving before this deploy recorded no commit; comparing with the last release tag instead: ${live:-there is none}"
           fi
           changed=''
           if [ -n "$live" ]; then changed=$(git diff --name-only "$live" HEAD || true); fi

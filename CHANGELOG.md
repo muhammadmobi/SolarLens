@@ -27,9 +27,11 @@ line, 3.0, rather than by this fix.
   pull request's commits to `main` in one push - so the 3.0.0 deploy,
   twenty-seven commits, said nothing about the relay's setup changing in an
   early one.
-  It now compares with the commit the last successful deploy ran, or the last
-  release tag if GitHub cannot say, and lists only the files that run on the
-  relay laptops. 3.0.0 changed `scripts/setup-relay.ps1`, so a relay laptop
+  It now compares with the commit the version serving before the deploy was
+  built from - each deploy records its commit on the Worker version it makes,
+  so this holds after a rollback or a re-run too - or the last release tag for
+  a version from before that, and lists only the files that run on the relay
+  laptops. 3.0.0 changed `scripts/setup-relay.ps1`, so a relay laptop
   set up before it should run `setup-solarlens-relay.cmd` once more.
 
 ## [3.0.0] — 2026-10-29
