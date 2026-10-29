@@ -189,6 +189,15 @@ test.describe('Overview', () => {
     await expect(page.locator('#fleet-today')).toHaveText('62.7 kWh');
   });
 
+  test("a system silent since an earlier day adds nothing to today's energy", async ({ page }) => {
+    // The Solis plant's newest reading is two days old: its day counters are that day's, not today's.
+    await stubApi(page, { invs: inverters({ solis: { ts: NOW - 2 * 86400 } }) });
+    await page.goto('/');
+    await expect(page.locator('#fleet-quiet')).toHaveText('Demo Solis Plant offline');
+    await expect(page.locator('#fleet-today')).toHaveText('13.7 kWh');
+    await expect(page.locator('#fleet-used')).toHaveText('4.8 kWh');
+  });
+
   test('an offline system zeroes its grid, load and battery too', async ({ page }) => {
     await stubApi(page, { invs: inverters({ solarman: { ts: NOW - 3600 } }) });
     await page.goto('/#/system/' + encodeURIComponent(HYBRID));
