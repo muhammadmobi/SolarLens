@@ -269,7 +269,10 @@ because of the login - though nothing locks until the owner turns it on.
   every plant is still read at least every fifteen minutes - inside the 25
   after which the page calls a system offline - without one run making every
   vendor call there is. Past twelve, a plant waits longer rather than a run
-  outgrowing the free plan's fifty database queries. SolisCloud's plant and
+  outgrowing the free plan's fifty database queries. A run also stores four
+  inverters and three hardware records at most, a plant's position in one
+  write for all its inverters, and the slow extras for one plant of its group;
+  a plant with more of either has them read in turns. SolisCloud's plant and
   inverter lists are read page by page, as SolarMan's are, so an account with
   more than fifty of either sees them all.
 

@@ -47,7 +47,7 @@ vi.mock('../../src/providers/solarman-web', async (orig) => ({
   SolarmanWebProvider: class { constructor() { const p = new StubProvider(); p.id = 'solarman' as never; solarmanWeb.instances.push(p); return p; } },
 }));
 
-const { buildProviders, plantFilter, plantsThisRun, pollAll, pollExtras, yearsFromMonths, PLANTS_PER_RUN } = await import('../../src/poll');
+const { buildProviders, inTurn, plantFilter, plantsThisRun, pollAll, pollExtras, yearsFromMonths, PLANTS_PER_RUN } = await import('../../src/poll');
 
 let d1: TestD1;
 const envWith = (over: Partial<Env> = {}): Env => ({ DB: d1.db, ASSETS: {} as Fetcher, ...over });
@@ -323,6 +323,19 @@ describe('plantsThisRun', () => {
       // Every plant still has its turn, once a round of a group per run.
       expect(longestWait(n), `${n} plants`).toEqual({ minutes: 5 * Math.ceil(n / PLANTS_PER_RUN), seen: n });
     }
+  });
+
+  it("takes a plant's inverters and records in turns once there are more than a run stores", () => {
+    const items = Array.from({ length: 10 }, (_, i) => i);
+    expect(inTurn(items.slice(0, 4), 4, 7)).toEqual([0, 1, 2, 3]);
+    // Ten, four a run: three runs see every one of them.
+    const seen = new Set<number>();
+    for (let round = 0; round < 3; round++) {
+      const got = inTurn(items, 4, round);
+      expect(got).toHaveLength(4);
+      for (const i of got) seen.add(i);
+    }
+    expect([...seen].sort((a, b) => a - b)).toEqual(items);
   });
 
   it('keeps a plant in its group whatever order the vendor lists them in', () => {
