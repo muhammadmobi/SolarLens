@@ -22,6 +22,8 @@ export interface Plant {
   tzOffsetSec?: number | null;
   /** The plant's IANA zone name, where the vendor states one. */
   tzName?: string | null;
+  /** Where the plant is, where the vendor says - the owner's alone; see src/weather.ts. */
+  location?: { lat: number; lng: number } | null;
 }
 
 export interface Inverter {

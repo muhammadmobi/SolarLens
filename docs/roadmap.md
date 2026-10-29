@@ -134,6 +134,13 @@ approve pull requests", and a `SOLARLENS_URL` repository secret for the watcher.
   dashboard needs a sign-in, showing where the systems are no longer publishes
   it.
 
+**As built:** the performance ratio is learned per system from its own recent
+sunny, fully-recorded days, not assumed, and the alert fires below 60% of what
+the sunlight allowed. Battery health is an estimate of usable capacity from
+each day's charge and swing, since neither vendor reports a hybrid's state of
+health here. The map is owner-only whatever the privacy switch says - a share
+link does not get it - and its tiles see only this site's origin.
+
 ### 8. Money and carbon
 
 A Settings page for the tariff and net metering, filled in by the owner when

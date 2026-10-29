@@ -8,6 +8,7 @@
  * It can break whenever the portal changes; the refresh grant below is a
  * standard OAuth2 form and has not yet been exercised against the real server.
  */
+import { locationOf } from '../weather';
 import type { Device, Inverter, Plant, Provider, Reading } from './types';
 import { CallQueue } from './queue';
 import { num, offsetOfZoneAt, pick, toWatts, tzNameOf, tzOffsetSec } from './units';
@@ -110,6 +111,7 @@ export class SolarmanWebProvider implements Provider {
       capacityW: toWatts(pick(s, 'installedCapacity'), 'kW'),
       tzOffsetSec: tzOffsetSec(s),
       tzName: tzNameOf(s),
+      location: locationOf(s),
     }));
     for (const p of plants) this.plants.set(p.id, p);
     return plants;

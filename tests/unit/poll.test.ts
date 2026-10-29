@@ -309,3 +309,15 @@ describe('plantsThisRun', () => {
     spy.mockRestore();
   });
 });
+
+describe("a plant's position", () => {
+  it("is kept for each of the plant's systems, apart from everything public", async () => {
+    const spy = vi.spyOn(StubProvider.prototype, 'listPlants').mockResolvedValue([
+      { id: 'plant-1', name: 'Stub Plant', capacityW: 10_000, location: { lat: 12.5, lng: -45.5 } },
+    ] as never);
+    const env = envWith({ SOLIS_KEY_ID: 'id', SOLIS_KEY_SECRET: 'secret' });
+    await pollAll(env);
+    expect(d1.raw.prepare('SELECT inverter_id, lat, lng FROM plant_location').all()).toEqual([{ inverter_id: 'soliscloud:inv-1', lat: 12.5, lng: -45.5 }]);
+    spy.mockRestore();
+  });
+});

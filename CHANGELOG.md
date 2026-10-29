@@ -18,6 +18,25 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **Output measured against the weather.** Each system's position is read
+  from its vendor's plant record and kept for the owner alone, and every hour
+  the Worker asks Open-Meteo - at the position rounded to about a kilometre -
+  for the sunlight, temperature and cloud there. Each system learns its own
+  performance ratio from its last fortnight's sunny days (the median, so one
+  odd day does not move it). The day curve carries a dashed line of what the
+  sun allowed; the system's page has an *Against the weather* card; and an
+  alert says when a system makes less than 60% of what its sunlight allowed.
+  `GET /api/weather` and `GET /api/expected`.
+
+- **A battery's usable capacity, over time**, on the History tab: each day's
+  charge over how far the charge rose, from days with a swing of 30 points or
+  more, against the nameplate and against the oldest days in view. The daily
+  history now carries each day's lowest and highest charge.
+
+- **A site map, for the owner only**: each system on OpenStreetMap, with
+  Leaflet loaded from cdnjs behind an integrity hash, and each position listed
+  with a link. `GET /api/locations` answers the owner and nobody else.
+
 - **The CI/CD gaps, closed without a staging server.**
   - *Integration tests against the real Worker*: wrangler starts it in workerd
     on a throwaway local database, and the tests check what only workerd can
@@ -127,6 +146,10 @@ checkout of any tag says which release it is.
 
 - **The deploy's smoke test** reads freshness from `/api/status`, and on a
   private dashboard checks that a signed-out caller is asked to sign in.
+
+- **The security policy admits the site map's sources**: Leaflet from cdnjs
+  (scripts and styles) and tiles from OpenStreetMap (images). Only the owner's
+  map view loads them.
 
 - **The installed app keeps no API answers offline.** Its service worker kept
   every same-origin answer for when the network was gone; an answer now

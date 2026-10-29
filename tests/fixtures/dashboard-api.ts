@@ -147,13 +147,13 @@ export function historyRows() {
     rows.push({
       inverter_id: SOLIS, day: day(n), yield_kwh: 44.7 - n, peak_w: 9470,
       load_kwh: null, import_kwh: null, export_kwh: null,
-      batt_charge_kwh: null, batt_discharge_kwh: null,
+      batt_charge_kwh: null, batt_discharge_kwh: null, soc_min: null, soc_max: null,
       samples: 111, first_ts: NOW - 86400, last_ts: NOW,
     });
     rows.push({
       inverter_id: HYBRID, day: day(n), yield_kwh: 13.2 - n, peak_w: 2850,
       load_kwh: 5.3, import_kwh: 2.2, export_kwh: 9.4,
-      batt_charge_kwh: 0.9, batt_discharge_kwh: 0.2,
+      batt_charge_kwh: 0.9, batt_discharge_kwh: 0.2, soc_min: 42, soc_max: 100,
       samples: 140, first_ts: NOW - 86400, last_ts: NOW,
     });
   }

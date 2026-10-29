@@ -467,7 +467,8 @@ test.describe('Historical Data', () => {
   test('says the record starts when SolarLens did, and shows the vendor totals beside it', async ({ page }) => {
     await stubApi(page);
     await page.goto('/#/history');
-    await expect(page.locator('.cardnote')).toContainText('begins when it started collecting');
+    // Other notes share the class now (the battery's capacity), so this one is found by what it says.
+    await expect(page.locator('.cardnote', { hasText: 'begins when it started collecting' })).toBeVisible();
     const solis = page.locator('details.syssec').nth(0);
     await expect(solis).toContainText('Recorded here');
     // 48852 kWh lifetime against four days of our own: the two must never be

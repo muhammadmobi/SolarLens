@@ -40,9 +40,9 @@ git clone https://github.com/muhammadmobi/SolarLens
 cd SolarLens
 npm ci
 npm run typecheck             # types for src/ and tests/
-npm run test:unit             # ~550 tests, a few seconds
+npm run test:unit             # ~575 tests, a few seconds
 npm run test:unit:coverage    # the same, with the coverage thresholds applied
-npm run test:e2e              # ~460 tests, a few minutes, needs Chrome
+npm run test:e2e              # ~490 tests, a few minutes, needs Chrome
 ```
 
 All of that runs with no Cloudflare account, no database and no vendor
@@ -140,6 +140,8 @@ stays open for monitoring.
 | `src/auth/routes.ts` | The sign-in routes under `/auth`, Settings, and share links at `/s/`. |
 | `src/auth/webauthn.ts` | Passkeys: the CBOR, the keys and the two ceremonies, verified with WebCrypto. |
 | `src/auth/crypto.ts` | Tokens, hashes, HMAC and the password, all WebCrypto. |
+| `src/weather.ts` | Each system's position (from the vendor's plant record, owner-only) and its hourly weather from Open-Meteo, fetched by the cron. |
+| `src/expected.ts` | What each system should make of its sun: its performance ratio learned from its recent sunny days, and today's expected output. |
 | `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, and sends the raw payload only as its alert fields and a cleaned `telemetry` copy. |
 | `src/relays.ts` | Validates a relay's report on itself into a narrow shape. |
 | `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. |
@@ -177,6 +179,8 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `readings` | sample | Keyed `(inverter_id, ts, source)`. Holds the normalised columns **and** `raw`, the untouched vendor JSON, which is never served. `tz_offset_sec` is the offset in force *when it was read*, so a day keeps its boundary after the clocks change; every row in production carries it since the 2.9 backfill |
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC. A logger's `logger` (link, signal bars, uptime, make date) is public |
 | `device_network` | datalogger | Its operator and cell, or MAC address. Owner only, never served - and a table of its own, because a Worker rolled back to 2.10 would serve any new column on `devices` |
+| `plant_location` | system | Its position. Owner-only; sent to Open-Meteo only rounded to about a kilometre |
+| `weather_hourly` | system and hour | Sunlight, temperature and cloud from Open-Meteo; kept 400 days |
 | `device_samples` | change in a device's status or signal | The link history on the Devices tab. Written on a change, or hourly while nothing changes; kept 90 days |
 | `alarms` | vendor fault | Severity, raised, cleared, readable name |
 | `vendor_periods` | vendor period total | Day, month and year totals per plant, from the vendor itself, back to installation |
@@ -290,6 +294,10 @@ decides it:
   point, since the plant records carry notes, codes and a zone name beside the
   measurements. A device's own alert count goes out as `alert_status`, and a
   device is named by a positional alias ("s1-datalogger-1"), not its serial.
+- **A system's position is the owner's alone.** It is read from the vendor's
+  plant record into `plant_location`, served by `/api/locations` to the owner
+  only (a share link does not get it), and sent to Open-Meteo rounded to two
+  decimal places. The site map is the only thing that shows it.
 - **A datalogger's network handles are never served.** Its mobile operator
   and cell, or its MAC address, are stored in `device_network` for the owner,
   never on the devices row: a cell id or a MAC address can place a logger on a
