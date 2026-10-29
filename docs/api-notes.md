@@ -123,11 +123,15 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   browser login, then the Worker uses `grant_type=refresh_token`.
 - `GET /maintain-s/operating/system/{stationId}` — richest single snapshot, **W and kWh, no unit strings**:
   - live: `generationPower`, `usePower` (load), `wirePower` (net grid, + = buying), `buyPower`, `gridPower` (feed-in),
-    `batteryPower` (sign observed −24 while `batteryStatus: STATIC`), `batterySoc`, `chargePower`, `dischargePower`
+    `batteryPower` (sign observed −24 while `batteryStatus: STATIC`), `batterySoc`, `chargePower`, `dischargePower`.
+    **`chargePower` comes negative while charging** (−99 to −396 W observed as the charge climbed 88 → 100%,
+    `batteryStatus: CHARGE`), and `dischargePower` positive while discharging (+224 W, `DISCHARGE`): take the sizes, and
+    the direction from which of the two is non-zero. 2.x took `chargePower` as it came and stored every charging reading
+    as discharging; migration 0021 turns those round.
   - today: `generationValue`, `useValue`, `gridValue` (export), `buyValue` (import), `chargeValue`, `dischargeValue`, `selfGenAndUseValue`
   - month/year: `generationMonth`, `generationYear`, `useMonth`, `useYear`, `gridMonth`, `gridYear`, `buyMonth`, `buyYear`
   - lifetime: `generationTotal` / `generationUploadTotal`, `useTotal`, `gridTotal`, `buyTotal`, `chargeTotal`, `dischargeTotal`
-  - status: `networkStatus` (`NORMAL`), `warningStatus`, `wireStatus` (`PURCHASE|SELL|…`), `batteryStatus` (`STATIC|CHARGING|DISCHARGING`)
+  - status: `networkStatus` (`NORMAL`), `warningStatus`, `wireStatus` (`PURCHASE|SELL|…`), `batteryStatus` (`STATIC|CHARGING|DISCHARGING`, and `CHARGE|DISCHARGE` in the live snapshot)
   - `lastUpdateTime` (epoch **s**), `temperature` (often null)
 - `GET /maintain-s/fast/system/{stationId}` — same live + today + lifetime fields, no month/year.
 - `GET /maintain-s/station/{stationId}/detail` — static: `station.name`, `installedCapacity`, `hasBattery`, `region.timezone`.

@@ -269,6 +269,15 @@ checkout of any tag says which release it is.
 
 ### Fixed
 
+- **A SolarMan battery charging now reads as charging.** SolarMan's live
+  snapshot sends `chargePower` as a negative number while the battery charges,
+  and 2.x took it as it came: every charging reading was stored as
+  discharging, so the dashboard showed the battery giving out while its charge
+  climbed. The normaliser now takes the size of each and the direction from
+  which one is non-zero. Migration 0021 turns round the readings already
+  stored - only those whose own payload says charging - and changes nothing
+  when run again.
+
 - **Produced today and Consumed today no longer count a system silent since an
   earlier day.** Its newest reading still carries that day's counters, which
   the header added to today's; with a relay off since Thursday, Thursday's

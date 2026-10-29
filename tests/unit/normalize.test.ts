@@ -6,9 +6,13 @@
  * figures that come out - units scaled, signs the right way round, and a figure
  * the vendor did not report left null rather than made zero. Battery presence
  * gets its own group, because an on-grid plant reports battery fields as zero
- * and reading those as a battery once put an empty battery on the page.
+ * and reading those as a battery once put an empty battery on the page. So
+ * does migration 0021, which turns round the SolarMan charging readings stored
+ * before 3.0 read the battery's sign right.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { createTestD1 } from '../helpers/d1';
 import solisFixture from '../fixtures/solis-station.json';
 import solarmanFixture from '../fixtures/solarman-station.json';
 import { stationReading as solisStation, deviceFromInverterDetail as solisDetail } from '../../src/providers/soliscloud';
@@ -134,6 +138,15 @@ describe('SolarMan station normaliser', () => {
     expect(solarmanStation(inv, { ...base, chargePower: 500, dischargePower: 0 }).batteryPowerW).toBe(500);
     expect(solarmanStation(inv, { ...base, chargePower: 0, dischargePower: 420 }).batteryPowerW).toBe(-420);
   });
+  it('reads charging as charging when the snapshot sends chargePower negative, as the live one does', () => {
+    // As observed: the charge climbing 88 -> 100% while chargePower read -99 to -396 W, status CHARGE;
+    // then discharging with dischargePower +224 W, status DISCHARGE.
+    expect(solarmanStation(inv, { ...base, batteryPower: -99, chargePower: -99, dischargePower: 0, batteryStatus: 'CHARGE' }).batteryPowerW).toBe(99);
+    expect(solarmanStation(inv, { ...base, batteryPower: 224, chargePower: 0, dischargePower: 224, batteryStatus: 'DISCHARGE' }).batteryPowerW).toBe(-224);
+    // And the status words that snapshot uses, when only batteryPower is sent.
+    expect(solarmanStation(inv, { ...base, batteryPower: -150, batteryStatus: 'CHARGE' }).batteryPowerW).toBe(150);
+    expect(solarmanStation(inv, { ...base, batteryPower: 150, batteryStatus: 'DISCHARGE' }).batteryPowerW).toBe(-150);
+  });
   it('maps today / lifetime energy and the extended breakdown', () => {
     expect(r.todayKwh).toBe(13.7);
     expect(r.totalKwh).toBe(7450.8);
@@ -158,6 +171,34 @@ describe('SolarMan station normaliser', () => {
     expect(t.metrics?.genMonthKwh).toBeNull();
     expect(t.metrics?.genYearKwh).toBeNull();
     expect(t.todayKwh).toBe(13.7);
+  });
+});
+
+describe('SolarMan readings stored before 3.0, put right by migration 0021', () => {
+  it('turns a battery charging the right way round, touches nothing else, and changes nothing run again', () => {
+    const d1 = createTestD1();
+    try {
+      d1.raw.exec(`INSERT INTO inverters (id, provider, vendor_id, name, first_seen, last_seen) VALUES
+        ('solarman:station:roof', 'solarman', 'roof', 'Roof', 0, 0), ('soliscloud:plant:garage', 'soliscloud', 'garage', 'Garage', 0, 0)`);
+      const put = d1.raw.prepare('INSERT INTO readings (inverter_id, ts, source, battery_power_w, raw) VALUES (?, ?, ?, ?, ?)');
+      // Charging, as 2.x stored it: chargePower taken as it came, below zero.
+      put.run('solarman:station:roof', 1, 'solarman', -99, JSON.stringify({ chargePower: -99, dischargePower: 0 }));
+      // Discharging, which 2.x stored right.
+      put.run('solarman:station:roof', 2, 'solarman', -224, JSON.stringify({ chargePower: 0, dischargePower: 224 }));
+      // No split sent: nothing says which way it went, so it stays as it is.
+      put.run('solarman:station:roof', 3, 'solarman', -50, JSON.stringify({ batteryPower: -50 }));
+      // Another vendor's reading, whatever its raw holds.
+      put.run('soliscloud:plant:garage', 4, 'soliscloud', -120, JSON.stringify({ chargePower: -120 }));
+      const migration = readFileSync('migrations/0021_battery_sign.sql', 'utf8');
+      const stored = () => d1.raw.prepare('SELECT ts, battery_power_w AS w FROM readings ORDER BY ts').all();
+      d1.raw.exec(migration);
+      const once = stored();
+      expect(once).toEqual([{ ts: 1, w: 99 }, { ts: 2, w: -224 }, { ts: 3, w: -50 }, { ts: 4, w: -120 }]);
+      d1.raw.exec(migration);
+      expect(stored()).toEqual(once);
+    } finally {
+      d1.close();
+    }
   });
 });
 
