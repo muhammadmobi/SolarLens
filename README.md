@@ -719,7 +719,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**783 unit tests**, **594 end-to-end tests** (297 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**785 unit tests**, **594 end-to-end tests** (297 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -763,7 +763,7 @@ Thirty-one files, one concern each. Most are pure-function tests against fixture
 - **`helpers/passkey.ts`** — a pretend authenticator with real P-256 and RSA keys: it makes passkeys and signs challenges the way a phone or a security key does, so the Worker's verification is tested against genuine signatures.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
-- **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds.
+- **`normalize.test.ts`** — both vendor normalisers end to end: SolisCloud's signed-API and relay payloads, SolarMan's station snapshot and `v3/detail` register categories. This is where the conventions are pinned down — `grid_power_w` positive on import, `battery_power_w` positive on charge, under 50 W of battery drift reading as idle, an on-grid plant getting no battery at all, and the state/status mappings for both clouds. SolarMan's live snapshot sends `chargePower` negative while charging, and it is read as charging; migration 0021 turns round the charging readings 2.x stored as discharging, touching nothing else and changing nothing when run again.
 - **`queue.test.ts`** — the rate limiter that stands between a cron run and a SolisCloud ban: calls stay in order, the minimum gap is a floor, and one failed call does not strand the ones behind it.
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
@@ -1289,7 +1289,8 @@ solar-lens/
 │                              0017 the owner's settings, starting with the tariff
 │                              0018 the places alerts are posted to
 │                              0019 what the agents found
-│                              0020 the apps connected to the MCP server)
+│                              0020 the apps connected to the MCP server
+│                              0021 SolarMan battery charging, turned the right way round)
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log

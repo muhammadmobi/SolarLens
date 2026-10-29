@@ -183,7 +183,8 @@ scope belong to one test each, and are explained where they are defined in
 
 ## 5. The data model
 
-D1, migrations in `migrations/` applied in order. Additive only - see section 12.
+D1, migrations in `migrations/` applied in order. Additive only, bar one
+correction of stored values (0021) - see section 12.
 
 | Table | One row per | Notes |
 |---|---|---|
@@ -441,6 +442,9 @@ something.
   repository's content. A guard enforces it.
 - **Migrations are additive.** A rollback puts an older Worker back while the
   database has already moved on; additive migrations are what make that safe.
+  The one that changes rows, 0021, corrects values in place (SolarMan charging
+  stored as discharging) and drops nothing, so an older Worker still reads
+  them - rightly, now. A correction like it must also be safe to run twice.
 - **Comments explain why, in prose**, and cite the measurement or the incident.
   The codebase reads as one voice; keep it.
 - **Documents ship with the change**: `README.md`, this file, `CHANGELOG.md`,

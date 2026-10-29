@@ -70,15 +70,19 @@ export function stationReading(inv: Inverter, s: Rec, source = 'solarman'): Read
   // Battery, as SolarLens signs it: + charging, - discharging. Separate charge
   // and discharge figures win when either is non-zero; otherwise batteryPower
   // is used, signed by batteryStatus, because its own sign is not reliable.
-  const charge = num(pick(s, 'chargePower')) ?? 0;
-  const discharge = num(pick(s, 'dischargePower')) ?? 0;
+  // Neither is chargePower's: the station snapshot sends it negative while the
+  // battery charges (-99 as the charge climbs), and dischargePower positive, so
+  // only their sizes are taken. The status reads CHARGE or DISCHARGE there,
+  // CHARGING or DISCHARGING elsewhere.
+  const charge = Math.abs(num(pick(s, 'chargePower')) ?? 0);
+  const discharge = Math.abs(num(pick(s, 'dischargePower')) ?? 0);
   const rawBattery = num(pick(s, 'batteryPower'));
   const batteryStatus = String(pick(s, 'batteryStatus') ?? '').toUpperCase();
   let batteryPowerW: number | null;
   if (charge !== 0 || discharge !== 0) batteryPowerW = charge - discharge;
   else if (rawBattery === null) batteryPowerW = null;
-  else if (batteryStatus === 'CHARGING') batteryPowerW = Math.abs(rawBattery);
-  else if (batteryStatus === 'DISCHARGING') batteryPowerW = -Math.abs(rawBattery);
+  else if (batteryStatus === 'CHARGING' || batteryStatus === 'CHARGE') batteryPowerW = Math.abs(rawBattery);
+  else if (batteryStatus === 'DISCHARGING' || batteryStatus === 'DISCHARGE') batteryPowerW = -Math.abs(rawBattery);
   else batteryPowerW = rawBattery; // STATIC: a few watts of idle drift, sign irrelevant
 
   const metrics = emptyMetrics();
