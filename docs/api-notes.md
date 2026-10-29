@@ -82,7 +82,9 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
   - `simFlowState` is -5 on a Wi-Fi logger; its other values are not known, so it is not read.
   - The link type is not a field. It is read from the model name (`S3-WIFI-ST`).
 - `station/detailMix` also carries the plant's timezone: `timeZone` in whole hours,
-  `timeZoneStandardId` as an IANA name, and `timeZoneStr` as a label. SolarLens reads the hours.
+  `timeZoneStandardId` as an IANA name, and `timeZoneStr` as a label. SolarLens reads the name
+  where the plant sends one - it is what knows about daylight saving - and the hours as the
+  offset otherwise (`src/providers/units.ts`).
 - `alarm/list` body `{currentPage, pageSize, state, faultType: 0, stationId}` → `data.records[]`
   with `total` and `pages`. Reached at `/overview/plantStation/details/alarm/{id}`; the page opens
   filtered to `state: 0`, and history needs the **Status** filter set and **Search** pressed.
@@ -209,6 +211,11 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
 `/station/v1.0/list`, `/station/v1.0/realTime` (same field names as above),
 `/device/v1.0/currentData` (`dataList[{key,value,unit}]`). Requires `appId`/`appSecret` from
 `service@solarmanpv.com`.
+
+`/station/v1.0/list` is paged: `{page, size}` in the body, `page` from 1, and SolarLens asks for
+50 a page. A page with fewer than it asked for is the last; SolarLens reads on until one comes
+back short, twenty pages at most. Until 3.0 it asked for one page only, so a fifty-first plant
+was never seen.
 
 ## Sign conventions used by SolarLens
 

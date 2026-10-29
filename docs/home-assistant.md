@@ -15,8 +15,9 @@ dashboard, with its address and your systems filled in. Paste it into
 Home Assistant's `configuration.yaml` and restart Home Assistant.
 
 It reads one address, `GET /api/sensors`, every five minutes - as often as the
-vendors themselves have anything new. The answer is flat JSON whose names do
-not change:
+vendors themselves have anything new, and far inside the optional rate limit
+for callers not signed in (a token of its own, below, is never held to it).
+The answer is flat JSON whose names do not change:
 
 | Field | Unit | What it is |
 |---|---|---|
@@ -40,7 +41,9 @@ compare.
 For the **Energy dashboard**, add the *SolarLens energy* sensor (`total_kwh`,
 `total_increasing`) as solar production.
 
-The configuration Settings writes looks like this:
+The configuration Settings writes has the fleet's power, energy today and
+energy in total, and for each system its power and energy today, and its
+battery's charge where it has one. It begins:
 
 ```yaml
 # configuration.yaml: SolarLens, read every five minutes
@@ -54,6 +57,12 @@ rest:
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
+      - name: "SolarLens energy today"
+        unique_id: solarlens_today
+        value_template: "{{ value_json.today_kwh }}"
+        unit_of_measurement: "kWh"
+        device_class: energy
+        state_class: total_increasing
       - name: "SolarLens energy"
         unique_id: solarlens_total
         value_template: "{{ value_json.total_kwh }}"
@@ -66,7 +75,11 @@ rest:
         unit_of_measurement: "W"
         device_class: power
         state_class: measurement
+      # ... then "South roof energy today", and a battery sensor for each system with one
 ```
+
+Any other field of the answer - `online`, `faults_active`, `saved_today` and the
+rest - becomes a sensor the same way, with its own `value_template`.
 
 ### When the dashboard is private
 

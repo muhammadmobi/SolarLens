@@ -7,7 +7,7 @@ throughout — an owner account cannot reach them.
 
 Observed on live owner accounts in September 2026: one on-grid plant on SolisCloud, one hybrid
 station on SolarMan. No account identifiers appear in this document. Last checked against the
-live database after 2.10.0.
+live database after 2.10.0; the rows marked 3.0 describe that release, not yet deployed.
 
 **Legend** — ● has it · ◐ partial · ○ does not have it
 
@@ -48,6 +48,13 @@ live database after 2.10.0.
 | **Datalogger status, model, firmware, signal** | ● | ● | ● both — Solis in dBm, SolarMan in percent |
 | Everything else the datalogger reports: link type, signal bars, time since restart and in total, make date | ● | ◐ | ● a card per logger on the Devices tab — SolarMan's list says less, and nothing is invented for it |
 | A datalogger's link over time: online, offline, signal | ○ | ○ | ● the last seven days as a strip, a summary and a signal line — neither app keeps this |
+| Per-MPPT-string DC power | ● | ● | ● both |
+| Per-string voltage & current | ● | ● | ● both |
+| Per-phase AC voltage, current, frequency | ● | ● | ● both (Solis adds power factor and DC bus) |
+| Inverter temperature | ● | ● | ● both |
+| Device types beyond the inverter (battery, meter, EPM, weather station) | ● | ◐ | ○ not available for these plants: SolarMan lists only an inverter and a datalogger, and the battery exists only inside the inverter's data |
+| BMS detail (pack voltage, current, temperature, charge limits) | ○ | ● | ● all five on the system page |
+| Raw register / telemetry dump | ○ | ○ | ● searchable table of every measurement the vendor sent, ids and places left out — neither app offers this |
 
 ### Weather and performance
 
@@ -75,13 +82,6 @@ live database after 2.10.0.
 | Stay signed in | ◐ SolisCloud asks again weekly | ● | ● a year, renewed on every use |
 | See and sign out your devices | ○ | ○ | ● |
 | Share a view-only link | ◐ visitor accounts | ◐ shared plants need an account | ● a link, no account, for as long as you say |
-| Per-MPPT-string DC power | ● | ● | ● both |
-| Per-string voltage & current | ● | ● | ● both |
-| Per-phase AC voltage, current, frequency | ● | ● | ● both (Solis adds power factor and DC bus) |
-| Inverter temperature | ● | ● | ● both |
-| Device types beyond the inverter (battery, meter, EPM, weather station) | ● | ◐ | ○ not available for these plants: SolarMan lists only an inverter and a datalogger, and the battery exists only inside the inverter's data |
-| BMS detail (pack voltage, current, temperature, charge limits) | ○ | ● | ● all five on the system page |
-| Raw register / telemetry dump | ○ | ○ | ● searchable table of every measurement the vendor sent, ids and places left out — neither app offers this |
 
 ### Alarms and events
 
@@ -106,7 +106,7 @@ live database after 2.10.0.
 | Scheduled email reports | ● | ○ | ◐ a summary every Monday to ntfy, Telegram, Discord or a webhook (3.0); no email |
 | A report on any period, on request | ◐ downloadable reports | ○ | ● the assistant writes one - energy, systems compared, statistics, faults and health - to read, download or print (3.0) |
 | Ask questions in words | ○ | ○ | ● the assistant on the Ask tab, with follow-ups; every figure worked out by SolarLens, and shown with the answer (3.0) |
-| Raw sample retention you control | ○ | ○ | ● full payload kept in your own D1 |
+| Raw sample retention you control | ○ | ○ | ● every reading kept in your own D1: the figures for good, the untouched vendor payload for 30 days |
 
 ### Financial, environmental, weather
 
@@ -121,7 +121,6 @@ live database after 2.10.0.
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Multiple plants in one account | ● | ● | ● one panel per unit |
 | **Two vendors on one screen** | ○ | ○ | ● the entire point |
 | Favourites, grouping, tags | ● | ◐ | ● a star puts a system first; groups lay the Overview out under headings (3.0); no tags |
 | Physical layout / site map | ● | ○ | ◐ a map of where each system is, for the owner only (3.0); no panel layout |
@@ -131,7 +130,7 @@ live database after 2.10.0.
 | In-app guide to the features | ◐ help pages | ◐ help pages | ● the **Guide** button (an open book) on every page: what each tab holds, where to find things, what is new |
 | Fits a phone screen | ● native app | ● native app | ● every view held to the screen width by a test |
 | Remote control (charge schedules, export limit, firmware) | ● | ◐ | ○ **deliberately not** — read-only by design |
-| Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API, reads open, writes gated; sensors for Home Assistant (3.0) |
+| Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API: reads open until the owner makes the dashboard private (3.0), writes need the owner; sensors for Home Assistant (3.0) |
 | AI apps, such as Claude | ○ | ○ | ● an MCP server, for apps the owner approves once (3.0) |
 
 ---
@@ -159,14 +158,16 @@ live database after 2.10.0.
 
 1. **Both vendors on one screen**, normalised to a single reading shape.
 2. **A searchable raw-telemetry table** — every measurement the vendor returned for the newest sample. The Worker builds it from a reviewed list of measurement fields, so anything else the vendor sends - ids, notes, codes, a zone name, a field added tomorrow - is left out.
-3. **Full sample retention in your own database**, including the untouched vendor payload.
+3. **Every reading kept in your own database** - the figures for good, and the untouched vendor
+   payload for 30 days: long enough to check a normaliser against what the vendor really sent,
+   short enough that the free plan's 500 MB lasts.
 4. **Honest staleness** — a panel says when its number was last updated and turns amber when a
    feed goes quiet, instead of showing a confidently stale zero.
-5. **A JSON API** over your own data, with no vendor approval process. Reads answer anyone,
-   with vendor station ids, plant ids and serial numbers stripped from every response; writes
-   need a token.
-6. **Both systems on one screen without scrolling** — a column each, sized to a laptop window,
-   so the two are compared rather than remembered.
+5. **A JSON API** over your own data, with no vendor approval process. Reads answer anyone
+   until the owner makes the dashboard private, with vendor station ids, plant ids and serial
+   numbers stripped from every response; writes need the owner.
+6. **Every system on one screen** — a column each, sized to a laptop window, so they are
+   compared rather than remembered; with three or more, a strip across the top names them all.
 7. **Every system's day ends where its own sun sets.** Both portals show a
    plant's day in the plant's timezone and assume you are standing near it;
    read either from another country and "today" quietly becomes someone else's.
@@ -188,7 +189,11 @@ live database after 2.10.0.
 2.3 closed the two largest gaps this section listed: the vendor alarm list with
 fault history, and history from before SolarLens began collecting. A third,
 batteries and meters as devices, turned out not to be a gap SolarLens can
-close - see section 6. What remains:
+close - see section 6. Every gap in the table below has since been closed, and
+it stays as the record of how. What is still open is out of scope by decision
+(section 5), not available from the vendors (section 6), or written down with
+its reason in [handoff.md](handoff.md#14-what-is-still-missing) - an official
+SolisCloud API key, which would retire the relay, first among them.
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
@@ -200,8 +205,9 @@ close - see section 6. What remains:
 
 ## 4b. What the pipeline checks, so this list stays honest
 
-Since 2.6, nothing merges until twelve checks pass, and nothing is deployed
-until a person approves it and the live site answers a smoke test. That changes
+Since 2.6, nothing merges until the twelve required checks pass - fifteen run
+in 3.0, and the owner's own pull requests wait for all of them - and nothing is
+deployed until a person approves it and the live site answers a smoke test. That changes
 what "still missing" means here: a gap left in this list is a gap nobody has
 built, not one that might have been fixed and forgotten. `README.md` describes
 each check; `Security` in the repository carries what the scanners found.
