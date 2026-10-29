@@ -68,7 +68,7 @@ free tier in about ten minutes.
 3. [Quick start (≈10 minutes)](#quick-start-10-minutes)
 4. [Getting credentials](#getting-credentials) — [SolisCloud](#soliscloud-official-api-key) · [SolarMan](#solarman-official-business-api) · [SolarMan fallback](#solarman-browser-session-fallback)
 5. [SolisCloud relay agent](#soliscloud-relay-agent) — [one command on Windows](#one-command-on-windows) · [more than one machine](#running-it-on-more-than-one-machine) · [replacing a token](#replacing-a-token)
-6. [Notifications on your phone](#notifications-on-your-phone) · [Alerts elsewhere, and Home Assistant](#alerts-elsewhere-and-home-assistant) · [Ask SolarLens, and the agents](#ask-solarlens-and-the-agents) · [SolarLens as an MCP server](#solarlens-as-an-mcp-server) · [Signing in, and making it private](#signing-in-and-making-it-private) · [The demo on GitHub Pages](#the-demo-on-github-pages)
+6. [Notifications on your phone](#notifications-on-your-phone) · [Alerts elsewhere, and Home Assistant](#alerts-elsewhere-and-home-assistant) · [Ask SolarLens, and the agents](#ask-solarlens-and-the-agents) · [SolarLens as an MCP server](#solarlens-as-an-mcp-server) · [Signing in, and making it private](#signing-in-and-making-it-private) · [The demo on GitHub Pages](#the-demo-on-github-pages) · [Upgrading from 2.x](#upgrading-from-2x)
 7. [Configuration reference](#configuration-reference)
 8. [Local development](#local-development)
 9. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request) · [where the reports are](#where-the-reports-are)
@@ -694,6 +694,79 @@ Pages). The demo's sample data is held to the real Worker's answers field by fie
 (`tests/unit/fixture-contract.test.ts`), and `tests/e2e/demo.spec.ts` opens the built site
 under a sub-path, as Pages serves it, and checks every view draws, no request leaves for a
 server, and nothing reaches for the root of the site.
+
+## Upgrading from 2.x
+
+3.0 changes nothing you rely on until you choose to: the dashboard stays open to
+anyone with its address, the relays and phone notifications carry on as they
+were, and each new feature waits to be set up.
+
+1. **Deploy it as usual.** Merging to `main` runs the deploy once you approve
+   it: a restore point, the nine new migrations (0014 to 0022), the Worker, and
+   a check of the live site. By hand: `npm run db:remote`, then
+   `npm run deploy`. The migrations add tables, columns and an index, 0021
+   turns round the SolarMan battery readings 2.x stored with charging as
+   discharging, and 0022 drops one index that repeated the readings table's
+   own key; no table or column is dropped, so rolling the Worker back to 2.x
+   still runs against the 3.0 database. 2.x would store charging the wrong
+   way again, though, and 0021 - applied already - does not run twice: after a
+   rollback, run it once more by hand when 3.0 is back
+   (`npm run cf -- d1 execute solar-lens --remote --file migrations/0021_battery_sign.sql`),
+   which turns round what 2.x stored and changes nothing else.
+2. **If the deploy fails on the `ai` binding** with an authentication error,
+   give the Cloudflare API token the deploy uses (the `CLOUDFLARE_API_TOKEN` of
+   the `production` environment) the *Workers AI* permission. The assistant
+   needs nothing else: it keeps inside Workers AI's free allowance.
+3. **Set `SECRET_KEY`** - recommended, and best before you set a password:
+   `npm run cf -- secret put SECRET_KEY`, with a long random value kept with the
+   others. Every key is derived from it rather than from `API_TOKEN`, so a new
+   `API_TOKEN` resets nothing: see [Replacing a token](#replacing-a-token).
+4. **Sign in, once per device - if you want to.** Settings (the gear) → *Set up
+   sign-in*, with your `API_TOKEN` as the setup code, then a passkey on each
+   phone and computer: [Signing in, and making it private](#signing-in-and-making-it-private).
+   The 2.x `/auth?t=…` link no longer signs a browser in, and the cookie it
+   left - the token itself - is no longer accepted and is cleared, so a
+   browser that used it signs in once.
+5. **Make it private - again, only if you want to.** Before turning on *Require
+   sign-in to view*, sign in once on each screen that shows the dashboard - the
+   TV included - or open a share link on it; and give Home Assistant, or
+   anything else that reads `/api`, a share link's token (Settings → Home
+   Assistant makes one). The relays, phone notifications and `/api/status` keep
+   working without a sign-in. On Cloudflare's free plan it also keeps strangers
+   from spending the database's daily reads; a dashboard left open can have
+   the optional rate limit instead (`RATE_LIMIT`, in the
+   [Configuration reference](#configuration-reference)).
+6. **Set up what is new**, each optional and each in Settings: the tariff (money
+   saved and CO₂ avoided), groups, *Alerts elsewhere* and the Monday summary,
+   Home Assistant, and connected AI apps. The assistant, the weather and
+   expected output, the site map and the health check need nothing: they start
+   on their own.
+
+**What behaves differently:**
+
+- **Replacing `API_TOKEN`** without `SECRET_KEY` means setting the password
+  again and adding each place under *Alerts elsewhere* again, since both are
+  keyed with it; with `SECRET_KEY`, nothing but the token changes. Signed-in
+  devices, passkeys and connected apps carry on either way.
+- **Reads are no longer cached** (`Cache-Control: no-store`): an answer now
+  depends on who is asking.
+- **A second cron**, once an hour at seven minutes past, does the slower work -
+  the weekly agents and summary, the weather, the housekeeping - which rode on
+  the five-minute run in 2.x. `wrangler.jsonc` lists both, and a deploy
+  registers them.
+- **A reading keeps its vendor payload for 30 days**, then only its figures:
+  the payload was most of the database. The first runs work through the
+  backlog, a day of readings an hour.
+- **A Worker with no `API_TOKEN` refuses every write** (503) instead of taking
+  it from anyone.
+- **The Worker has no preview addresses** (`preview_urls: false`): each would be
+  another public host serving it, with the production database behind it.
+
+**If you run this repository's own workflows**, as a fork: turn on GitHub Pages
+with *GitHub Actions* as its source, for the demo; allow GitHub Actions to create
+and approve pull requests (Settings → Actions → General), for the owner's
+auto-approval; and add a `SOLARLENS_URL` repository secret, for the production
+watcher.
 
 ## Configuration reference
 
@@ -1767,6 +1840,11 @@ Third parties the dashboard talks to: the page loads its web font from Google, w
 - [x] A demo on GitHub Pages, on made-up data, and screenshots taken of it (3.0)
 - [x] Weather from Open-Meteo, expected output and an underperformance alert, battery capacity over time, and an owner-only site map (3.0)
 - [x] Integration tests against a real local Worker, screenshot comparison, Lighthouse, a production watcher, a restore point before migrations, and the owner's own pull requests approved once ready (3.0)
+- [x] Money saved and CO₂ avoided, by the owner's tariff (3.0)
+- [x] An Analysis tab - a day hour by hour - and favourites and groups (3.0)
+- [x] Alerts on ntfy, Telegram, Discord and webhooks, a summary every Monday, and Home Assistant (3.0)
+- [x] An assistant that answers in words from the figures - follow-ups, statistics, reports, help with the app - on Workers AI or any OpenAI-style server; and a weekly health check and report (3.0)
+- [x] An MCP server, for AI apps the owner approves once (3.0)
 - [x] A review of the whole repository, applied: every cron run inside D1's per-invocation limit, keys from a secret of their own, the database kept from filling, strangers kept from spending its day, and every write route's guard tested (3.0)
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware

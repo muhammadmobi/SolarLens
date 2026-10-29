@@ -361,5 +361,12 @@ and confirming the Cloudflare plan.
 
 ## Upgrading from 2.x
 
-To be written with the release: sign in once on each device, including the TV;
-the relays need no change; phone notifications carry on.
+Written with the release, in the README:
+[Upgrading from 2.x](../README.md#upgrading-from-2x). In short: deploy as usual,
+since the migrations only add - bar 0021, which turns round the SolarMan
+charging readings 2.x stored as discharging, and drops nothing, and 0022, which
+drops an index that repeated a key; set `SECRET_KEY`, so a new `API_TOKEN`
+resets nothing; nothing locks until the owner turns on *Require
+sign-in to view*; before that, sign in once on each device, the TV included, and
+give Home Assistant a share link's token; the relays need no change, and phone
+notifications carry on.
