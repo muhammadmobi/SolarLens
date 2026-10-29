@@ -24,7 +24,6 @@ permissions:
   actions: read
 
 # One deploy at a time, and never cancel one half-way.
-# One deploy at a time, and never cancel one half-way.
 #
 # The group carries the branch, which matters more than it looks: this workflow
 # starts whenever *any* Checks run finishes, pull requests included, and those
