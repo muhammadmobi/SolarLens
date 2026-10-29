@@ -4909,8 +4909,11 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
   // from the Guide button (an open book) in the header. A guide is reference, read now and then, so it
   // sits behind an icon rather than taking a tab from the pages used every day.
   // RELEASE is kept equal to package.json's version by a unit test, so the
-  // guide never describes a release other than the one it ships with.
-  const RELEASE = '3.0.0';
+  // guide never describes a release other than the one it ships with. Its
+  // "What is new" card is about the line - 3.0 - since a fix like 3.0.1 adds
+  // nothing to tell, and the card would otherwise credit 3.0 to it.
+  const RELEASE = '3.0.1';
+  const LINE = RELEASE.split('.').slice(0, 2).join('.');
 
   function renderGuide() {
     const systems = (state.latest?.inverters ?? []).map((inv) => {
@@ -4968,7 +4971,7 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
         ${systems ? `<div class="systems" aria-label="Your systems">${systems}</div>` : ''}
       </div></section>
 
-      <section class="card"><h2>What is new in ${RELEASE}</h2><div class="body"><ul>
+      <section class="card"><h2>What is new in ${LINE}</h2><div class="body"><ul>
         <li><strong>Yours alone, if you like.</strong> ${tab('#/settings', 'Settings')} (the gear): sign in once per
           device, with a passkey or a password, then <em>Require sign-in to view</em>. <em>Share to view</em> makes a
           link that lets someone see it and change nothing.</li>
