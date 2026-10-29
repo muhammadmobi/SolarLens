@@ -14,7 +14,11 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
-## [Unreleased]
+## [3.0.1] — 2026-10-29
+
+A fix to how a deploy tells the owner about the relay laptops. Nothing changes
+on the dashboard; the guide's *What is new* card is now titled by the release
+line, 3.0, rather than by this fix.
 
 ### Fixed
 
@@ -1821,6 +1825,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[3.0.1]: https://github.com/muhammadmobi/SolarLens/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.11.0...v3.0.0
 [2.11.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.9.0...v2.10.0

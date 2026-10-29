@@ -73,9 +73,10 @@ mistakes already made here:
 
 ### Where things stand
 
-- **Live:** 3.0.0, released on 29 October 2026 and deployed from `main` -
-  every phase of `docs/roadmap.md`, 1 to 14, the review before release
-  included. What changed, and how to bring a copy of 2.x up to it:
+- **Live:** 3.0.1, released on 29 October 2026 and deployed from `main` -
+  3.0.0, every phase of `docs/roadmap.md`, 1 to 14, the review before release
+  included, and the same day a fix to the deploy's note about the relay
+  laptops. What changed, and how to bring a copy of 2.x up to it:
   `CHANGELOG.md` and the README's *Upgrading from 2.x*.
 
 **Once, on the live site:** sign in with the setup code, set a password, add a
