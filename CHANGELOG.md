@@ -14,6 +14,20 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [Unreleased]
+
+### Fixed
+
+- **The deploy's relay note sees every commit a merge brings.** It compared
+  the newest commit with the one before it, but "Rebase and merge" brings a
+  pull request's commits to `main` in one push - so the 3.0.0 deploy,
+  twenty-seven commits, said nothing about the relay's setup changing in an
+  early one.
+  It now compares with the commit the last successful deploy ran, or the last
+  release tag if GitHub cannot say, and lists only the files that run on the
+  relay laptops. 3.0.0 changed `scripts/setup-relay.ps1`, so a relay laptop
+  set up before it should run `setup-solarlens-relay.cmd` once more.
+
 ## [3.0.0] — 2026-10-29
 
 SolarLens can now be yours alone: an owner login with passkeys, and a dashboard
