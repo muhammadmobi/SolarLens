@@ -623,7 +623,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**537 unit tests** and **462 end-to-end tests** (231 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**553 unit tests**, **462 end-to-end tests** (231 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **10 integration tests** against the real Worker (`npm run test:integration`) and **10 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -660,7 +660,7 @@ exact lines no test reaches.
 
 ### Unit tests — `tests/unit/`
 
-Twenty-nine files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; eleven drive the Worker or its database layer against a real database, through the helpers in `tests/helpers/`:
+Thirty files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; eleven drive the Worker or its database layer against a real database, through the helpers in `tests/helpers/`:
 
 - **`helpers/d1.ts`** — SQLite behind the D1 interface, with the project's own migrations applied. D1 *is* SQLite and Node ships one, so the SQL a test exercises is the SQL that runs in production. It also refuses a bound value D1 would refuse, which is how a `undefined` reaches a test rather than a deploy.
 - **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about.
@@ -676,6 +676,7 @@ Twenty-nine files, one concern each. Most are pure-function tests against fixtur
 - **`datalogger.test.ts`** — everything a datalogger reports: its link read from the model name (and left unknown rather than guessed), SolisCloud's signal bars, restart and working time and make date, the operator, cell and MAC address kept apart and never published; and the link history - a row the first time, on each change of status, on a signal move beyond its jitter (3 dBm, 5 points), and hourly otherwise, the window opened by the row before it, and 90 days kept.
 - **`auth.test.ts`** — the owner login through the Worker, with a cookie jar and a moving clock: setup with the setup code, the password and its lockout (per caller and for everyone), the session renewed silently when its hour is up and a device kept in across a year of occasional use, two tabs renewing at once without signing either out, a copied refresh token signing the device out, sign-out at once for one device or all others, the *require sign-in* switch and what stays open with it on (the relays, `/api/status`, the notification reader), share links that read and never write and are taken back with their viewers, passkeys through the routes, a logger's network handles for the owner only, and `private` caching.
 - **`webauthn.test.ts`** — passkey verification against real signatures: CBOR, DER and COSE, both ES256 and RS256, and each refusal an attacker would try - another challenge, another origin, another site, no touch, a replayed registration, a key that is not the passkey's, a counter that went backwards.
+- **`ci-scripts.test.ts`** — the two CI scripts that decide on the owner's behalf: when the production watcher opens an issue (a feed quiet while another delivers is not one; no feed for 90 minutes, a failing poll or no answer is), and when the owner's own pull request is approved (every check done and green, Copilot's review of the newest commit, no open thread, not a draft, not "do not merge", never anyone else's).
 - **`fixture-contract.test.ts`** — the end-to-end fixtures held to the real Worker. It runs the Worker on the vendor fixtures and fails if a row in `tests/fixtures/dashboard-api.ts` carries a field `/api/latest` or `/api/devices` does not send, or lacks one they do, and if any spec serves a raw payload. This is the test that would have caught gap 5.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
@@ -826,7 +827,7 @@ Request signing itself (`crypto.subtle` MD5 + HMAC) only runs in the Workers run
 
 ## What runs on every pull request
 
-`.github/workflows/checks.yml` runs six jobs in parallel on every pull request
+`.github/workflows/checks.yml` runs nine jobs in parallel on every pull request
 and on every push to `main`. None of them needs a secret, a Cloudflare account
 or a SolisCloud login, so a fork gets the same checks.
 
@@ -836,6 +837,9 @@ or a SolisCloud login, so a fork gets the same checks.
 | **Unit tests** | Failures, and coverage falling below the thresholds in `vitest.config.ts`. The report is attached to the run. |
 | **End-to-end tests** | Dashboard regressions on desktop and mobile Chrome. On failure the screenshots and traces are attached. |
 | **Build check** | A Worker that would not bundle, found by `wrangler deploy --dry-run`, which uploads nothing. |
+| **Integration (real Worker)** | What only workerd can show: the page from the assets binding with its security headers, cookies surviving the header rebuild, the password and passkeys in workerd's WebCrypto, and the deploy's own smoke test passing against a real Worker. Started by wrangler on a throwaway local database with made-up tokens - `npm run test:integration`. |
+| **Screenshot comparison** | A view that looks different from its recorded picture - a colour gone, a card collapsed - at a fixed moment of the demo. Pictures are recorded on Linux in CI (`tests/visual/__screenshots__/linux/`); a view without one gets one recorded and the run says so, and after that any difference fails, with before, after and the difference attached. |
+| **Lighthouse** | The demo scoring under 0.95 for accessibility or 0.9 for best practices (performance under 0.8 is a warning). The reports are attached to the run, not sent anywhere. |
 | **Privacy, attribution and headers** | The four guards below. |
 | **Relay scripts (Windows)** | PowerShell that will not parse, analyser errors, and a relay that hangs instead of refusing when its settings are missing. |
 
@@ -867,6 +871,36 @@ The guards are small Node scripts in `scripts/ci/`, each runnable by hand:
 
 Third-party actions are pinned to a commit rather than a tag, because a tag can
 be moved after it has been reviewed.
+
+### Approving the owner's own pull request
+
+GitHub will not let anyone approve their own pull request, and `main` wants one
+approval. `.github/workflows/approve.yml` runs `scripts/ci/approve-if-ready.mjs`
+when the checks finish and whenever a review lands, and approves - as the
+Actions bot - only when every one of these holds:
+
+- the pull request is the owner's own, not a draft, and does not say "do not merge";
+- every check on its newest commit has finished, and none failed;
+- **Copilot has reviewed that newest commit** - so Copilot's review is, in
+  effect, a required check: nothing is approved until it has looked;
+- no review thread is still open.
+
+Anyone else's pull request waits for the owner, as before. It needs **Allow
+GitHub Actions to create and approve pull requests** turned on once (Settings →
+Actions → General).
+
+### Watching production
+
+`.github/workflows/watch.yml` asks the live site's `/api/status` every half hour.
+If the site is down, or no feed has delivered for 90 minutes, it opens a GitHub
+issue labelled **watcher** - or adds to the one open - and closes it again once
+readings are arriving; GitHub's notifications carry it to the owner's phone.
+One feed quiet while another delivers is not an issue: the SolisCloud relay runs
+on laptops that are sometimes off, and the phone notifications already cover its
+login. It needs `SOLARLENS_URL` as a repository secret (the deploy's copy lives in
+the `production` environment, which asks for approval on every run); without it
+the job says so and does nothing. `DRY_RUN=1 SOLARLENS_URL=<url> node
+scripts/ci/watch.mjs` shows what it would do.
 
 ### Who reviews a pull request
 
@@ -932,18 +966,22 @@ live dashboard. Then it stops: the `production` environment carries a required
 reviewer, and nothing deploys until someone approves the run on GitHub.
 
 1. **Remember the version serving right now**, which is what a rollback needs.
-2. **Apply database migrations** (`npm run db:remote`). Migrations stay additive
+2. **Mark a restore point in the database** - a D1 Time Travel bookmark, written
+   into the run's summary with the command that restores it. Rolling the Worker
+   back never needs it, since migrations only add; a migration that damaged
+   data would.
+3. **Apply database migrations** (`npm run db:remote`). Migrations stay additive
    by rule, so the version still serving keeps working against the new schema -
    which is what makes rolling back the Worker alone a safe answer.
-3. **Deploy the Worker.**
-4. **Ask the live site whether it works** - `scripts/ci/smoke.mjs`: the page
+4. **Deploy the Worker.**
+5. **Ask the live site whether it works** - `scripts/ci/smoke.mjs`: the page
    loads and still carries its security policy, `/api/status` answers and a
    vendor feed is current, `/api/latest` and `/api/health` answer - or, on a
    private dashboard, ask a signed-out caller to sign in - the responses carry no identifiers,
    and `/api/poll` and `/api/ingest/relay` still refuse a caller with no token.
-5. **If any of that fails, the previous version is put back automatically** and
+6. **If any of that fails, the previous version is put back automatically** and
    the run is marked failed, with the reason in its log.
-6. **The run's summary says whether the relay computers need updating**, when
+7. **The run's summary says whether the relay computers need updating**, when
    the merge touched `agent/`, the relay scripts or a `.cmd`.
 
 `.github/workflows/pages.yml` publishes the demo to GitHub Pages when `public/` or `demo/`
@@ -1090,6 +1128,8 @@ solar-lens/
 │   ├── privacy-allow.txt     long numbers the privacy guard may let through
 │   ├── CODEOWNERS            asks the owner to review anyone elses pull request
 │   ├── workflows/pages.yml     builds the demo and publishes it to GitHub Pages
+│   ├── workflows/watch.yml     every half hour: is production working? an issue if not
+│   ├── workflows/approve.yml   approves the owner's own pull request once it is ready
 │   └── workflows/reviewers.yml  asks Copilot, and the owner, for a review
 ├── tsconfig.json             typecheck for src/
 ├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
@@ -1156,6 +1196,8 @@ solar-lens/
 │   ├── ci/check-cmd-shape.mjs   refuses a .cmd that its own update could break
 │   ├── ci/check-pinned-actions.mjs  refuses an action pinned to a movable tag
 │   ├── ci/smoke.mjs             asks the live site whether the deploy worked
+│   ├── ci/watch.mjs             the production watcher: opens and closes its issue
+│   ├── ci/approve-if-ready.mjs  approves the owner's own pull request when it is ready
 │   ├── ci/worker-version.mjs    the version now serving, for a rollback
 │   ├── ci/release-notes.mjs     the changelog section, if the release is ready
 │   ├── setup-relay.ps1          installs the relay on a machine, start to finish
@@ -1187,6 +1229,9 @@ solar-lens/
 │   ├── unit/auth.test.ts        the owner login, end to end through the Worker
 │   ├── unit/webauthn.test.ts    passkey verification against real signatures
 │   ├── helpers/passkey.ts       a pretend authenticator with real keys
+│   ├── unit/ci-scripts.test.ts  when the watcher opens an issue, and when a PR is approved
+│   ├── integration/             the real Worker, in workerd, over HTTP
+│   ├── visual/                  each view of the demo, compared with its picture
 │   ├── unit/fallbacks.test.ts   the fallback branches nothing else reached
 │   ├── unit/series-rules.test.ts   live beats backfilled; where "today" opens
 │   ├── unit/daylight-saving.test.ts  history that keeps its day across a clock change
@@ -1404,6 +1449,7 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] Everything each datalogger reports, and its link over the week (3.0)
 - [x] Any number of systems: a colour each, Compare per kWp, TV mode taking turns, polling spread across runs (3.0)
 - [x] A demo on GitHub Pages, on made-up data, and screenshots taken of it (3.0)
+- [x] Integration tests against a real local Worker, screenshot comparison, Lighthouse, a production watcher, a restore point before migrations, and the owner's own pull requests approved once ready (3.0)
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed

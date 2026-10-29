@@ -1,0 +1,46 @@
+# The production watcher: is the live dashboard still working?
+#
+# Every half hour, scripts/ci/watch.mjs asks the deployment's /api/status - open
+# even when the dashboard is private, and saying only how fresh each feed is.
+# If the site is down, or no feed has delivered for 90 minutes, it opens a
+# GitHub issue labelled "watcher" (or adds to the one open), and closes it again
+# once readings are arriving. GitHub's own notifications then carry it to the
+# owner's phone.
+#
+# Needs SOLARLENS_URL as a repository secret (Settings -> Secrets and variables
+# -> Actions). The deploy's copy lives in the production environment, which asks
+# for an approval on every run - no use for a job that runs every half hour.
+# Without the secret the job says so and does nothing.
+#
+# Locally, without touching any issue:
+#   SOLARLENS_URL=<url> DRY_RUN=1 node scripts/ci/watch.mjs
+
+name: Watch production
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Is the dashboard working?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/ci/watch.mjs
+        env:
+          SOLARLENS_URL: ${{ secrets.SOLARLENS_URL }}
+          GH_TOKEN: ${{ github.token }}

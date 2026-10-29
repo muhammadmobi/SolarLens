@@ -85,6 +85,31 @@ jobs:
               >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # A restore point, before anything changes the database. D1 keeps thirty
+      # days of history (Time Travel) whatever this does; the bookmark is the
+      # exact moment to go back to, written where the person who approved this
+      # run will find it. Rolling the Worker back never needs it - migrations
+      # only add - but a migration that damaged data would. Not fatal: a
+      # database that cannot report its bookmark can still be migrated.
+      - name: Mark a restore point in the database
+        run: |
+          if out=$(npm run --silent cf -- d1 time-travel info solar-lens --json 2>/dev/null) \
+             && bookmark=$(node -e "process.stdout.write(JSON.parse(process.argv[1]).bookmark || '')" "$out") \
+             && [ -n "$bookmark" ]; then
+            {
+              echo "### Database restore point"
+              echo
+              echo "Taken before this run's migrations. To put the database back to it:"
+              echo
+              echo '```'
+              echo "npm run cf -- d1 time-travel restore solar-lens --bookmark=$bookmark"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Restore point: $bookmark"
+          else
+            echo "Could not read a restore point; D1 Time Travel still keeps thirty days, by time." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       # Migrations are additive by rule, so the version currently serving keeps
       # working against the new schema - which is what makes a rollback of the
       # Worker alone a safe answer.

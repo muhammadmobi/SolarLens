@@ -18,6 +18,23 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **The CI/CD gaps, closed without a staging server.**
+  - *Integration tests against the real Worker*: wrangler starts it in workerd
+    on a throwaway local database, and the tests check what only workerd can
+    show - the page's headers from the assets binding, cookies through the
+    header rebuild, the password and passkeys in workerd's WebCrypto - and run
+    the deploy's own smoke test against it. `npm run test:integration`.
+  - *Screenshot comparison*: each view of the demo at a fixed moment, compared
+    with its recorded picture on Linux in CI.
+  - *Lighthouse* on the demo: accessibility 0.95 and best practices 0.9 or the
+    run fails.
+  - *A restore point before every migration*: the deploy writes a D1 Time
+    Travel bookmark, and the command to restore it, into its summary.
+  - *A production watcher*: every half hour, an issue if the site is down or no
+    feed has delivered for 90 minutes, closed again when readings return.
+  - *The owner's own pull requests approved* by the Actions bot once every check
+    has passed, Copilot has reviewed the newest commit and no thread is open.
+
 - **A demo on GitHub Pages.** The real dashboard, on made-up data, with no
   server behind it: `demo/demo.js` answers every request with three invented
   systems, placed wherever it is early afternoon so the day's curve is always

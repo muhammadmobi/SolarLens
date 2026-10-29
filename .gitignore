@@ -31,3 +31,13 @@ coverage/
 
 # The GitHub Pages demo, built by scripts/build-demo.mjs
 site/
+
+# The integration suite writes this from wrangler.jsonc with a made-up database id
+.wrangler.it.jsonc
+
+# Lighthouse reports, from the CI job or a local run
+.lighthouseci/
+
+# Screenshot baselines are recorded on Linux in CI; a local run records its own, not kept
+tests/visual/__screenshots__/*
+!tests/visual/__screenshots__/linux/

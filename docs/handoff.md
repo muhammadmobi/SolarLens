@@ -40,7 +40,7 @@ git clone https://github.com/muhammadmobi/SolarLens
 cd SolarLens
 npm ci
 npm run typecheck             # types for src/ and tests/
-npm run test:unit             # ~530 tests, a few seconds
+npm run test:unit             # ~550 tests, a few seconds
 npm run test:unit:coverage    # the same, with the coverage thresholds applied
 npm run test:e2e              # ~460 tests, a few minutes, needs Chrome
 ```
@@ -373,6 +373,12 @@ publishes it when either changes on `main`. Pages has to be turned on once (Sett
 source: GitHub Actions). When the API grows a field, the demo must grow it too -
 `tests/unit/fixture-contract.test.ts` fails until it does. `npm run screenshots` retakes the
 README's pictures from it.
+
+**Watching it**: `.github/workflows/watch.yml` checks `/api/status` every half hour
+and opens a GitHub issue labelled *watcher* if the site is down or no feed has
+delivered for 90 minutes, closing it when readings return. It needs the
+`SOLARLENS_URL` repository secret. Each deploy's summary also carries a D1 restore
+point taken before its migrations.
 
 **Seeing what is happening**: the README's *Debugging the live system* has the
 commands - the Worker's live log, `/api/health`, a query against production,
