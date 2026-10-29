@@ -3,10 +3,11 @@
  *
  * Workers AI is replaced by a script of replies, so each test says exactly
  * what the model "answered" and can read what it was sent. Held to the
- * promises in src/ask.ts: the model's choice is checked like any input, a
- * sentence stating a number the figures do not hold is set aside for the
- * tool's own words, the day's cap is kept, nobody anonymous spends it, and
- * with no model at all a direct question still gets its figures.
+ * promises in src/ask.ts and the assistant behind it: the model's choice is
+ * checked like any input, a sentence stating a number the figures do not hold
+ * is set aside for the tool's own words, the day's cap is kept, nobody
+ * anonymous spends it, and with no model at all - or none left today - the
+ * question is read by SolarLens itself and answered from the figures.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ask, numbersAgree, numbersIn, type AskReply } from '../../src/ask';
@@ -85,16 +86,16 @@ describe('asking', () => {
 
   it('lets the model choose the tool, runs it, and has the model word the figures', async () => {
     const ai = withAi([
-      { response: { tool: 'energy', args: { range: 'last_week', measure: 'exported' } } },
+      { response: { calls: [{ tool: 'energy', args: { range: 'last_week', measure: 'exported' } }] } },
       { response: 'Your systems sold 35 kWh to the grid last week, 21 – 27 Sep 2026; Garage does not report its export.' },
     ]);
     await lastWeek(h.env.DB);
-    const out = await ask(h.env, { question: 'How much did I export last week?' }, NOW);
+    const out = await ask(h.env, { question: 'How much did I export last week?' }, true, NOW);
     expect(out.status).toBe(200);
     expect(reply(out)).toMatchObject({
       question: 'How much did I export last week?', tool: 'energy', args: { range: 'last_week', measure: 'exported' },
       answer: 'Your systems sold 35 kWh to the grid last week, 21 – 27 Sep 2026; Garage does not report its export.',
-      worded: 'model', used: 2, limit: 100, model: DEFAULT_MODEL,
+      worded: 'model', understood: 'model', kind: 'figures', used: 2, limit: 100, model: DEFAULT_MODEL, provider: 'workers-ai',
     });
     expect(reply(out).result?.facts.total_exported_kwh).toBe(35);
 
@@ -103,87 +104,95 @@ describe('asking', () => {
     expect(ai.calls[0].model).toBe(DEFAULT_MODEL);
     expect(choosing.messages[0].content).toContain('Today is Mon 28 Sep 2026 (2026-09-28)');
     expect(choosing.messages[0].content).toContain('"Roof" (5 kWp), "Garage" (4 kWp)');
-    for (const t of ['status_now', 'energy', 'compare_systems', 'faults', 'day_report', 'performance_trend']) expect(choosing.messages[0].content).toContain(`- ${t}:`);
+    for (const t of ['status_now', 'energy', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']) expect(choosing.messages[0].content).toContain(`- ${t}:`);
     expect(choosing.messages[1]).toEqual({ role: 'user', content: 'How much did I export last week?' });
-    expect(choosing.response_format).toMatchObject({ type: 'json_schema', json_schema: { properties: { tool: { enum: expect.arrayContaining(['energy', 'none']) } } } });
+    expect(choosing.response_format).toMatchObject({ type: 'json_schema', json_schema: { properties: { calls: { type: 'array' } } } });
     // What it was shown to word: the question and the Worker's figures, not a database.
     const wording = ai.calls[1].inputs.messages;
     expect(wording[0].content).toContain('Do not add, subtract, average');
-    expect(wording[1].content).toContain('Question: How much did I export last week?');
+    expect(wording[1].content).toContain('Latest message: How much did I export last week?');
     expect(wording[1].content).toContain('"total_exported_kwh":35');
     expect(JSON.stringify(ai.calls)).not.toMatch(/station|alpha|beta/);
   });
 
   it("sets aside a sentence with a number of the model's own, for the tool's own words", async () => {
     withAi([
-      { response: { tool: 'energy', args: { range: 'last_week', measure: 'exported' } } },
+      { response: { calls: [{ tool: 'energy', args: { range: 'last_week', measure: 'exported' } }] } },
       { response: 'You sold 36 kWh last week.' },
     ]);
     await lastWeek(h.env.DB);
-    const r = reply(await ask(h.env, { question: 'How much did I export last week?' }, NOW));
+    const r = reply(await ask(h.env, { question: 'How much did I export last week?' }, true, NOW));
     expect(r.worded).toBe('solarlens');
     expect(r.answer).toBe(r.result?.summary);
     expect(r.answer.startsWith('Your systems sold 35 kWh to the grid last week')).toBe(true);
   });
 
   it("finds the choice inside a chatty reply, and falls back to the figures' own words when wording fails", async () => {
-    withAi([{ response: 'Sure! {"tool": "faults", "args": {"range": "last_week"}}' }, new Error('model busy')]);
+    withAi([{ response: 'Sure! {"calls": [{"tool": "faults", "args": {"range": "last_week"}}]}' }, new Error('model busy')]);
     await lastWeek(h.env.DB);
-    const r = reply(await ask(h.env, { question: 'Any faults last week?' }, NOW));
+    const r = reply(await ask(h.env, { question: 'Any faults last week?' }, true, NOW));
     expect(r).toMatchObject({ tool: 'faults', worded: 'solarlens', answer: 'No faults were recorded last week (21 – 27 Sep 2026).' });
   });
 
   it('answers a question about something else in a sentence, and spends no second call', async () => {
-    const ai = withAi([{ response: { tool: 'none', reply: 'I can only answer questions about your solar figures.' } }]);
-    const r = reply(await ask(h.env, { question: 'What is the capital of France?' }, NOW));
-    expect(r).toMatchObject({ tool: null, result: null, worded: 'model', answer: 'I can only answer questions about your solar figures.', used: 1 });
+    const ai = withAi([{ response: { calls: [], reply: 'I can only answer questions about your solar figures.' } }]);
+    const r = reply(await ask(h.env, { question: 'What is the capital of France?' }, true, NOW));
+    expect(r).toMatchObject({ tool: null, result: null, worded: 'model', kind: 'chat', answer: 'I can only answer questions about your solar figures.', used: 1 });
     expect(ai.calls).toHaveLength(1);
   });
 
   it('says what was wrong when the model chose arguments the tool does not take, or no tool at all', async () => {
-    withAi([{ response: { tool: 'energy', args: { range: 'someday' } } }, { response: { args: {} } }]);
+    withAi([{ response: { calls: [{ tool: 'energy', args: { range: 'someday' } }] } }, { response: { args: {} } }]);
     await lastWeek(h.env.DB);
-    const bad = reply(await ask(h.env, { question: 'How much someday?' }, NOW));
-    expect(bad).toMatchObject({ tool: 'energy', result: null, worded: 'solarlens' });
-    expect(bad.answer).toMatch(/^I could not answer that from the figures: range is one of/);
-    const none = reply(await ask(h.env, { question: 'Hmm?' }, NOW));
-    expect(none.answer).toBe('I could not tell which figures that needs. Try asking about a period, a system, or a day.');
+    const bad = reply(await ask(h.env, { question: 'How much someday?' }, true, NOW));
+    expect(bad).toMatchObject({ tool: null, result: null, worded: 'solarlens' });
+    expect(bad.answer).toMatch(/^I could not answer that from the figures: energy: range is one of/);
+    // No calls and no reply: SolarLens reads it itself, and "Hmm?" says nothing it can look up.
+    const none = reply(await ask(h.env, { question: 'Hmm?' }, true, NOW));
+    expect(none).toMatchObject({ kind: 'chat', understood: 'solarlens', worded: 'solarlens' });
+    expect(none.answer).toMatch(/^I can answer questions about the energy your systems made/);
   });
 
-  it('says so when the model does not answer at all', async () => {
+  it('reads the question itself when the model does not answer at all', async () => {
     withAi([new Error('4006: daily free allocation used up')]);
-    const out = await ask(h.env, { question: 'How was yesterday?' }, NOW);
-    expect(out).toEqual({ status: 502, body: { error: 'The model did not answer. Try again in a moment.' } });
+    await lastWeek(h.env.DB);
+    const r = reply(await ask(h.env, { question: 'How much did I make yesterday?' }, true, NOW));
+    expect(r).toMatchObject({ understood: 'solarlens', worded: 'solarlens', tool: 'energy', args: { range: 'yesterday' } });
+    expect(r.answer).toBe('Your systems made 30 kWh yesterday (Sun 27 Sep 2026).');
   });
 
-  it('keeps to the daily cap: a question that finds no call left for wording gets the figures\' own words, and the next is refused', async () => {
-    withAi([{ response: { tool: 'energy', args: { range: 'last_week' } } }], { AI_DAILY_CALLS: '1' });
+  it('keeps to the daily cap: past it, SolarLens reads the question itself and answers from the figures', async () => {
+    // The second reply is the next day's: this day's one call is spent on the first question.
+    const ai = withAi([{ response: { calls: [{ tool: 'energy', args: { range: 'last_week' } }] } }, { response: { calls: [{ tool: 'energy', args: { range: 'last_week' } }] } }], { AI_DAILY_CALLS: '1' });
     await lastWeek(h.env.DB);
-    const first = reply(await ask(h.env, { question: 'How much last week?' }, NOW));
-    expect(first).toMatchObject({ tool: 'energy', worded: 'solarlens', used: 1, limit: 1 });
-    const second = await ask(h.env, { question: 'And the week before?' }, NOW);
-    expect(second.status).toBe(429);
-    expect((second.body as { error: string }).error).toContain("Today's 1 model calls are used up");
+    const first = reply(await ask(h.env, { question: 'How much last week?' }, true, NOW));
+    expect(first).toMatchObject({ tool: 'energy', understood: 'model', worded: 'solarlens', used: 1, limit: 1 });
+    const second = reply(await ask(h.env, { question: 'How much did I sell last week?' }, true, NOW));
+    expect(second).toMatchObject({ understood: 'solarlens', worded: 'solarlens', args: { range: 'last_week', measure: 'exported' } });
+    expect(ai.calls).toHaveLength(1);
     // A new day, a new allowance.
-    expect((await ask(h.env, { tool: 'energy', args: { range: 'last_week' } }, NOW + 86400)).status).toBe(200);
+    expect(reply(await ask(h.env, { question: 'How much last week?' }, true, NOW + 86400)).understood).toBe('model');
   });
 
   it('takes a question of a few words, and not an essay', async () => {
     withAi([]);
-    expect(await ask(h.env, { question: 'hi' }, NOW)).toEqual({ status: 400, body: { error: 'Ask a question of a few words at least.' } });
-    expect((await ask(h.env, { question: 'why '.repeat(100) }, NOW)).status).toBe(400);
-    expect((await ask(h.env, null, NOW)).status).toBe(400);
+    expect(await ask(h.env, { question: 'hi' }, true, NOW)).toEqual({ status: 400, body: { error: 'Ask a question of a few words at least.' } });
+    expect((await ask(h.env, { question: 'why '.repeat(100) }, true, NOW)).status).toBe(400);
+    expect((await ask(h.env, null, true, NOW)).status).toBe(400);
   });
 
-  it('with no model, refuses a question but answers a tool asked for directly, in its own words', async () => {
+  it('with no model, reads a question itself, and answers a tool asked for directly, in the figures\' own words', async () => {
     h = createHarness();
     await lastWeek(h.env.DB);
-    expect((await ask(h.env, { question: 'How much did I export last week?' }, NOW)).status).toBe(503);
-    const out = await ask(h.env, { tool: 'energy', args: { range: 'last_week', measure: 'exported' } }, NOW);
+    const asked = reply(await ask(h.env, { question: 'How much did I export last week?' }, true, NOW));
+    expect(asked).toMatchObject({ understood: 'solarlens', worded: 'solarlens', tool: 'energy', model: null, provider: null });
+    expect(asked.answer.startsWith('Your systems sold 35 kWh')).toBe(true);
+    const out = await ask(h.env, { tool: 'energy', args: { range: 'last_week', measure: 'exported' } }, true, NOW);
     expect(out.status).toBe(200);
     expect(reply(out)).toMatchObject({ question: null, tool: 'energy', worded: 'solarlens', used: 0, model: null });
     expect(reply(out).answer.startsWith('Your systems sold 35 kWh')).toBe(true);
-    expect(await ask(h.env, { tool: 'drop_tables', args: {} }, NOW)).toEqual({ status: 400, body: { error: 'There is no tool called drop_tables.' } });
+    expect(await ask(h.env, { tool: 'drop_tables', args: {} }, true, NOW)).toEqual({ status: 400, body: { error: 'There is no tool called drop_tables.' } });
+    expect(await ask(h.env, { tool: 'energy', args: { range: 'someday' } }, true, NOW)).toEqual({ status: 400, body: { error: expect.stringContaining('range is one of') } });
   });
 });
 
@@ -194,24 +203,43 @@ describe('the routes', () => {
   const post = (body: unknown, headers: Record<string, string> = {}) =>
     h.fetch('/api/ask', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 
-  it('let anyone signed in ask - the owner, or a share link - and nobody anonymous, who could spend the day\'s calls', async () => {
+  it("let anyone who may read ask, and only someone signed in spend the day's model calls", async () => {
     const now = Math.floor(Date.now() / 1000);
     await lastWeek(h.env.DB, now);
     const direct = { tool: 'energy', args: { range: 'last_week' } };
-    expect(await (await post(direct)).json()).toEqual({ error: 'signin' });
+    // Anonymous, on an open dashboard: answered, from the figures alone.
+    const anonymous = await post(direct);
+    expect(anonymous.status).toBe(200);
+    expect(await anonymous.json()).toMatchObject({ worded: 'solarlens' });
     expect((await post(direct, bearer(API))).status).toBe(200);
     const share = await createShare(h.env.DB, 'Family', null, now);
     const asViewer = await post(direct, bearer(share.token));
     expect(asViewer.status).toBe(200);
     expect(asViewer.headers.get('cache-control')).toBe('no-store');
     expect(((await asViewer.json()) as AskReply).result?.tool).toBe('energy');
+    // With sign-in required, a stranger is asked to sign in, as for any read.
+    await setRequired(h.env.DB, true, now);
+    expect(await (await post(direct)).json()).toEqual({ error: 'signin' });
+  });
+
+  it('spend a model call only for someone signed in', async () => {
+    const ai = scriptedAi([{ response: { calls: [{ tool: 'energy', args: { range: 'last_week' } }] } }, { response: 'Your systems made 210 kWh last week.' }]);
+    const withModel = createHarness({ AI: ai.AI });
+    const now = Math.floor(Date.now() / 1000);
+    await lastWeek(withModel.env.DB, now);
+    const ask2 = (headers: Record<string, string>) => withModel.fetch('/api/ask', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ question: 'How much last week?' }) });
+    expect(await (await ask2({})).json()).toMatchObject({ understood: 'solarlens' });
+    expect(ai.calls).toHaveLength(0);
+    expect(await (await ask2(bearer(API))).json()).toMatchObject({ understood: 'model' });
+    expect(ai.calls).toHaveLength(2);
+    withModel.close();
   });
 
   it('say whether asking works here, and for whom', async () => {
-    expect(await (await h.fetch('/api/ask/status')).json()).toEqual({ available: false, model: null, used: 0, limit: 100, can_ask: false });
+    expect(await (await h.fetch('/api/ask/status')).json()).toEqual({ available: false, model: null, provider: null, used: 0, limit: 100, can_ask: false });
     const withAi = createHarness({ AI: scriptedAi([]).AI, AI_MODEL: '@cf/made-up/model', AI_DAILY_CALLS: '40' });
     expect(await (await withAi.fetch('/api/ask/status', { headers: bearer(API) })).json())
-      .toEqual({ available: true, model: '@cf/made-up/model', used: 0, limit: 40, can_ask: true });
+      .toEqual({ available: true, model: '@cf/made-up/model', provider: 'workers-ai', used: 0, limit: 40, can_ask: true });
     withAi.close();
   });
 
@@ -219,7 +247,7 @@ describe('the routes', () => {
     const now = Math.floor(Date.now() / 1000);
     await lastWeek(h.env.DB, now);
     const list = (await (await h.fetch('/api/tools')).json()) as { tools: { name: string; input_schema: { type: string } }[] };
-    expect(list.tools.map((t) => t.name)).toEqual(['status_now', 'energy', 'compare_systems', 'faults', 'day_report', 'performance_trend']);
+    expect(list.tools.map((t) => t.name)).toEqual(['status_now', 'energy', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
     expect(list.tools[1].input_schema.type).toBe('object');
     const ran = await h.fetch('/api/tools/compare_systems?range=last_week');
     expect(ran.status).toBe(200);

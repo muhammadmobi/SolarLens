@@ -162,20 +162,53 @@ describe('signing in, in workerd', () => {
     expect((await fetch(url('/api/settings/channels'), { headers: ha })).status).toBe(401);
   });
 
-  it('asks without a model: a question is refused, and a tool asked for directly answers from the figures', async () => {
-    // This suite runs without the AI binding, as src/ask.ts must when there is none.
+  it('asks without a model: SolarLens reads a question, a conversation and a tool asked for directly, and answers from the figures', async () => {
+    // This suite runs without the AI binding, as src/assistant.ts must when there is none.
     const owner = { 'content-type': 'application/json', cookie: b.header() };
-    expect(await (await fetch(url('/api/ask/status'), { headers: owner })).json()).toMatchObject({ available: false, model: null, can_ask: true });
+    expect(await (await fetch(url('/api/ask/status'), { headers: owner })).json())
+      .toMatchObject({ available: false, model: null, provider: null, can_ask: true });
     const question = await fetch(url('/api/ask'), { method: 'POST', headers: owner, body: JSON.stringify({ question: 'How much today?' }) });
-    expect(question.status).toBe(503);
+    expect(question.status).toBe(200);
+    expect(await question.json()).toMatchObject({ tool: 'energy', args: { range: 'today' }, understood: 'solarlens', worded: 'solarlens', used: 0 });
+
+    // A conversation: a report on last month, then a follow-up that moves it a month back.
+    const first = await fetch(url('/api/chat'), {
+      method: 'POST', headers: owner, body: JSON.stringify({ messages: [{ role: 'user', content: 'A report on last month' }] }),
+    });
+    expect(first.status).toBe(200);
+    expect(first.headers.get('cache-control')).toBe('no-store');
+    const report = (await first.json()) as { kind: string; answer: string; calls: { tool: string; args: Record<string, string> }[]; results: { sections?: { tool: string }[] }[] };
+    expect(report).toMatchObject({ kind: 'report', calls: [{ tool: 'report', args: { range: 'last_month' } }] });
+    expect(report.results[0].sections!.map((s) => s.tool)).toEqual(expect.arrayContaining(['energy', 'compare_systems', 'stats', 'faults']));
+    const followUp = await fetch(url('/api/chat'), {
+      method: 'POST', headers: owner, body: JSON.stringify({ messages: [
+        { role: 'user', content: 'A report on last month' },
+        { role: 'assistant', content: report.answer, calls: report.calls },
+        { role: 'user', content: 'And the month before?' },
+      ] }),
+    });
+    expect(followUp.status).toBe(200);
+    const before = (await followUp.json()) as { calls: { tool: string; args: Record<string, string> }[] };
+    expect(before.calls[0].tool).toBe('report');
+    expect(before.calls[0].args.from).toMatch(/^\d{4}-\d\d-01$/);
+    // Help with the app, from the entries in src/help.ts.
+    const help = await fetch(url('/api/chat'), {
+      method: 'POST', headers: owner, body: JSON.stringify({ messages: [{ role: 'user', content: 'How do I get alerts on Telegram?' }] }),
+    });
+    expect(await help.json()).toMatchObject({ kind: 'help', calls: [{ tool: 'app_help' }] });
+    expect((await fetch(url('/api/chat'), { method: 'POST', headers: owner, body: '{"messages":[]}' })).status).toBe(400);
+
     const direct = await fetch(url('/api/ask'), { method: 'POST', headers: owner, body: JSON.stringify({ tool: 'status_now' }) });
     expect(direct.status).toBe(200);
     const answer = (await direct.json()) as { tool: string; worded: string; result: { facts: Record<string, unknown> } };
     expect(answer).toMatchObject({ tool: 'status_now', worded: 'solarlens' });
     expect(answer.result.facts.systems).toBe(2);
     const tools = (await (await fetch(url('/api/tools'), { headers: owner })).json()) as { tools: unknown[] };
-    expect(tools.tools).toHaveLength(6);
+    expect(tools.tools).toHaveLength(9);
     expect((await fetch(url('/api/ask'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"tool":"status_now"}' })).status).toBe(401);
+    // On a private dashboard a stranger's conversation is refused like a read.
+    expect((await fetch(url('/api/chat'), { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: '{"messages":[{"role":"user","content":"How much today?"}]}' })).status).toBe(401);
   });
 
   it('connects an AI app over OAuth - registered, approved by the owner, PKCE - and answers it over MCP', async () => {

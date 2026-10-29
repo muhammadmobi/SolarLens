@@ -60,6 +60,14 @@ export interface Env {
   AI_MODEL?: string;
   /** Model calls a day, every feature together; 100 unless set. */
   AI_DAILY_CALLS?: string;
+  /**
+   * A model server of the owner's choosing instead of Workers AI: any that
+   * speaks OpenAI's chat completions (OpenAI, Groq, OpenRouter, a model on your
+   * own computer behind a tunnel...). https only; needs AI_MODEL too.
+   */
+  AI_BASE_URL?: string;
+  /** That server's key, a secret; unset for one that needs none. */
+  AI_API_KEY?: string;
 }
 
 /** The current time in epoch seconds, the unit every table here uses. */

@@ -19,8 +19,10 @@
  *   (/api/settings/*), or forcing a poll.
  * - Home Assistant, reading /api/sensors on a timer - with a share link as a
  *   bearer token when the dashboard is private.
- * - Ask SolarLens (/api/ask), for anyone signed in - the owner, or someone
- *   with a share link - since each question spends the day's model calls.
+ * - The assistant (/api/chat, and /api/ask for one question), for anyone who
+ *   may read: the model's words for someone signed in - the owner, or a share
+ *   link - since they spend the day's model calls; SolarLens's own reading of
+ *   the question for anyone else.
  * - AI apps outside SolarLens, through the MCP server at /mcp (./mcp), each
  *   with an OAuth token from an approval the owner gave once (./oauth). Those need the owner signed in, or API_TOKEN as a header - except
  *   turning a phone's notifications off, which needs only that phone's own
@@ -47,8 +49,9 @@ import { expectedToday } from './expected';
 import { getGroups, getTariff, parseGroups, parseTariff, setGroups, setTariff } from './settings';
 import { MAX_CHANNELS, addChannel, channelsFor, deliver, getChannel, listChannels, parseChannel, publicChannel, removeChannel, testMessage, updateChannel } from './channels';
 import { buildSummary, currentSlot, sendWeekly, summaryMessage, withReport } from './summary';
-import { aiModel, callsUsed, dailyCalls, hasAi } from './ai';
+import { aiModel, callsUsed, dailyCalls, hasAi, providerOf } from './ai';
 import { ask } from './ask';
+import { converse } from './assistant';
 import { latestReports, runWeeklyAgents } from './agents';
 import { TOOLS, jsonSchemaOf, runTool } from './tools';
 import {
@@ -210,8 +213,12 @@ app.get('/s/:link', openShareLink);
  * device that is signed up, and the service worker asking has no session to
  * show once its hour is up.
  */
-/** The writes a share link's viewer may make, besides reading: asking a question. */
-const VIEWER_WRITES = new Set(['/api/ask']);
+/**
+ * Posts that only read: a message to the assistant. They are answered as a
+ * read is - open, or with sign-in required, for the owner and a share link -
+ * and the route itself decides who may spend a model call.
+ */
+const READING_POSTS = new Set(['/api/ask', '/api/chat']);
 const ALWAYS_OPEN = new Set(['/api/status', '/api/push/key', '/api/push/recent', '/api/push/unsubscribe']);
 app.use('/api/*', async (c, next) => {
   if (c.req.path === '/api/ingest' || c.req.path.startsWith('/api/ingest/')) return next();
@@ -221,7 +228,7 @@ app.use('/api/*', async (c, next) => {
   if (ALWAYS_OPEN.has(c.req.path)) return next();
   const caller = c.get('caller');
 
-  if (c.req.method === 'GET') {
+  if (c.req.method === 'GET' || READING_POSTS.has(c.req.path)) {
     if (caller.role) return next();
     const o = await owner(c.env.DB);
     if (o?.require_sign_in) return c.json({ error: 'signin' }, 401);
@@ -233,9 +240,6 @@ app.use('/api/*', async (c, next) => {
     return next();
   }
   if (caller.role === 'owner') return next();
-  // Asking reads and spends only the day's model calls, which a viewer may too;
-  // anyone else is asked to sign in, as a read would be.
-  if (VIEWER_WRITES.has(c.req.path)) return caller.role === 'viewer' ? next() : c.json({ error: 'signin' }, 401);
   return c.json({ error: 'unauthorized' }, 401);
 });
 
@@ -464,24 +468,39 @@ app.get('/api/summary', async (c) => {
 
 // ---------- Ask SolarLens, the tools and the agents (./ask, ./tools, ./agents) ----------
 
-/** Whether asking works here, for whom, and how much of today's allowance is used. */
+/**
+ * Whether there is a model here (`available`), which one and where it runs,
+ * whether this caller may use it (`can_ask`: anyone signed in), and how much
+ * of today's allowance is used.
+ */
 app.get('/api/ask/status', async (c) => {
   c.header('Cache-Control', CACHE);
   return c.json({
-    available: hasAi(c.env), model: hasAi(c.env) ? aiModel(c.env) : null,
+    available: hasAi(c.env), model: hasAi(c.env) ? aiModel(c.env) : null, provider: providerOf(c.env),
     used: await callsUsed(c.env.DB), limit: dailyCalls(c.env), can_ask: !!c.get('caller').role,
   });
 });
 
 /**
- * A question - `{question}` - or a tool asked for directly - `{tool, args}`.
- * For anyone signed in: the owner, or someone with a share link. Not an
- * anonymous caller, even on an open dashboard: each question spends model
- * calls from the day's allowance, and a stranger could spend them all.
+ * One question - `{question}` - or a tool asked for directly - `{tool, args}`.
+ * Anyone who may read may ask; only someone signed in - the owner, or a share
+ * link - spends a model call, since a stranger could spend the day's allowance.
+ * Anyone else is answered by SolarLens reading the question itself.
  */
 app.post('/api/ask', async (c) => {
-  if (!c.get('caller').role) return c.json({ error: 'signin' }, 401);
-  const out = await ask(c.env, await c.req.json().catch(() => null));
+  const out = await ask(c.env, await c.req.json().catch(() => null), !!c.get('caller').role);
+  c.header('Cache-Control', 'no-store');
+  return c.json(out.body, out.status as 200);
+});
+
+/**
+ * The assistant: `{messages}`, the conversation so far with the owner's
+ * latest last, answered with the figures it used. The Worker keeps none of
+ * the conversation. Who may spend a model call is as for /api/ask.
+ */
+app.post('/api/chat', async (c) => {
+  const body = (await c.req.json().catch(() => null)) as { messages?: unknown } | null;
+  const out = await converse(c.env, { messages: body?.messages }, !!c.get('caller').role);
   c.header('Cache-Control', 'no-store');
   return c.json(out.body, out.status as 200);
 });

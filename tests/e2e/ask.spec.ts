@@ -1,58 +1,69 @@
 /**
- * The Ask tab, and "Why?" on Historical Data.
+ * The Ask tab - the assistant's conversation - and "Why?" on Historical Data.
  *
- * The Worker is stubbed as everywhere in this suite; tests/unit/ask.test.ts,
- * tools.test.ts and agents.test.ts hold the model's lead, the tools and the
- * agents. These hold the page: a question sent as typed, and its answer shown
- * with its evidence - the figures, the period, how fresh the data was and who
- * worded it; the examples; what someone who cannot ask is told, and why; the
- * weekly report and each system's health; "Why?" beside a low day, answered
- * from the figures alone for someone not signed in; and a model's words kept
- * as text, never markup.
+ * The Worker is stubbed as everywhere in this suite; tests/unit/assistant.test.ts
+ * and its neighbours hold the understanding, the tools and the agents. These
+ * hold the page: a message sent with the conversation before it, and its answer
+ * shown with its evidence - the figures, a chart where one helps, a report's
+ * parts, the period, how fresh the data was and who worded it; the examples; a
+ * new conversation, and one that survives a reload; a report downloaded as a
+ * page of its own; what each kind of reader is told about the model; the
+ * weekly report and each system's health; "Why?" beside a low day; and a
+ * model's words kept as text, never markup.
  */
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { HYBRID, NOW, devices, deviceHistory, inverters, series } from '../fixtures/dashboard-api';
 
 const json = (body: unknown, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) });
 const day = (n: number) => new Date(Date.now() - n * 86400_000).toISOString().slice(0, 10);
 
-/** What the Worker answers a question with, in the shape src/ask.ts gives it. */
-function answer(over: Record<string, unknown> = {}) {
+const energyResult = {
+  tool: 'energy', title: 'Energy per day', period: { from: '2026-09-21', to: '2026-09-27', label: 'last week (21 – 27 Sep 2026)' },
+  columns: ['Day', 'Made (kWh)', 'Sold (kWh)'],
+  rows: [['Mon 21 Sep 2026', 13.2, 5], ['Tue 22 Sep 2026', 1234.5, 5], ['Wed 23 Sep 2026', 12, 5]],
+  facts: { total_made_kwh: 1259.7 }, notes: ['Demo Solis Plant does not report what was sold.'],
+  summary: 'Your systems made 1260 kWh last week (21 – 27 Sep 2026).',
+  freshness: { newest: NOW - 120, offline: ['Demo Solis Plant'] },
+};
+
+/** What the Worker answers a message with, in the shape src/assistant.ts gives it. */
+function reply(over: Record<string, unknown> = {}) {
   return {
-    question: 'How much did I export last week?', tool: 'energy', args: { range: 'last_week', measure: 'exported' },
-    answer: 'Your systems sold 35 kWh to the grid last week, 21 – 27 Sep 2026.', worded: 'model', used: 3, limit: 100, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
-    result: {
-      tool: 'energy', title: 'Energy per day', period: { from: '2026-09-21', to: '2026-09-27', label: 'last week (21 – 27 Sep 2026)' },
-      columns: ['Day', 'Made (kWh)', 'Sold (kWh)'],
-      rows: [['Mon 21 Sep 2026', 13.2, 5], ['Tue 22 Sep 2026', 1234.5, 5]],
-      facts: { total_exported_kwh: 35 }, notes: ['Demo Solis Plant does not report what was sold.'],
-      summary: 'Your systems sold 35 kWh to the grid last week (21 – 27 Sep 2026).',
-      freshness: { newest: NOW - 120, offline: ['Demo Solis Plant'] },
-    },
-    ...over,
+    answer: 'Your systems made 1260 kWh last week, 21 – 27 Sep 2026.', worded: 'model', understood: 'model', kind: 'figures',
+    calls: [{ tool: 'energy', args: { range: 'last_week' } }], results: [energyResult], errors: [],
+    used: 3, limit: 100, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', provider: 'workers-ai', ...over,
   };
 }
+
+const reportReply = () => reply({
+  kind: 'report', answer: 'Last week in short: 1260 kWh made.\nThe Hybrid led per kWp.\n- No faults were recorded.',
+  calls: [{ tool: 'report', args: { range: 'last_week' } }],
+  results: [{
+    tool: 'report', title: 'Report', period: energyResult.period, columns: ['', 'Figure'],
+    rows: [['Made (kWh)', 1259.7], ['Faults', '0']], facts: {}, notes: [], summary: 'The report in a sentence.', freshness: energyResult.freshness,
+    sections: [energyResult, { ...energyResult, tool: 'faults', title: 'Faults', rows: [], columns: [], summary: 'No faults were recorded last week.' }],
+  }],
+});
 
 interface World {
   status: Record<string, unknown>;
   agents: unknown;
-  asked: unknown[];
-  toolsAsked: string[];
-  reply: { status: number; body: unknown };
+  sent: { path: string; body: any }[];
+  replies: { status: number; body: unknown }[];
 }
 
 async function stub(page: Page, over: Partial<World> = {}): Promise<World> {
   const world: World = {
-    status: { available: true, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', used: 2, limit: 100, can_ask: true },
+    status: { available: true, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', provider: 'workers-ai', used: 2, limit: 100, can_ask: true },
     agents: {
       weekly: { kind: 'weekly', week_of: '2026-09-28', title: 'Week of 21 Sep 2026', body: 'A steady week: 224 kWh, about the same as the week before.', worded: 'model', flagged: false, created_at: NOW - 3600 },
       health: [
-        { kind: 'health', system: 's1', name: 'Demo Solis Plant', week_of: '2026-09-28', title: 't', body: 'Demo Solis Plant: steady (performance ratio 0.8 over the last 4 weeks, against 0.8 in the 8 before).', worded: 'solarlens', flagged: false, created_at: NOW - 3600, data: { verdict: 'steady', weekly: [0.8, 0.81, 0.79, 0.8, 0.8, 0.82, 0.8, 0.79, 0.8, 0.81, 0.8, 0.8] } },
-        { kind: 'health', system: HYBRID, name: 'Demo Hybrid', week_of: '2026-09-28', title: 't', body: 'Demo Hybrid: for its sunlight it is making 20% less - worth a look for dirt, shade or a string down.', worded: 'solarlens', flagged: true, created_at: NOW - 3600, data: { verdict: 'declining', weekly: [0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.64, 0.64, 0.64, 0.64] } },
+        { kind: 'health', system: 's1', name: 'Demo Solis Plant', week_of: '2026-09-28', title: 't', body: 'Demo Solis Plant: steady.', worded: 'solarlens', flagged: false, created_at: NOW - 3600, data: { verdict: 'steady', weekly: [0.8, 0.81, 0.79, 0.8] } },
+        { kind: 'health', system: HYBRID, name: 'Demo Hybrid', week_of: '2026-09-28', title: 't', body: 'Demo Hybrid: for its sunlight it is making 20% less.', worded: 'solarlens', flagged: true, created_at: NOW - 3600, data: { verdict: 'declining', weekly: [0.8, 0.8, 0.64, 0.64] } },
       ],
     },
-    asked: [], toolsAsked: [],
-    reply: { status: 200, body: answer() },
+    sent: [], replies: [],
     ...over,
   };
   await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters: inverters() })));
@@ -68,14 +79,13 @@ async function stub(page: Page, over: Partial<World> = {}): Promise<World> {
   }
   await page.route('**/api/ask/status', (r) => r.fulfill(json(world.status)));
   await page.route('**/api/agents', (r) => r.fulfill(json(world.agents)));
-  await page.route('**/api/ask', (r: Route) => {
-    world.asked.push(r.request().postDataJSON());
-    return r.fulfill(json(world.reply.body, world.reply.status));
-  });
-  await page.route('**/api/tools/**', (r) => {
-    world.toolsAsked.push(new URL(r.request().url()).pathname + new URL(r.request().url()).search);
-    return r.fulfill(json({ args: {}, result: { ...answer().result, tool: 'day_report', title: 'Explained', summary: 'Demo Hybrid made 3 kWh, 25% of a usual day: less sun.', rows: [] } }));
-  });
+  for (const path of ['**/api/chat', '**/api/ask']) {
+    await page.route(path, (r: Route) => {
+      world.sent.push({ path: new URL(r.request().url()).pathname, body: r.request().postDataJSON() });
+      const next = world.replies.shift() ?? { status: 200, body: reply() };
+      return r.fulfill(json(next.body, next.status));
+    });
+  }
   return world;
 }
 
@@ -83,73 +93,143 @@ async function ready(page: Page) {
   await expect(page.locator('#fleet-today')).not.toHaveText('—');
   await expect(page.locator('#askq')).toBeVisible();
 }
+const ask = async (page: Page, text: string) => {
+  await page.locator('#askq').fill(text);
+  await page.getByRole('button', { name: 'Ask', exact: true }).click();
+};
+const lastBot = (page: Page) => page.locator('.chatlog .msg.bot').last();
 
-test.describe('asking', () => {
-  test('sends the question as typed, and shows the answer with its figures, period, freshness, and who worded it', async ({ page }) => {
+test.describe('the conversation', () => {
+  test('sends the message, and shows the answer with its figures, a chart, the period, how fresh, and who worded it', async ({ page }) => {
     const world = await stub(page);
     await page.goto('/#/ask');
     await ready(page);
     await expect(page.getByText('98 of 100 model calls left today')).toBeVisible();
-    await page.locator('#askq').fill('How much did I export last week?');
-    await page.getByRole('button', { name: 'Ask', exact: true }).click();
-    const card = page.locator('section.answer').first();
-    await expect(card.locator('.said')).toHaveText('Your systems sold 35 kWh to the grid last week, 21 – 27 Sep 2026.');
-    await expect(card.locator('.asked')).toHaveText('How much did I export last week?');
-    await expect(card.locator('.by')).toContainText('Worded by the model from the figures below, which SolarLens worked out.');
-    await expect(card.locator('.by')).toContainText('Covers last week (21 – 27 Sep 2026).');
-    await expect(card.locator('.by')).toContainText('not reporting now: Demo Solis Plant');
-    await expect(card.locator('.evidence tbody tr')).toHaveCount(2);
-    await expect(card.locator('.evidence tbody tr').nth(1)).toContainText(/1,234\.5|1234\.5/);
-    await expect(card.locator('.asknotes li')).toHaveText(['Demo Solis Plant does not report what was sold.']);
+    await ask(page, 'How much did I make last week?');
+    await expect(page.locator('.chatlog .msg.me')).toHaveText(['How much did I make last week?']);
+    const bot = lastBot(page);
+    await expect(bot.locator('.said')).toHaveText('Your systems made 1260 kWh last week, 21 – 27 Sep 2026.');
+    await expect(bot.locator('.by')).toContainText('Worded by the model from the figures below, which SolarLens worked out.');
+    await expect(bot.locator('.by')).toContainText('not reporting now: Demo Solis Plant');
+    await expect(bot.locator('details.evidence summary')).toHaveText(['Energy per day · last week (21 – 27 Sep 2026)']);
+    await expect(bot.locator('details.evidence tbody tr')).toHaveCount(3);
+    await expect(bot.locator('.minichart svg rect')).toHaveCount(3);
+    // The first and last labels are text beneath the drawing, oldest on the left.
+    await expect(bot.locator('.minichart figcaption span')).toHaveText(['Mon 21 Sep 2026', 'Wed 23 Sep 2026']);
+    await expect(bot.locator('.asknotes li')).toHaveText(['Demo Solis Plant does not report what was sold.']);
     await expect(page.getByText('97 of 100 model calls left today')).toBeVisible();
-    expect(world.asked).toEqual([{ question: 'How much did I export last week?' }]);
+    expect(world.sent).toEqual([{ path: '/api/chat', body: { messages: [{ role: 'user', content: 'How much did I make last week?' }] } }]);
+  });
+
+  test('carries the conversation with a follow-up, and keeps it across a reload until a new one begins', async ({ page }) => {
+    const world = await stub(page);
+    await page.goto('/#/ask');
+    await ready(page);
+    await ask(page, 'How much did I make last week?');
+    await expect(lastBot(page).locator('.said')).toContainText('1260 kWh');
+    world.replies.push({ status: 200, body: reply({ answer: 'The week before, 1100 kWh.', calls: [{ tool: 'energy', args: { from: '2026-09-14', to: '2026-09-20' } }] }) });
+    await expect(page.locator('#askq')).toHaveAttribute('placeholder', 'Ask a follow-up…');
+    await ask(page, 'And the week before?');
+    await expect(page.locator('.chatlog .msg.bot')).toHaveCount(2);
+    expect(world.sent[1].body.messages).toEqual([
+      { role: 'user', content: 'How much did I make last week?' },
+      { role: 'assistant', content: 'Your systems made 1260 kWh last week, 21 – 27 Sep 2026.', calls: [{ tool: 'energy', args: { range: 'last_week' } }] },
+      { role: 'user', content: 'And the week before?' },
+    ]);
+    await page.reload();
+    await ready(page);
+    await expect(page.locator('.chatlog .msg.me')).toHaveText(['How much did I make last week?', 'And the week before?']);
+    await page.getByRole('button', { name: 'New conversation' }).click();
+    await expect(page.locator('.chatlog .msg')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'A report on last month' })).toBeVisible();
   });
 
   test('asks an example with one tap', async ({ page }) => {
     const world = await stub(page);
     await page.goto('/#/ask');
     await ready(page);
-    await page.getByRole('button', { name: 'Why was yesterday low?' }).click();
-    await expect(page.locator('section.answer')).toHaveCount(1);
-    expect(world.asked).toEqual([{ question: 'Why was yesterday low?' }]);
+    await page.getByRole('button', { name: 'How do I get alerts on Telegram?' }).click();
+    await expect(page.locator('.chatlog .msg.bot')).toHaveCount(1);
+    expect(world.sent[0].body.messages).toEqual([{ role: 'user', content: 'How do I get alerts on Telegram?' }]);
   });
 
-  test("shows the Worker's refusal as it gave it, and keeps the figures' own words when the model's were set aside", async ({ page }) => {
-    const world = await stub(page, { reply: { status: 429, body: { error: "Today's 100 model calls are used up; asking starts again at midnight UTC." } } });
+  test('shows a report with its parts, and downloads it as a page of its own', async ({ page }) => {
+    const world = await stub(page);
+    world.replies.push({ status: 200, body: reportReply() });
     await page.goto('/#/ask');
     await ready(page);
-    await page.locator('#askq').fill('And the week before?');
-    await page.getByRole('button', { name: 'Ask', exact: true }).click();
-    await expect(page.locator('section.answer .autherr')).toHaveText("Today's 100 model calls are used up; asking starts again at midnight UTC.");
-    world.reply = { status: 200, body: answer({ worded: 'solarlens', answer: 'Your systems sold 35 kWh to the grid last week (21 – 27 Sep 2026).' }) };
-    await page.locator('#askq').fill('How much did I export?');
-    await page.getByRole('button', { name: 'Ask', exact: true }).click();
-    await expect(page.locator('section.answer').first().locator('.by')).toContainText("In SolarLens's own words, from the figures below.");
+    await ask(page, 'A report on last week');
+    const bot = lastBot(page);
+    await expect(bot.locator('.said p')).toHaveText(['Last week in short: 1260 kWh made.', 'The Hybrid led per kWp.']);
+    await expect(bot.locator('.said li')).toHaveText(['No faults were recorded.']);
+    await expect(bot.locator('details.evidence summary')).toHaveText(['Report · last week (21 – 27 Sep 2026)', 'Energy per day · last week (21 – 27 Sep 2026)', 'Faults · last week (21 – 27 Sep 2026)']);
+    const [download] = await Promise.all([page.waitForEvent('download'), bot.getByRole('button', { name: 'Download report' }).click()]);
+    expect(download.suggestedFilename()).toBe('SolarLens report - last week 21  27 Sep 2026.html');
+    const html = readFileSync((await download.path())!, 'utf8');
+    expect(html).toContain('<h1>SolarLens report: last week (21 – 27 Sep 2026)</h1>');
+    expect(html).toContain('<p>Last week in short: 1260 kWh made.</p>');
+    expect(html).toContain('<h3>Energy per day <small>last week (21 – 27 Sep 2026)</small></h3>');
+    expect(html).toContain('<td>1,234.5</td>');
+    expect(html).toContain('the words by @cf/meta/llama-3.3-70b-instruct-fp8-fast');
+    expect(html).not.toContain('<script');
   });
 
-  test('keeps a reply as text, never markup', async ({ page }) => {
-    await stub(page, { reply: { status: 200, body: answer({ answer: '<img src=x onerror="window.pwned=1">Made 35 kWh.' }) } });
+  test('keeps an answer as text, never markup, in the page and in a download', async ({ page }) => {
+    const world = await stub(page);
+    world.replies.push({ status: 200, body: reply({ answer: '<img src=x onerror="window.pwned=1">Made 1260 kWh.' }) });
     await page.goto('/#/ask');
     await ready(page);
-    await page.locator('#askq').fill('How much?');
-    await page.getByRole('button', { name: 'Ask', exact: true }).click();
-    await expect(page.locator('section.answer .said')).toHaveText('<img src=x onerror="window.pwned=1">Made 35 kWh.');
-    await expect(page.locator('section.answer img')).toHaveCount(0);
+    await ask(page, 'How much?');
+    await expect(lastBot(page).locator('.said')).toHaveText('<img src=x onerror="window.pwned=1">Made 1260 kWh.');
+    await expect(page.locator('.chatlog img')).toHaveCount(0);
     expect(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
+    const [download] = await Promise.all([page.waitForEvent('download'), lastBot(page).getByRole('button', { name: 'Download' }).click()]);
+    expect(readFileSync((await download.path())!, 'utf8')).toContain('&lt;img src=x onerror=&quot;window.pwned=1&quot;&gt;');
   });
 
-  test('tells someone not signed in why they cannot ask, and a server with no model what still works', async ({ page }) => {
-    const world = await stub(page, { status: { available: true, model: 'm', used: 0, limit: 100, can_ask: false } });
+  test("links an answer about the app to the page it is about, and shows the Worker's refusals in its words", async ({ page }) => {
+    const world = await stub(page);
+    world.replies.push(
+      { status: 200, body: reply({ kind: 'help', answer: 'Settings → Alerts elsewhere.', calls: [{ tool: 'app_help', args: {} }], results: [{
+        tool: 'app_help', title: 'In SolarLens', period: null, columns: ['Topic', 'How', 'Where'], rows: [['Alerts', 'Settings → Alerts elsewhere', '#/settings']],
+        facts: {}, notes: [], summary: 's', freshness: { newest: null, offline: [] } }] }) },
+      { status: 400, body: { error: 'A message is at most 500 characters.' } },
+      { status: 401, body: { error: 'signin' } },
+    );
     await page.goto('/#/ask');
-    await expect(page.locator('#fleet-today')).not.toHaveText('—');
-    await expect(page.locator('#askq')).toBeDisabled();
-    await expect(page.getByText(/Sign in to ask: each question spends model calls/)).toBeVisible();
-    world.status = { available: false, model: null, used: 0, limit: 100, can_ask: true };
-    await page.evaluate(() => { location.hash = '#/'; });
-    await page.reload();
+    await ready(page);
+    await ask(page, 'How do I get alerts?');
+    await expect(lastBot(page).getByRole('link', { name: 'Open' })).toHaveAttribute('href', '#/settings');
+    await ask(page, 'x'.repeat(20));
+    await expect(lastBot(page).locator('.autherr')).toHaveText('A message is at most 500 characters.');
+    await ask(page, 'And now?');
+    await expect(lastBot(page).locator('.autherr')).toHaveText('This dashboard is private: sign in to ask.');
+  });
+});
+
+test.describe('who words the answers', () => {
+  for (const [label, status, text] of [
+    ['someone not signed in', { available: true, model: 'm', provider: 'workers-ai', used: 0, limit: 100, can_ask: false }, "Answered in SolarLens's own words, from the figures. Sign in for the model's."],
+    ['a server with no model', { available: false, model: null, provider: null, used: 0, limit: 100, can_ask: true }, 'No model is set up here: SolarLens reads each question itself, and answers from the figures.'],
+    ['a day with no calls left', { available: true, model: 'm', provider: 'workers-ai', used: 100, limit: 100, can_ask: true }, "Today's model calls are used up: until midnight UTC, SolarLens reads each question itself."],
+    ["a server of the owner's own", { available: true, model: 'made-up-model', provider: 'openai-compatible', used: 1, limit: 100, can_ask: true }, 'Worded by made-up-model; SolarLens works out every figure. 99 of 100 model calls left today.'],
+  ] as const) {
+    test(`is said, for ${label}`, async ({ page }) => {
+      await stub(page, { status: { ...status } });
+      await page.goto('/#/ask');
+      await ready(page);
+      await expect(page.getByText(text)).toBeVisible();
+      await expect(page.locator('#askq')).toBeEnabled();
+    });
+  }
+
+  test('and an answer SolarLens read and worded itself says so', async ({ page }) => {
+    const world = await stub(page);
+    world.replies.push({ status: 200, body: reply({ worded: 'solarlens', understood: 'solarlens' }) });
     await page.goto('/#/ask');
-    await expect(page.getByText(/Questions in words need Workers AI/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Which month produced the most this year?' })).toBeDisabled();
+    await ready(page);
+    await ask(page, 'How much last week?');
+    await expect(lastBot(page).locator('.by')).toContainText("In SolarLens's own words, from the figures below. SolarLens read the question itself.");
   });
 });
 
@@ -160,14 +240,11 @@ test.describe('the report and the health check', () => {
     await ready(page);
     const report = page.locator('section.card', { has: page.locator('h2', { hasText: "This week's report" }) });
     await expect(report.locator('.said')).toHaveText('A steady week: 224 kWh, about the same as the week before.');
-    await expect(report.locator('.by')).toContainText('Written by the model');
     const rows = page.locator('.healthrow');
     await expect(rows).toHaveCount(2);
-    await expect(rows.first().locator('.pill')).toHaveText('steady');
     await expect(rows.nth(1).locator('.pill')).toHaveText('declining');
     await expect(rows.nth(1).locator('.pill')).toHaveClass(/warn/);
     await expect(rows.nth(1).locator('svg.ratiospark path')).toHaveCount(1);
-    await expect(rows.nth(1)).toContainText('making 20% less');
   });
 
   test('say when nothing has been written yet', async ({ page }) => {
@@ -179,34 +256,23 @@ test.describe('the report and the health check', () => {
   });
 });
 
-test.describe('why was this day low?', () => {
-  test('is a button beside a low day on Historical Data, answered on the Ask tab', async ({ page }) => {
-    const world = await stub(page, { reply: { status: 200, body: answer({ question: null, tool: 'day_report', worded: 'model', answer: 'Demo Hybrid made 3 kWh: less sun.' }) } });
-    await page.goto('/#/history');
-    await expect(page.locator('#fleet-today')).not.toHaveText('—');
-    const buttons = page.getByRole('button', { name: 'Why?' });
-    await expect(buttons).toHaveCount(1);
-    await buttons.click();
-    await expect(page).toHaveURL(/#\/ask$/);
-    await expect(page.locator('section.answer .said')).toHaveText('Demo Hybrid made 3 kWh: less sun.');
-    expect(world.asked).toEqual([{ tool: 'day_report', args: { date: day(2), system: 'Demo Hybrid' } }]);
-  });
-
-  test("answers someone not signed in from the figures alone, with no model", async ({ page }) => {
-    const world = await stub(page, { reply: { status: 401, body: { error: 'signin' } }, status: { available: true, model: 'm', used: 0, limit: 100, can_ask: false } });
-    await page.goto('/#/history');
-    await expect(page.locator('#fleet-today')).not.toHaveText('—');
-    await page.getByRole('button', { name: 'Why?' }).click();
-    await expect(page.locator('section.answer .said')).toHaveText('Demo Hybrid made 3 kWh, 25% of a usual day: less sun.');
-    await expect(page.locator('section.answer .by')).toContainText("In SolarLens's own words");
-    expect(world.toolsAsked).toEqual([`/api/tools/day_report?date=${day(2)}&system=Demo+Hybrid`]);
-  });
+test('"Why?" beside a low day on Historical Data asks for that day, and the answer joins the conversation', async ({ page }) => {
+  const world = await stub(page);
+  world.replies.push({ status: 200, body: { ...reply({ answer: 'Demo Hybrid made 3 kWh: less sun.' }), question: null, tool: 'day_report', args: {}, result: energyResult } });
+  await page.goto('/#/history');
+  await expect(page.locator('#fleet-today')).not.toHaveText('—');
+  const buttons = page.getByRole('button', { name: 'Why?' });
+  await expect(buttons).toHaveCount(1);
+  await buttons.click();
+  await expect(page).toHaveURL(/#\/ask$/);
+  await expect(page.locator('.chatlog .msg.me')).toHaveText([`Why was ${day(2)} low for Demo Hybrid?`]);
+  await expect(lastBot(page).locator('.said')).toHaveText('Demo Hybrid made 3 kWh: less sun.');
+  expect(world.sent).toEqual([{ path: '/api/ask', body: { tool: 'day_report', args: { date: day(2), system: 'Demo Hybrid' } } }]);
 });
 
 test('the guide says where to ask', async ({ page }) => {
   await stub(page);
   await page.goto('/#/guide');
-  await expect(page.getByText('Ask a question in words')).toBeVisible();
+  await expect(page.getByText('Ask anything in words, with follow-ups')).toBeVisible();
   await expect(page.getByText('Why was a day low?')).toBeVisible();
-  await expect(page.getByText('Whether a system is slowly making less')).toBeVisible();
 });

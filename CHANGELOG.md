@@ -20,8 +20,9 @@ checkout of any tag says which release it is.
 
 - **SolarLens as an MCP server**, at `/mcp`: AI apps outside SolarLens -
   Claude, an IDE, anything that speaks the Model Context Protocol - ask the
-  same six read-only questions as the Ask tab, from the same tools, whether the
-  relay laptops are on or off. Streamable HTTP with JSON answers; protocol
+  same nine read-only questions as the assistant, from the same tools, whether
+  the relay laptops are on or off, and so work as a chatbot over the owner's
+  systems. Streamable HTTP with JSON answers; protocol
   versions 2025-06-18, 2025-03-26 and 2024-11-05. Protected by OAuth 2.1 tied to
   the owner's sign-in: discovery (RFC 9728, RFC 8414), dynamic registration of
   public clients (RFC 7591), an approval page only the owner's own browser can
@@ -30,16 +31,28 @@ checkout of any tag says which release it is.
   stays connected until the owner disconnects it under Settings → Connected
   apps. Migration 0020. See docs/mcp.md.
 
-- **Ask SolarLens.** An Ask tab for questions in plain words - "Which month
-  produced the most this year?", "How much did I export last week?", "Why was
-  yesterday low?". A model on Workers AI chooses which of six read-only tools
-  answers it and fills in their arguments, which are checked like any input;
-  the Worker computes every figure; the model words them, and a sentence
-  stating a number the figures do not hold is replaced by the tool's own. Each
-  answer shows its figures, period, freshness and who worded it. For anyone
-  signed in; a daily cap (`AI_DAILY_CALLS`, 100) keeps inside the free
-  allowance. `POST /api/ask`, `GET /api/ask/status`, and `GET /api/tools`,
-  `/api/tools/<name>`, which run a tool with no model.
+- **An assistant, on the Ask tab.** A conversation in plain words, with
+  follow-ups - "How much did I export last week?" … "and the week before?" -
+  about energy made, used, bought and sold, statistics (the average and median
+  day, the best and worst, the spread, capacity factor, low days), systems
+  compared per kWp, faults, why a day was low, a slow decline, a full report on
+  any period, and how to do something in the app. A model chooses up to three
+  of nine read-only tools and fills in their arguments, which are checked like
+  any input; the Worker computes every figure; the model words them, and words
+  stating a number the figures do not hold are replaced by the tools' own. Each
+  answer shows its tables, a chart where one helps, the period, how fresh the
+  data was and who worded it, and **Download** keeps it as a page of its own -
+  a report prints to a PDF. The model is Workers AI by default (Llama 3.3 70B),
+  or any server that speaks OpenAI's chat API - OpenAI, Groq, OpenRouter, or a
+  model of the owner's own behind a tunnel - with `AI_BASE_URL`, `AI_MODEL`
+  and `AI_API_KEY`. Anyone who can see the dashboard can ask: someone signed in
+  gets the model, anyone else SolarLens's own reading of the question - as does
+  everyone with no model, or none of the day's calls left. A daily cap
+  (`AI_DAILY_CALLS`, 100) keeps inside the free allowance. The conversation
+  stays in the browser tab; the Worker keeps none of it. `POST /api/chat`,
+  `POST /api/ask` for one question, `GET /api/ask/status`, and `GET
+  /api/tools`, `/api/tools/<name>`, which run a tool with no model. See
+  docs/ask-solarlens.md.
 
 - **The agents.** A weekly health check sets each system's output against the
   sunlight on its panels over twelve weeks and flags a fall of 8% or more, which

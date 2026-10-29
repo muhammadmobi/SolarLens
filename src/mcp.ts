@@ -40,6 +40,9 @@ const TITLES: Record<string, string> = {
   faults: 'Faults',
   day_report: 'Why a day was low',
   performance_trend: 'Slow decline',
+  stats: 'Statistics',
+  report: 'A full report',
+  app_help: 'How to use SolarLens',
 };
 
 const INSTRUCTIONS = [
@@ -70,6 +73,15 @@ export function resultText(r: ToolResult, now = nowSec()): string {
   const facts = Object.entries(r.facts).filter(([, v]) => v !== null);
   if (facts.length) lines.push(`Figures: ${facts.map(([k, v]) => `${k}: ${v}`).join('; ')}.`);
   for (const n of r.notes) lines.push(`Note: ${n}`);
+  // A report's parts, each in brief: its title, its sentence, and the first rows of its table.
+  for (const s of r.sections ?? []) {
+    lines.push('', `## ${s.title}${s.period ? ` - ${s.period.label}` : ''}`, s.summary);
+    if (s.rows.length) {
+      lines.push(s.columns.join(' | '));
+      for (const row of s.rows.slice(0, 20)) lines.push(row.map((v) => (v === null ? '-' : String(v))).join(' | '));
+      if (s.rows.length > 20) lines.push(`… and ${s.rows.length - 20} more rows.`);
+    }
+  }
   if (r.freshness.newest) {
     const mins = Math.max(0, Math.round((now - r.freshness.newest) / 60));
     lines.push(`Data up to ${new Date(r.freshness.newest * 1000).toISOString().replace(/:\d\d\.\d+Z$/, ' UTC').replace('T', ' ')} (${mins} min ago)`

@@ -30,6 +30,7 @@ import { aliasFor } from './public-view';
 import { STALE_AFTER_S } from './sensors';
 import { getTariff, valueOf } from './settings';
 import { weatherSince } from './weather';
+import { HELP, findHelp } from './help';
 
 const DAY = 86400;
 
@@ -57,6 +58,8 @@ export interface ToolResult {
   summary: string;
   /** How fresh the data behind it is: the newest reading, and any system not reporting now. */
   freshness: { newest: number | null; offline: string[] };
+  /** A report's parts, each a result of its own: the energy, the statistics, the faults... */
+  sections?: ToolResult[];
 }
 
 export type Args = Record<string, string | number>;
@@ -129,6 +132,19 @@ const RANGE_WORDS: Record<Range, string> = {
 };
 
 export interface Period { from: string; to: string; label: string }
+
+/**
+ * The period each tool covers when none is named. The assistant reads it too:
+ * "and the month before?" after a report steps back from the month the report
+ * covered.
+ */
+export const DEFAULT_RANGE: Record<string, Range> = {
+  energy: 'this_month',
+  compare_systems: 'this_month',
+  faults: 'last_30_days',
+  stats: 'last_30_days',
+  report: 'last_month',
+};
 
 /**
  * The days a tool's period arguments name: a named range, or `from` and `to`
@@ -292,7 +308,7 @@ export function checkArgs(tool: Tool, raw: unknown): Args | string {
       continue;
     }
     if (typeof v !== 'string' && typeof v !== 'number') return `${name} is text.`;
-    let s = String(v).trim().slice(0, 80);
+    let s = String(v).trim().slice(0, 200);
     if (spec.enum) {
       // "last week" and "Last-Week" are last_week.
       s = s.toLowerCase().replace(/[\s-]+/g, '_');
@@ -427,7 +443,7 @@ const energy: Tool = {
     const all = await loadSystems(db);
     const chosen = pickSystems(all, args.system);
     const off = zoneOf(all);
-    const p = resolvePeriod(args, now, off, 'this_month');
+    const p = resolvePeriod(args, now, off, DEFAULT_RANGE.energy);
     const span = noOf(p.to) - noOf(p.from) + 1;
     const group = (args.group_by as Group | undefined) ?? (span <= 31 ? 'day' : span <= 400 ? 'month' : 'year');
     const byMonth = group === 'month' || group === 'year' || (group === 'total' && span > 62);
@@ -534,7 +550,7 @@ const compareSystems: Tool = {
   async run({ db, now }, args) {
     const all = await loadSystems(db);
     const off = zoneOf(all);
-    const p = resolvePeriod(args, now, off, 'this_month');
+    const p = resolvePeriod(args, now, off, DEFAULT_RANGE.compare_systems);
     const span = noOf(p.to) - noOf(p.from) + 1;
     const { keys, table, days } = await energyBuckets(db, all, p, off, span > 62);
     const per = all.map((s) => {
@@ -583,7 +599,7 @@ const faults: Tool = {
     const all = await loadSystems(db);
     const chosen = pickSystems(all, args.system);
     const off = zoneOf(all);
-    const p = resolvePeriod(args, now, off, 'last_30_days');
+    const p = resolvePeriod(args, now, off, DEFAULT_RANGE.faults);
     const start = noOf(p.from) * DAY - off;
     const end = (noOf(p.to) + 1) * DAY - off;
     const alarms = (await listAlarms(db, start - DAY, 5000))
@@ -854,10 +870,170 @@ const performanceTrend: Tool = {
   },
 };
 
+// ---------------------------------------------------------------- stats
+
+const statsTool: Tool = {
+  name: 'stats',
+  description: "Statistics of each system's daily energy over a period: days recorded, the total, the average and median day, the best and worst day, "
+    + 'how much days vary, kWh per kWp, capacity factor, low days, and the total against the same length of time just before. For "statistics", "average day", "how consistent".',
+  params: { ...periodParams, system: systemParam },
+  async run({ db, now }, args) {
+    const all = await loadSystems(db);
+    const chosen = pickSystems(all, args.system);
+    const off = zoneOf(all);
+    const p = resolvePeriod(args, now, off, DEFAULT_RANGE.stats);
+    // Whole days only: today is still being made.
+    const today = isoDay(dayNo(now, off));
+    const full: Period = { ...p, to: p.to === today ? isoDay(noOf(today) - 1) : p.to };
+    if (full.to < full.from) throw new ToolError('Statistics need at least one whole day: ask about a period that has ended.');
+    const span = noOf(full.to) - noOf(full.from) + 1;
+    const before: Period = { from: isoDay(noOf(full.from) - span), to: isoDay(noOf(full.from) - 1), label: '' };
+    const [rows, prev] = await Promise.all([dayRows(db, chosen, full, off), dayRows(db, chosen, before, off)]);
+
+    const facts: ToolResult['facts'] = {};
+    const lines: string[] = [];
+    const table = chosen.map((s) => {
+      const days = rows.filter((r) => r.inverter_id === s.id && r.yield_kwh != null)
+        .map((r) => ({ day: r.day, kwh: r.yield_kwh as number })).sort((a, b) => a.day.localeCompare(b.day));
+      const k = chosen.length === 1 ? '' : `${s.alias}_`;
+      if (!days.length) {
+        lines.push(`${s.name}: no whole day recorded.`);
+        return [s.name, 0, null, null, null, null, null, null, null, null, null, null];
+      }
+      const n = days.length;
+      const total = days.reduce((a, d) => a + d.kwh, 0);
+      const mean = total / n;
+      const mid = median(days.map((d) => d.kwh));
+      const best = days.reduce((b, d) => (d.kwh > b.kwh ? d : b));
+      const worst = days.reduce((b, d) => (d.kwh < b.kwh ? d : b));
+      const spread = Math.sqrt(days.reduce((a, d) => a + (d.kwh - mean) ** 2, 0) / n);
+      const perKwp = s.kwp ? total / s.kwp : null;
+      const cf = s.kwp ? (total / (s.kwp * 24 * n)) * 100 : null;
+      const low = days.filter((d) => d.kwh < 0.5 * mid).length;
+      const prevTotal = prev.filter((r) => r.inverter_id === s.id).reduce((a, r) => a + (r.yield_kwh ?? 0), 0);
+      const change = prevTotal > 0 ? Math.round((total / prevTotal - 1) * 100) : null;
+      Object.assign(facts, {
+        [`${k}days`]: n, [`${k}total_kwh`]: r1(total), [`${k}average_kwh`]: r1(mean), [`${k}median_kwh`]: r1(mid),
+        [`${k}best_day`]: dayWords(best.day, true), [`${k}best_kwh`]: r1(best.kwh),
+        [`${k}worst_day`]: dayWords(worst.day, true), [`${k}worst_kwh`]: r1(worst.kwh),
+        [`${k}spread_kwh`]: r1(spread), [`${k}kwh_per_kwp`]: perKwp != null ? r1(perKwp) : null,
+        [`${k}capacity_factor_pct`]: cf != null ? r1(cf) : null, [`${k}low_days`]: low, [`${k}change_pct`]: change,
+      });
+      lines.push(`${s.name}: ${n} day${n === 1 ? '' : 's'}, ${kwh(total)} - ${kwh(mean)} on an average day (median ${r1(mid)}); `
+        + `best ${dayWords(best.day, true)} with ${kwh(best.kwh)}, worst ${dayWords(worst.day, true)} with ${kwh(worst.kwh)}`
+        + `${perKwp != null ? `; ${r1(perKwp)} kWh per kWp, capacity factor ${r1(cf!)}%` : ''}`
+        + `${low ? `; ${low} low day${low === 1 ? '' : 's'}` : ''}`
+        + `${change != null ? `; ${Math.abs(change)}% ${change >= 0 ? 'more' : 'less'} than the ${span} days before` : ''}.`);
+      return [s.name, n, r1(total), r1(mean), r1(mid), `${dayWords(best.day, true)}: ${r1(best.kwh)}`, `${dayWords(worst.day, true)}: ${r1(worst.kwh)}`,
+        r1(spread), perKwp != null ? r1(perKwp) : null, cf != null ? r1(cf) : null, low, change];
+    });
+    const notes = ['Capacity factor is the energy made against the panels running at their full size all day, every day. A low day is under half the median day.'];
+    if (p.to === today) notes.unshift('Today is left out: it is not over yet.');
+    return {
+      tool: 'stats',
+      title: 'Statistics, day by day',
+      period: { from: full.from, to: full.to, label: p.to === today ? `${p.label}, to yesterday` : p.label },
+      columns: ['System', 'Days', 'Total (kWh)', 'Average day (kWh)', 'Median day (kWh)', 'Best day (kWh)', 'Worst day (kWh)', 'Spread (kWh)', 'kWh per kWp', 'Capacity factor (%)', 'Low days', 'Against before (%)'],
+      rows: table,
+      facts,
+      notes,
+      summary: lines.join(' '),
+      freshness: await freshnessOf(db, chosen, now),
+    };
+  },
+};
+
+// ---------------------------------------------------------------- report
+
+const reportTool: Tool = {
+  name: 'report',
+  description: 'A full report on a period, in one: energy made, used, bought and sold with the money and CO2, each system side by side, the statistics with the best '
+    + 'and worst days, the faults, and whether any system is slowly making less. For "a report on last month", "summarise the year", "write me a report".',
+  params: { ...periodParams, system: systemParam },
+  async run(ctx, args) {
+    const all = await loadSystems(ctx.db);
+    const chosen = pickSystems(all, args.system);
+    const off = zoneOf(all);
+    const p = resolvePeriod(args, ctx.now, off, DEFAULT_RANGE.report);
+    const span = noOf(p.to) - noOf(p.from) + 1;
+    // The period as it was asked - a named one reads as "last month (…)" in every section.
+    const asked: Args = args.range ? { range: args.range } : { from: p.from, to: p.to };
+    const periodArgs: Args = { ...asked, ...(args.system ? { system: args.system } : {}) };
+    const energyR = await energy.run(ctx, { ...periodArgs, group_by: span <= 31 ? 'day' : 'month' });
+    let statsR: ToolResult | null = null;
+    try { statsR = await statsTool.run(ctx, periodArgs); } catch (e) { if (!(e instanceof ToolError)) throw e; }
+    const compareR = chosen.length > 1 ? await compareSystems.run(ctx, asked) : null;
+    const faultsR = await faults.run(ctx, periodArgs);
+    const trendR = await performanceTrend.run(ctx, { ...(args.system ? { system: args.system } : {}), weeks: 12 });
+    const sections = [energyR, compareR, statsR, faultsR, trendR].filter((x): x is ToolResult => !!x);
+
+    const f = energyR.facts;
+    const one = chosen.length === 1;
+    const k = (name: string) => (one ? name : `${chosen[0].alias}_${name}`);
+    const verdicts = trendR.rows.length ? chosen.map((s) => {
+      const v = trendR.facts[one ? 'verdict' : `${s.alias}_verdict`];
+      return `${s.name}: ${v}`;
+    }).join('; ') : '—';
+    const headline: [string, string | number | null][] = [
+      ['Made (kWh)', f.total_made_kwh ?? null],
+      ...(f.total_used_kwh != null ? [['Used by the house (kWh)', f.total_used_kwh] as [string, number]] : []),
+      ...(f.total_imported_kwh != null ? [['Bought (kWh)', f.total_imported_kwh] as [string, number]] : []),
+      ...(f.total_exported_kwh != null ? [['Sold (kWh)', f.total_exported_kwh] as [string, number]] : []),
+      ...(f.saved != null ? [[`Saved (${f.currency})`, f.saved] as [string, number], ['CO₂ avoided (kg)', f.co2_avoided_kg] as [string, number]] : []),
+      ...(one && statsR ? [['Best day', `${statsR.facts.best_day}: ${statsR.facts.best_kwh} kWh`] as [string, string], ['Worst day', `${statsR.facts.worst_day}: ${statsR.facts.worst_kwh} kWh`] as [string, string]] : []),
+      ...(compareR?.facts.best_system ? [['Best per kWp', `${compareR.facts.best_system}: ${compareR.facts.best_kwh_per_kwp} kWh/kWp`] as [string, string]] : []),
+      ['Faults', `${faultsR.facts.faults}${faultsR.facts.still_active ? ` (${faultsR.facts.still_active} still active)` : ''}`],
+      ['Health', verdicts],
+    ];
+    const facts: ToolResult['facts'] = { ...f, faults: faultsR.facts.faults, faults_still_active: faultsR.facts.still_active };
+    if (compareR) Object.assign(facts, { best_system: compareR.facts.best_system ?? null, best_kwh_per_kwp: compareR.facts.best_kwh_per_kwp ?? null });
+    if (statsR && one) Object.assign(facts, { best_day: statsR.facts[k('best_day')], best_day_kwh: statsR.facts[k('best_kwh')], worst_day: statsR.facts[k('worst_day')], worst_day_kwh: statsR.facts[k('worst_kwh')] });
+    const summary = [energyR.summary, compareR && chosen.length > 1 ? compareR.summary : '', faultsR.summary,
+      trendR.summary].filter(Boolean).join(' ');
+    const notes = [...new Set(sections.flatMap((x) => x.notes))];
+    return {
+      tool: 'report',
+      title: `Report${one ? `: ${chosen[0].name}` : ''}`,
+      period: { ...p },
+      columns: ['', 'Figure'],
+      rows: headline,
+      facts,
+      notes,
+      summary,
+      freshness: energyR.freshness,
+      sections,
+    };
+  },
+};
+
+// ---------------------------------------------------------------- app_help
+
+const appHelp: Tool = {
+  name: 'app_help',
+  description: 'How to do something in SolarLens, and where: signing in, sharing, notifications, alerts on Telegram or Discord, Home Assistant, the tariff, groups, '
+    + 'reports, the MCP server, a system that reads offline. For any question about using the app rather than about the figures.',
+  params: { question: { type: 'string', description: "The question, in the owner's own words." } },
+  async run(_ctx, args) {
+    const found = findHelp(String(args.question));
+    const list = found.length ? found : [HELP.find((e) => e.topic === 'The assistant, and reports')!];
+    return {
+      tool: 'app_help',
+      title: 'In SolarLens',
+      period: null,
+      columns: ['Topic', 'How', 'Where'],
+      rows: list.map((e) => [e.topic, e.answer, e.where]),
+      facts: {},
+      notes: found.length ? [] : ['Nothing in the guide matched the question; this is what the assistant can do.'],
+      summary: list[0].answer,
+      freshness: { newest: null, offline: [] },
+    };
+  },
+};
+
 // ---------------------------------------------------------------- the list
 
 /** Every tool, in the order a person would reach for them. */
-export const TOOLS: readonly Tool[] = [statusNow, energy, compareSystems, faults, dayReport, performanceTrend];
+export const TOOLS: readonly Tool[] = [statusNow, energy, compareSystems, statsTool, faults, dayReport, performanceTrend, reportTool, appHelp];
 
 export const toolByName = (name: unknown): Tool | undefined => TOOLS.find((t) => t.name === name);
 
