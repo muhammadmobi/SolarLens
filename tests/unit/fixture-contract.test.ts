@@ -18,6 +18,7 @@ import { bearer, createHarness, testReading, type Harness } from '../helpers/wor
 import { insertReading } from '../../src/db';
 import { storeWeather, upsertLocation } from '../../src/weather';
 import { parseTariff } from '../../src/settings';
+import { MAX_CHANNELS, publicChannel } from '../../src/channels';
 import { deviceHistory, devices, inverters } from '../fixtures/dashboard-api';
 
 const post = (body: unknown) => ({
@@ -158,7 +159,7 @@ describe('the demo matches what the Worker sends', () => {
   });
 
   it('answers every read the dashboard makes', () => {
-    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/api/settings/groups', '/auth/status', '/auth/settings']) {
+    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/api/settings/groups', '/api/settings/channels', '/auth/status', '/auth/settings']) {
       expect(demo, path).toHaveProperty([path]);
     }
   });
@@ -194,6 +195,15 @@ describe('the demo matches what the Worker sends', () => {
   it('its tariff is one the Worker would keep, unchanged', () => {
     const t = (demo['/api/settings/tariff'] as { tariff: unknown }).tariff;
     expect(parseTariff(t)).toEqual({ tariff: t });
+  });
+
+  it('its channels have exactly the fields the Worker shows the owner, and no secret', () => {
+    const worker = publicChannel({ id: 'c', kind: 'ntfy', name: null, label: 'l', secret: 's', origin: 'o', alerts: 1, weekly: 1,
+      created_at: 0, last_ok_at: null, last_error: null, last_error_at: null, failures: 0 });
+    const listed = demo['/api/settings/channels'] as { channels: Record<string, unknown>[]; max: number; ready: boolean };
+    expect(listed.channels.length).toBeGreaterThan(0);
+    for (const ch of listed.channels) expect(fields(ch)).toEqual(fields(worker));
+    expect(listed.max).toBe(MAX_CHANNELS);
   });
 
   it('its groups name systems it has', () => {

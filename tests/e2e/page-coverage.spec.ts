@@ -89,6 +89,14 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   // A tariff and groups, so the money figures and the Overview's headings are walked too.
   await page.route('**/api/settings/tariff', (r) => r.fulfill(json({ tariff: { currency: 'EUR', importPrice: 0.3, exportPrice: 0.1, netMetering: false, co2KgPerKwh: 0.4 } })));
   await page.route('**/api/settings/groups', (r) => r.fulfill(json({ groups: { s1: 'Roof' } })));
+  // One place alerts go, working, and one failing; every write to them accepted.
+  await page.route('**/api/settings/channels**', (r) => r.fulfill(json(r.request().method() === 'GET'
+    ? { max: 5, ready: true, channels: [
+      { id: 'c1', kind: 'ntfy', name: 'Phone', label: 'ntfy.sh · topic …ab', alerts: true, weekly: true, created_at: NOW - 86_400, last_ok_at: NOW - 600, last_error: null, last_error_at: null, failures: 0 },
+      { id: 'c2', kind: 'webhook', name: null, label: 'hooks.example.net webhook', alerts: true, weekly: false, created_at: NOW - 86_400, last_ok_at: null, last_error: 'HTTP 500', last_error_at: NOW - 60, failures: 2 },
+    ] }
+    : { ok: true, channel: { id: 'c3' }, test: { ok: false, error: 'HTTP 404' } })));
+  await page.route('**/api/settings/summary', (r) => r.fulfill(json({ sent: 1, of: 1 })));
   await page.route('**/api/devices', (r) => r.fulfill(json({
     now: NOW,
     devices: [
@@ -238,6 +246,16 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   await page.getByRole('button', { name: 'Save the groups' }).click().catch(() => {});
   await page.waitForTimeout(150);
   await page.locator('#t-net').check().catch(() => {});
+  // Alerts elsewhere: each kind's fields, an add, a toggle, a test, a removal, the summary; Home Assistant's copy.
+  await page.locator('details.authmore summary', { hasText: 'Add a place' }).click().catch(() => {});
+  for (const kind of ['telegram', 'discord', 'webhook', 'ntfy']) await page.locator('#chan-kind').selectOption(kind).catch(() => {});
+  await page.locator('#ntfy-topic').fill('walk-topic').catch(() => {});
+  await page.getByRole('button', { name: 'Add, and send a test' }).click().catch(() => {});
+  await page.waitForTimeout(150);
+  for (const sel of ['[data-chan][data-what="weekly"]', '[data-chan-test]', '#summary-now', '[data-chan-remove]', '#ha-copy']) {
+    await page.locator(sel).first().click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(150);
+  }
   await page.locator('#pw-cur').fill('a current password');
   await page.locator('#pw-new').fill('a new long password');
   await page.getByRole('button', { name: 'Change password' }).click().catch(() => {});

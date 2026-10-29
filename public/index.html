@@ -778,6 +778,15 @@
   .authform label small { color: var(--muted); font-weight: 500; }
   .authform label.switchrow { flex-direction: row; font-weight: 500; }
   .formrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  /* Alerts elsewhere and Home Assistant. */
+  /* A row, not the column .authlist gives every other span in a list item. */
+  .authlist li > .chanopts { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; }
+  .chanopts label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .chanbad { color: var(--bad); font-weight: 650; }
+  .kindfields { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  pre.yaml { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: var(--surface-2); border: 1px solid var(--line);
+             border-radius: 10px; padding: 12px 14px; margin: 12px 0; max-height: 320px; overflow: auto; white-space: pre; }
+  pre.yaml:focus-visible { outline: 2px solid var(--solarman); outline-offset: 1px; }
   .authform input, .authform select, .sharelink input {
     font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); min-width: 0;
@@ -822,7 +831,7 @@
     </div>
     <span class="livedot" id="updated"><i></i>loading…</span>
     <a class="tvbtn guidebtn" id="guidebtn" href="#/guide" aria-label="Guide: what SolarLens does and where to find it" title="Guide: what SolarLens does and where to find it"><svg class="guideicon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 6.5C10.3 5.2 7.9 4.5 3 4.5v13c4.9 0 7.3.7 9 2 1.7-1.3 4.1-2 9-2v-13c-4.9 0-7.3.7-9 2z"/><path d="M12 6.5v13"/></svg><span class="guidelabel">Guide</span></a>
-    <a class="tvbtn settingsbtn" id="settingsbtn" href="#/settings" aria-label="Settings: sign-in, devices and sharing" title="Settings: sign-in, devices and sharing"><svg class="gearicon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
+    <a class="tvbtn settingsbtn" id="settingsbtn" href="#/settings" aria-label="Settings: sign-in, sharing, tariff, groups and alerts" title="Settings: sign-in, sharing, tariff, groups and alerts"><svg class="gearicon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a>
     <a class="tvbtn" id="tvbtn" href="#/tv" aria-label="TV mode" title="TV mode: full screen, for a wall display">📺</a>
     <button class="themebtn" id="theme" type="button" aria-label="Change theme">🖥️</button>
   </div>
@@ -875,6 +884,7 @@
     devices          the Devices tab: each datalogger and its week, hardware, SolisCloud relays
     system detail    one system in full: the blocks Power and a system page share
     signing in and settings    the sign-in page, and Settings behind the gear icon
+    alerts elsewhere and Home Assistant    Settings' cards for ntfy, Telegram, Discord, webhooks and Home Assistant
     the guide        the Guide page, behind the book icon in the header
     routing          which view the address (#/...) asks for; TV mode
     loading data     fetching from /api, on a timer and on coming back to the tab
@@ -4123,6 +4133,8 @@
       view.innerHTML = `<section class="card"><h2>Settings</h2><div class="body"><p class="autherr">${esc(e.message)}</p></div></section>`;
       return;
     }
+    // The places alerts are posted to: the owner's alone, like this page.
+    const chans = await authGet('/api/settings/channels').catch(() => null);
     if (location.hash !== '#/settings') return;
     const canLock = s.password || s.passkeys.length;
     const devices = s.devices.map((d) => `<tr>
@@ -4180,6 +4192,9 @@
         </form>
       </div></section>
 
+      ${channelsCard(chans)}
+      ${homeAssistantCard(s)}
+
       <section class="card"><h2>Passkeys</h2><div class="body">
         <p class="cardnote">Sign in with a fingerprint, a face or the device PIN. Nothing that could sign you in is stored on the server.</p>
         <ul class="authlist">${passkeys}</ul>
@@ -4227,6 +4242,57 @@
       state.groups = (await apiSend('PUT', '/api/settings/groups', { groups })).groups;
       redo('Groups saved. The Overview shows each under its own heading.');
     });
+    // Alerts elsewhere: which fields show follows the kind chosen.
+    if ($('chan-kind')) $('chan-kind').onchange = () => {
+      const k = $('chan-kind').value;
+      for (const el of view.querySelectorAll('[data-kind]')) el.hidden = el.dataset.kind !== k;
+      for (const el of view.querySelectorAll('[data-kind-note]')) el.hidden = el.dataset.kindNote !== k;
+    };
+    if ($('chan-add')) $('chan-add').onsubmit = act(async () => {
+      const kind = $('chan-kind').value;
+      const v = (id) => $(id).value.trim();
+      const made = await apiSend('POST', '/api/settings/channels', {
+        kind, name: v('chan-name'), alerts: $('chan-alerts').checked, weekly: $('chan-weekly').checked,
+        ...(kind === 'ntfy' ? { server: v('ntfy-server'), topic: v('ntfy-topic'), token: v('ntfy-token') }
+          : kind === 'telegram' ? { token: v('tg-token'), chat: v('tg-chat') }
+            : { url: v(kind === 'discord' ? 'dc-url' : 'wh-url') }),
+      });
+      redo(made.test && made.test.ok === false ? `Added, but the test did not arrive: ${made.test.error}.` : 'Added, and a test is on its way: check it arrived.');
+    });
+    for (const b of view.querySelectorAll('[data-chan]')) b.onchange = act(async () => {
+      try {
+        await apiSend('PATCH', `/api/settings/channels/${encodeURIComponent(b.dataset.chan)}`, { [b.dataset.what]: b.checked });
+      } catch (e) { b.checked = !b.checked; throw e; }
+      redo('Saved.');
+    });
+    for (const b of view.querySelectorAll('[data-chan-test]')) b.onclick = act(async () => {
+      const r = await apiSend('POST', `/api/settings/channels/${encodeURIComponent(b.dataset.chanTest)}/test`);
+      redo(r.ok === false ? `The test did not arrive: ${r.error}.` : 'Test sent: check it arrived.');
+    });
+    for (const b of view.querySelectorAll('[data-chan-remove]')) b.onclick = act(async () => {
+      await apiSend('DELETE', `/api/settings/channels/${encodeURIComponent(b.dataset.chanRemove)}`);
+      redo('Removed.');
+    });
+    if ($('summary-now')) $('summary-now').onclick = act(async () => {
+      const r = await apiSend('POST', '/api/settings/summary');
+      redo(`Last week's summary sent to ${r.sent} of ${r.of} ${r.of === 1 ? 'place' : 'places'}.`);
+    });
+    // Home Assistant: a read-only token is a share link, made here and shown once.
+    if ($('ha-token')) $('ha-token').onclick = act(async () => {
+      const made = await authPost('/auth/settings/shares', { name: 'Home Assistant', days: null });
+      const token = made.url.slice(made.url.lastIndexOf('/s/') + 3);
+      await renderSettings('Token made. It is in the configuration below, and shown only this once: copy it now.');
+      if ($('ha-yaml')) $('ha-yaml').textContent = haYaml(token);
+    });
+    $('ha-copy').onclick = async () => {
+      try { await navigator.clipboard.writeText($('ha-yaml').textContent); $('ha-copy').textContent = 'Copied'; } catch {
+        // No clipboard: select it, for the keyboard.
+        const range = document.createRange();
+        range.selectNodeContents($('ha-yaml'));
+        getSelection().removeAllRanges();
+        getSelection().addRange(range);
+      }
+    };
     $('t-net').onchange = () => { $('t-exp-row').hidden = $('t-net').checked; };
     $('tariff-form').onsubmit = act(async () => {
       const net = $('t-net').checked;
@@ -4274,6 +4340,128 @@
     });
   }
 
+  // ---------- alerts elsewhere and Home Assistant ----------
+  /**
+   * Two of Settings' cards. "Alerts elsewhere" lists the places the Worker
+   * posts alerts and the weekly summary to - ntfy, Telegram, Discord, any
+   * webhook (src/channels.ts) - and adds one, posting a test to it at once. What
+   * posting takes is typed once and never shown again: the Worker keeps it
+   * encrypted and sends back only a hint of where it goes.
+   *
+   * "Home Assistant" writes the configuration that reads /api/sensors into
+   * sensors, with this dashboard's address and systems filled in. When the
+   * dashboard is private it also makes Home Assistant a token: a share link
+   * that can only read, sent as a bearer token and taken back like any other.
+   */
+  const CHANNEL_KINDS = [
+    ['ntfy', 'ntfy', 'A notification on a phone or a computer, through ntfy.sh or a server of your own: install the ntfy app and subscribe to the topic you choose here.'],
+    ['telegram', 'Telegram', 'A message from a bot of your own, to you or to a group. @BotFather makes the bot and gives you its token.'],
+    ['discord', 'Discord', "A post in a channel, through a webhook made in that channel's settings, under Integrations."],
+    ['webhook', 'Webhook', "JSON posted to any address: a Home Assistant automation's webhook trigger, for one."],
+  ];
+  const kindName = (k) => (CHANNEL_KINDS.find(([id]) => id === k) ?? [k, k])[1];
+
+  /** How a channel's last post went, in a few words. */
+  function channelState(ch) {
+    if (ch.failures && ch.last_error) {
+      return `<span class="chanbad">failing${ch.failures > 1 ? ` ${ch.failures} times in a row` : ''}: ${esc(ch.last_error)}</span>`;
+    }
+    return ch.last_ok_at ? `delivered ${esc(ago(ch.last_ok_at))}` : 'nothing sent yet';
+  }
+
+  function channelsCard(chans) {
+    if (!chans) return '';
+    const list = chans.channels ?? [];
+    const full = list.length >= (chans.max ?? 5);
+    const items = list.map((ch) => `<li class="chan">
+        <span><strong>${esc(ch.name || kindName(ch.kind))}</strong>
+          <small class="faint">${esc(kindName(ch.kind))} · ${esc(ch.label)} · ${channelState(ch)}</small></span>
+        <span class="chanopts">
+          <label><input type="checkbox" data-chan="${esc(ch.id)}" data-what="alerts" ${ch.alerts ? 'checked' : ''}> Alerts</label>
+          <label><input type="checkbox" data-chan="${esc(ch.id)}" data-what="weekly" ${ch.weekly ? 'checked' : ''}> Weekly summary</label>
+          <button type="button" class="rangebtn" data-chan-test="${esc(ch.id)}">Send a test</button>
+          <button type="button" class="rangebtn" data-chan-remove="${esc(ch.id)}">Remove</button>
+        </span></li>`).join('');
+    // Typed once and never shown again, so no password manager is invited to keep them.
+    const field = (id, label, hint, attrs = '') => `<label>${label}${hint ? ` <small>${hint}</small>` : ''}<input id="${id}" autocomplete="off" spellcheck="false" ${attrs}></label>`;
+    return `<section class="card"><h2>Alerts elsewhere</h2><div class="body">
+      <p class="cardnote">The same alerts a phone gets - a system that stops, a fault, a SolisCloud login running out - and a summary every Monday morning, posted where you already look. No email.</p>
+      ${chans.ready ? '' : '<p class="autherr">This server has no API_TOKEN, which these need: what posting takes is kept encrypted with a key derived from it.</p>'}
+      <ul class="authlist">${items || '<li><span class="faint">Nowhere yet.</span></li>'}</ul>
+      ${list.some((c) => c.weekly) ? '<button type="button" class="rangebtn" id="summary-now">Send last week\'s summary now</button>' : ''}
+      ${full ? `<p class="cardnote">That is the most there can be (${chans.max}): remove one to add another.</p>` : `
+      <details class="authmore" ${list.length ? '' : 'open'}><summary>Add a place</summary>
+      <form class="authform" id="chan-add">
+        <label>Where<select id="chan-kind">${CHANNEL_KINDS.map(([id, name]) => `<option value="${id}">${name}</option>`).join('')}</select></label>
+        ${CHANNEL_KINDS.map(([id, , note]) => `<p class="cardnote" data-kind-note="${id}" ${id === 'ntfy' ? '' : 'hidden'}>${esc(note)}</p>`).join('')}
+        <fieldset class="kindfields" data-kind="ntfy">
+          ${field('ntfy-server', 'Server', 'ntfy.sh, or your own', 'value="https://ntfy.sh" inputmode="url"')}
+          ${field('ntfy-topic', 'Topic', 'on ntfy.sh anyone who knows a topic can read it, so make it long and hard to guess', 'maxlength="64"')}
+          ${field('ntfy-token', 'Access token', 'only for a topic that needs one')}
+        </fieldset>
+        <fieldset class="kindfields" data-kind="telegram" hidden>
+          ${field('tg-token', 'Bot token', 'from @BotFather')}
+          ${field('tg-chat', 'Chat id', "a number - a group's starts with a minus - or a @channel name")}
+        </fieldset>
+        <fieldset class="kindfields" data-kind="discord" hidden>${field('dc-url', 'Webhook address', 'https://discord.com/api/webhooks/…', 'inputmode="url"')}</fieldset>
+        <fieldset class="kindfields" data-kind="webhook" hidden>${field('wh-url', 'Address', "https only; Home Assistant's looks like https://…/api/webhook/…", 'inputmode="url"')}</fieldset>
+        ${field('chan-name', 'Name', 'optional', 'maxlength="40" placeholder="My phone"')}
+        <label class="switchrow"><input type="checkbox" id="chan-alerts" checked><span><strong>Alerts</strong><small class="faint">Each told once, when it happens.</small></span></label>
+        <label class="switchrow"><input type="checkbox" id="chan-weekly" checked><span><strong>Weekly summary</strong><small class="faint">Mondays at 08:00: last week's energy against the week before, the savings and the faults.</small></span></label>
+        <div class="formrow"><button type="submit" class="authbtn">Add, and send a test</button></div>
+      </form></details>`}
+      <p class="cardnote">A token or an address is kept encrypted and never shown again: each place above shows only a hint of where it posts. The messages name your systems and their faults.</p>
+    </div></section>`;
+  }
+
+  /** A name inside a YAML double-quoted string. */
+  const yamlText = (t) => String(t ?? '').replace(/[\\"]/g, (c) => `\\${c}`);
+
+  /**
+   * Home Assistant's configuration for this dashboard: the fleet's power and
+   * energy, and each system's power, energy today and battery. `token` is
+   * the bearer token to fill in, null for a placeholder when the dashboard is
+   * private and none has been made, or undefined when none is needed.
+   */
+  function haYaml(token) {
+    const sensor = (name, id, path, unit, cls, stateClass) => [
+      `      - name: "${yamlText(name)}"`,
+      `        unique_id: ${id}`,
+      `        value_template: "{{ value_json.${path} }}"`,
+      `        unit_of_measurement: "${unit}"`,
+      `        device_class: ${cls}`,
+      `        state_class: ${stateClass}`,
+    ];
+    const lines = [
+      '# configuration.yaml: SolarLens, read every five minutes',
+      'rest:',
+      `  - resource: ${location.origin}/api/sensors`,
+      '    scan_interval: 300',
+      ...(token === undefined ? [] : ['    headers:', `      Authorization: "Bearer ${token ?? '<make a token with the button above>'}"`]),
+      '    sensor:',
+      ...sensor('SolarLens power', 'solarlens_power', 'power_w', 'W', 'power', 'measurement'),
+      ...sensor('SolarLens energy today', 'solarlens_today', 'today_kwh', 'kWh', 'energy', 'total_increasing'),
+      ...sensor('SolarLens energy', 'solarlens_total', 'total_kwh', 'kWh', 'energy', 'total_increasing'),
+    ];
+    for (const inv of state.latest?.inverters ?? []) {
+      lines.push(...sensor(`${inv.name} power`, `solarlens_${inv.id}_power`, `systems.${inv.id}.power_w`, 'W', 'power', 'measurement'));
+      lines.push(...sensor(`${inv.name} energy today`, `solarlens_${inv.id}_today`, `systems.${inv.id}.today_kwh`, 'kWh', 'energy', 'total_increasing'));
+      if (inv.battery_soc != null) lines.push(...sensor(`${inv.name} battery`, `solarlens_${inv.id}_battery`, `systems.${inv.id}.battery_soc`, '%', 'battery', 'measurement'));
+    }
+    return lines.join('\n');
+  }
+
+  function homeAssistantCard(s) {
+    return `<section class="card"><h2>Home Assistant</h2><div class="body">
+      <p class="cardnote">Home Assistant can show every figure here as a sensor - power, energy, battery - and use them in its Energy dashboard. Paste this into its configuration.yaml and restart it; docs/home-assistant.md in the repository says more.</p>
+      ${s.required ? `<p class="cardnote">The dashboard is private, so Home Assistant needs a token of its own: a share link that can only read. It is listed under Share to view, where taking it back stops it.</p>
+        <button type="button" class="authbtn" id="ha-token">Make a token for Home Assistant</button>` : ''}
+      <pre class="yaml" id="ha-yaml" tabindex="0" aria-label="Home Assistant configuration">${esc(haYaml(s.required ? null : undefined))}</pre>
+      <div class="formrow"><button type="button" class="rangebtn" id="ha-copy">Copy</button></div>
+      <p class="cardnote">For alerts in Home Assistant as well, add a Webhook under Alerts elsewhere, with the address of an automation's webhook trigger.</p>
+    </div></section>`;
+  }
+
   // ---------- the guide ----------
   //
   // What SolarLens is, what is on each tab, and where to find things - opened
@@ -4300,6 +4488,8 @@
       ['Which system is doing best, for its size', `${tab('#/compare', 'Compare')} - kWh per kWp, today and this month (with two systems or more)`],
       ['A day hour by hour: made against used, and the peaks', `${tab('#/analysis', 'Analysis')} - any of the last seven days, one system or all`],
       ['Put the systems you watch first, or sort them into groups', `the star on a system's page (this browser only); groups are set by the owner under ${tab('#/settings', 'Settings')}`],
+      ['Get alerts on ntfy, Telegram or Discord, and a summary every Monday', `${tab('#/settings', 'Settings')} - Alerts elsewhere`],
+      ['Show SolarLens in Home Assistant', `${tab('#/settings', 'Settings')} - Home Assistant`],
       ['See every system on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
       ['See one system on its own, in full', `${tab('#/', 'Overview')} - tap the system`],
       ['Daily, monthly or yearly totals', `${tab('#/history', 'Historical Data')} - Day, Month or Year at the top`],

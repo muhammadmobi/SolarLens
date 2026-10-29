@@ -15,7 +15,10 @@
  *   POST /api/ingest/*, each request carrying INGEST_TOKEN. The login does not
  *   touch them.
  * - The owner writing: signing a phone up for notifications, setting the
- *   tariff or the systems' groups (/api/settings/*), or forcing a poll. Those need the owner signed in, or API_TOKEN as a header - except
+ *   tariff, the systems' groups or the places alerts are posted to
+ *   (/api/settings/*), or forcing a poll.
+ * - Home Assistant, reading /api/sensors on a timer - with a share link as a
+ *   bearer token when the dashboard is private. Those need the owner signed in, or API_TOKEN as a header - except
  *   turning a phone's notifications off, which needs only that phone's own
  *   push address (see the middleware below).
  * - The sign-in routes under /auth (./auth/routes), and share links at /s/.
@@ -32,18 +35,21 @@ import { Hono, type Context, type Next } from 'hono';
 import { getCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { auth, applyCookies, openShareLink, type AuthVars } from './auth/routes';
-import { REFRESH_COOKIE, SESSION_COOKIE, type Caller, deviceLabel, identify, owner, startDevice } from './auth/sessions';
+import { REFRESH_COOKIE, SESSION_COOKIE, type Caller, deviceLabel, identify, openShare, owner, startDevice } from './auth/sessions';
 import { timingSafeEqual } from './auth/crypto';
 import { locationOf, locations, refreshWeather, upsertLocation, weatherSince } from './weather';
 import { expectedToday } from './expected';
 import { getGroups, getTariff, parseGroups, parseTariff, setGroups, setTariff } from './settings';
+import { MAX_CHANNELS, addChannel, channelsFor, deliver, getChannel, listChannels, parseChannel, publicChannel, removeChannel, testMessage, updateChannel } from './channels';
+import { buildSummary, sendWeekly, summaryMessage } from './summary';
+import { sensors } from './sensors';
 import { daily, deviceNetworks, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
 import { tzNameOf, tzOffsetSec } from './providers/units';
 import { aliasFor, deviceAliasFor, publicAlarms, publicDeviceSamples, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
 import { parseRelayStatus } from './relays';
 import { plantFilter, pollAll } from './poll';
-import { announce, forgetOldMessages, isPushEndpoint, needsPriming, recentMessages, subscribe, tellOne, unsubscribe, vapidKey, vapidPublicKey } from './push';
+import { announce, forgetOldMessages, forgetToldIfAlone, isPushEndpoint, needsPriming, recentMessages, subscribe, tellOne, unsubscribe, vapidKey, vapidPublicKey } from './push';
 import type { Inverter, Reading } from './providers/types';
 import {
   deviceFromCollector,
@@ -120,11 +126,16 @@ function bearer(header: string | undefined): string | null {
   return m ? m[1].trim() : null;
 }
 
+/** A share link's token, "<id>.<secret>": the part of the link after /s/. */
+const SHARE_TOKEN = /^[\w-]{6,40}\.[\w-]{16,80}$/;
+
 /**
  * Who is asking, for every route that answers with data or signs in.
  *
- * The API token as a header is the owner. Otherwise the session and refresh
- * cookies are read, and renewed on the way
+ * The API token as a header is the owner. A share link's token as a header
+ * is a viewer, as the link itself would make a browser: that is how Home
+ * Assistant reads a private dashboard, and taking the link back stops it.
+ * Otherwise the session and refresh cookies are read, and renewed on the way
  * if the session has run out (./auth/sessions identify), so a signed-in
  * browser never has to sign in again. The static page is left alone: it has
  * no data in it, and its response cannot take cookies.
@@ -136,6 +147,8 @@ const identifyCaller = async (c: Context<{ Bindings: Env; Variables: AuthVars }>
   const given = bearer(c.req.header('Authorization'));
   if (secret && given && timingSafeEqual(given, secret)) {
     caller = { role: 'owner', deviceId: null, via: 'token' };
+  } else if (secret && given && SHARE_TOKEN.test(given) && (await openShare(c.env.DB, given, nowSec()))) {
+    caller = { role: 'viewer', deviceId: null, via: 'link' };
   } else if (secret) {
     const session = getCookie(c, SESSION_COOKIE);
     const refresh = getCookie(c, REFRESH_COOKIE);
@@ -405,6 +418,109 @@ app.put('/api/settings/groups', async (c) => {
   if ('error' in parsed) return c.json({ error: parsed.error }, 400);
   await setGroups(c.env.DB, parsed.groups);
   return c.json({ groups: Object.fromEntries(Object.entries(parsed.groups).map(([id, name]) => [alias(id), name])) });
+});
+
+/**
+ * Every figure Home Assistant wants, flat and under names that do not move
+ * (./sensors). A read like any other: open, or - with sign-in required - for
+ * the owner and a share link, which Home Assistant sends as a bearer token.
+ */
+app.get('/api/sensors', async (c) => {
+  c.header('Cache-Control', CACHE);
+  return c.json(await sensors(c.env.DB));
+});
+
+/**
+ * The last `days` full days (7 unless asked; 1 to 31), system by system,
+ * against the days before - what the weekly summary says, as data and in words.
+ */
+app.get('/api/summary', async (c) => {
+  const asked = Number(c.req.query('days') ?? 7);
+  const days = Number.isFinite(asked) ? Math.min(31, Math.max(1, Math.round(asked))) : 7;
+  const s = await buildSummary(c.env.DB, nowSec(), days);
+  const { title, body } = summaryMessage(s);
+  c.header('Cache-Control', CACHE);
+  return c.json({ ...s, message: { title, body } });
+});
+
+// ---------- the places alerts are posted to (./channels) ----------
+
+/** Channels need API_TOKEN: what posting to them needs is sealed with a key derived from it. */
+const NO_TOKEN = 'Set API_TOKEN first: what these need is kept encrypted with a key derived from it.';
+
+/**
+ * The channels, for the owner's Settings: what each takes, where it posts with
+ * the secret parts left out, and how its last post went. The owner's alone,
+ * whatever the switch says - like the map, a share link does not get it.
+ */
+app.get('/api/settings/channels', async (c) => {
+  if (c.get('caller').role !== 'owner') return c.json({ error: 'owner only' }, 401);
+  c.header('Cache-Control', CACHE);
+  return c.json({ channels: (await listChannels(c.env.DB)).map(publicChannel), max: MAX_CHANNELS, ready: !!c.env.API_TOKEN });
+});
+
+/**
+ * Add a channel, and post a test to it at once, so the owner sees the whole
+ * path work. The first listener of all - no device, no channel before it -
+ * primes the told-state, and hears what goes wrong from now on rather than
+ * everything already wrong.
+ */
+app.post('/api/settings/channels', async (c) => {
+  const token = c.env.API_TOKEN;
+  if (!token) return c.json({ error: NO_TOKEN }, 503);
+  const parsed = parseChannel(await c.req.json().catch(() => null));
+  if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+  const now = nowSec();
+  const row = await addChannel(c.env.DB, token, parsed, new URL(c.req.url).origin, now);
+  if (row === 'full') return c.json({ error: `At most ${MAX_CHANNELS} places can be told. Remove one first.` }, 409);
+  if (row.alerts && (await needsPriming(c.env.DB))) await announce(c.env, now, true);
+  const test = await deliver(c.env, row, testMessage(row, now), now);
+  return c.json({ channel: publicChannel((await getChannel(c.env.DB, row.id))!), test });
+});
+
+/** Change what a channel takes, or its name. Turning alerts on for the first listener primes, as adding one does. */
+app.patch('/api/settings/channels/:id', async (c) => {
+  // Without API_TOKEN every write under /api/ is open (see the middleware), and these must not be.
+  if (!c.env.API_TOKEN) return c.json({ error: NO_TOKEN }, 503);
+  const body = ((await c.req.json().catch(() => null)) ?? {}) as { alerts?: unknown; weekly?: unknown; name?: unknown };
+  const row = await updateChannel(c.env.DB, c.req.param('id'), body);
+  if (!row) return c.json({ error: 'There is no such channel.' }, 404);
+  if ('error' in row) return c.json({ error: row.error }, 400);
+  if (row.alerts && (await needsPriming(c.env.DB))) await announce(c.env, nowSec(), true);
+  await forgetToldIfAlone(c.env.DB);
+  return c.json({ channel: publicChannel(row) });
+});
+
+/** Remove a channel. The last listener to go takes the told-state with it. */
+app.delete('/api/settings/channels/:id', async (c) => {
+  if (!c.env.API_TOKEN) return c.json({ error: NO_TOKEN }, 503);
+  const removed = await removeChannel(c.env.DB, c.req.param('id'));
+  await forgetToldIfAlone(c.env.DB);
+  return removed ? c.json({ ok: true }) : c.json({ error: 'There is no such channel.' }, 404);
+});
+
+/** Post a test to one channel, and say how it went. */
+app.post('/api/settings/channels/:id/test', async (c) => {
+  if (!c.env.API_TOKEN) return c.json({ error: NO_TOKEN }, 503);
+  const row = await getChannel(c.env.DB, c.req.param('id'));
+  if (!row) return c.json({ error: 'There is no such channel.' }, 404);
+  const now = nowSec();
+  return c.json(await deliver(c.env, row, testMessage(row, now), now));
+});
+
+/**
+ * Send the weekly summary now, to every channel that takes it - the owner's
+ * way to see one without waiting for Monday. The Monday one still goes out.
+ */
+app.post('/api/settings/summary', async (c) => {
+  if (!c.env.API_TOKEN) return c.json({ error: NO_TOKEN }, 503);
+  const rows = await channelsFor(c.env.DB, 'weekly');
+  if (!rows.length) return c.json({ error: 'No channel takes the weekly summary.' }, 409);
+  const now = nowSec();
+  const msg = summaryMessage(await buildSummary(c.env.DB, now));
+  let sent = 0;
+  for (const row of rows) if ((await deliver(c.env, row, msg, now)).ok) sent++;
+  return c.json({ sent, of: rows.length, title: msg.title, body: msg.body });
 });
 
 /**
@@ -812,6 +928,12 @@ export default {
         await forgetOldMessages(env.DB);
       } catch (e) {
         console.error('push:', String(e));
+      }
+      // The weekly summary, on Monday mornings; see ./summary.
+      try {
+        await sendWeekly(env);
+      } catch (e) {
+        console.error('summary:', String(e));
       }
       // Housekeeping, kept apart so a push failure never leaves it undone.
       try {

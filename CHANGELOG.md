@@ -18,6 +18,31 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **Alerts elsewhere: ntfy, Telegram, Discord and webhooks.** Settings has a
+  card for up to five places that get the same alerts as a phone - told once
+  each, one post a run however many - and a summary every Monday. Each is
+  tested the moment it is added, and Settings shows how its last post went, in
+  the service's own words. The token or address posting takes is encrypted
+  with AES-GCM under a key derived from `API_TOKEN`, never served and never
+  logged; only `https://` to a named host is accepted; Discord is told to ping
+  nobody and Telegram's HTML is escaped. A channel taking alerts counts as a
+  listener like a signed-up phone, so the told-state is shared and primed the
+  same way. No email. Migration 0018; `GET`, `POST`, `PATCH` and `DELETE
+  /api/settings/channels`. See docs/alerts-elsewhere.md.
+
+- **A weekly summary**, from 08:00 each Monday on the first system's clock:
+  last week's energy against the week before (only systems recorded in both),
+  each system's share, best day and days reported, the money saved and CO₂
+  avoided by the tariff, and the faults. Sent once, caught up if a Monday was
+  missed, and on request from Settings. `GET /api/summary` serves it as data.
+
+- **Home Assistant.** `GET /api/sensors` answers every figure a sensor wants,
+  flat and in fixed units, and Settings writes the `configuration.yaml` for it
+  with this dashboard's address and systems. A share link's token now works as
+  a bearer token, as a viewer, so Home Assistant can read a private dashboard
+  with a token that is taken back like any other link. Alerts can go into Home
+  Assistant through the webhook channel. See docs/home-assistant.md.
+
 - **An Analysis tab**: any of the last seven days, one system or all of them,
   hour by hour - what the panels made (stacked by system) against what the
   house used, the best hour, the peak output and the peak draw, how much of

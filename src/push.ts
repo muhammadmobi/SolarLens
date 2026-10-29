@@ -17,8 +17,14 @@
  * for. The on-grid system goes quiet every night - its inverter sleeps - so
  * "nothing for 15 minutes" is a badge on a screen but would be a nightly false
  * alarm in a pocket. See pushEvents for each rule and why it is shaped so.
+ *
+ * The same events go to the owner's channels - ntfy, Telegram, Discord, a
+ * webhook (./channels) - so "listening" here means a device signed up or a
+ * channel taking alerts, and the told-state below is kept for all of them
+ * together: each condition is told once, to everyone listening at the time.
  */
 import { nowSec, type Env } from './db';
+import { alertChannelCount, sendAlerts } from './channels';
 import { publicRelays } from './public-view';
 
 /** Each device the cron may wake. Kept well inside a Worker's fifty outbound calls per run. */
@@ -151,24 +157,32 @@ export async function subscribe(db: D1Database, endpoint: string, origin: string
   return known ? 'known' : 'full';
 }
 
-/**
- * Forget a device. The last one to go takes the told-state with it, so that
- * whoever signs up next starts from what is wrong then, not from what was
- * wrong when the previous devices were listening.
- */
+/** Forget a device. The last listener to go takes the told-state with it (forgetToldIfAlone). */
 export async function unsubscribe(db: D1Database, endpoint: string): Promise<boolean> {
   const res = await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?1').bind(endpoint).run();
-  const { n } = (await db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>())!;
-  if (!n) await db.prepare('DELETE FROM kv WHERE k = ?1 OR k LIKE ?2').bind(PRIMED, `${TOLD}%`).run();
+  await forgetToldIfAlone(db);
   return res.meta.changes > 0;
 }
 
 /**
- * Whether the told-state has been set up for the devices now listening. Kept
- * as a state of its own rather than inferred from "this is the only device":
- * two first devices signing up at the same moment would each see the other and
- * neither would prime, whereas both finding this unset and both priming does no
- * harm - nobody has been told anything yet.
+ * When nobody is listening any more - no device signed up, no channel taking
+ * alerts - forget what has been told, so that whoever listens next starts
+ * from what is wrong then, not from what was wrong when the others were.
+ */
+export async function forgetToldIfAlone(db: D1Database): Promise<void> {
+  const { n } = (await db
+    .prepare('SELECT (SELECT COUNT(*) FROM push_subscriptions) + (SELECT COUNT(*) FROM channels WHERE alerts = 1) AS n')
+    .first<{ n: number }>())!;
+  if (!n) await db.prepare('DELETE FROM kv WHERE k = ?1 OR k LIKE ?2').bind(PRIMED, `${TOLD}%`).run();
+}
+
+/**
+ * Whether the told-state has been set up for whoever is listening now - the
+ * devices and the channels. Kept as a state of its own rather than inferred
+ * from "this is the only listener": two first listeners arriving at the same
+ * moment would each see the other and neither would prime, whereas both
+ * finding this unset and both priming does no harm - nobody has been told
+ * anything yet.
  */
 export async function needsPriming(db: D1Database): Promise<boolean> {
   return !(await db.prepare('SELECT 1 FROM kv WHERE k = ?1').bind(PRIMED).first());
@@ -329,16 +343,23 @@ export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEv
  * returns, it is news again.
  *
  * With `prime`, the told-state is set to exactly what is wrong now without
- * telling anyone, and marked as set up. That is for the first device to sign
- * up, which wants to hear what happens next rather than everything already
- * wrong. A later device is never primed (see needsPriming): priming then would
- * mark as told an event the devices already signed up have not yet heard.
+ * telling anyone, and marked as set up. That is for the first listener - a
+ * device signing up, or a channel taking alerts - which wants to hear what
+ * happens next rather than everything already wrong. A later one is never
+ * primed (see needsPriming): priming then would mark as told an event the
+ * others already listening have not yet heard.
+ *
+ * What is new goes to every device (an empty push; each asks what to show) and
+ * to every channel taking alerts (one post each, ./channels sendAlerts).
  */
 export async function announce(env: Env, now = nowSec(), prime = false): Promise<number> {
-  // Nobody listening, or no key to sign with: not worth the reads.
-  if (!vapidKey(env)) return 0;
-  const { n } = (await env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>())!;
-  if (!n) return 0;
+  // Devices count only when there is a key to wake them with.
+  const devices = vapidKey(env)
+    ? (await env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').first<{ n: number }>())!.n
+    : 0;
+  const channels = await alertChannelCount(env.DB);
+  // Nobody listening: not worth the reads.
+  if (!devices && !channels) return 0;
 
   const events = await pushEvents(env.DB, now);
   const current = new Set(events.map((e) => TOLD + e.key));
@@ -363,15 +384,18 @@ export async function announce(env: Env, now = nowSec(), prime = false): Promise
   if (stmts.length) await env.DB.batch(stmts);
   if (prime || !fresh.length) return prime ? 0 : fresh.length;
 
-  for (const e of fresh) {
-    // The id carries the moment: the same condition returning later is a new
-    // message, which a device that has shown the first must still show.
-    await env.DB
-      .prepare('INSERT OR IGNORE INTO push_messages (id, ts, audience, title, body) VALUES (?1, ?2, ?3, ?4, ?5)')
-      .bind(await audienceOf(`${e.key}@${now}`), now, '', e.title, e.body)
-      .run();
+  if (devices) {
+    for (const e of fresh) {
+      // The id carries the moment: the same condition returning later is a new
+      // message, which a device that has shown the first must still show.
+      await env.DB
+        .prepare('INSERT OR IGNORE INTO push_messages (id, ts, audience, title, body) VALUES (?1, ?2, ?3, ?4, ?5)')
+        .bind(await audienceOf(`${e.key}@${now}`), now, '', e.title, e.body)
+        .run();
+    }
+    await wakeAll(env, now);
   }
-  await wakeAll(env, now);
+  if (channels) await sendAlerts(env, fresh, now);
   return fresh.length;
 }
 
