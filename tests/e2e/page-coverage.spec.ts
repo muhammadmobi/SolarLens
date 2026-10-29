@@ -101,8 +101,10 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   await page.route('**/api/settings/apps**', (r) => r.fulfill(json(r.request().method() === 'GET'
     ? { mcp: 'https://solarlens.example.com/mcp', apps: [{ id: 'g1', name: 'An app', redirect_to: 'app.example.org', connected_at: NOW - 86_400, last_used_at: NOW - 60 }] }
     : { ok: true })));
-  // Ask SolarLens: a model on hand, a report, a health check each way, and an answer with its figures.
-  await page.route('**/api/ask/status', (r) => r.fulfill(json({ available: true, model: 'm', used: 1, limit: 100, can_ask: true })));
+  // Ask SolarLens: a model on hand, a report, a health check each way, and a
+  // conversation - figures with a chart, a report with its parts, a word on the
+  // app, and a refusal.
+  await page.route('**/api/ask/status', (r) => r.fulfill(json({ available: true, model: 'm', provider: 'workers-ai', used: 1, limit: 100, can_ask: true })));
   await page.route('**/api/agents', (r) => r.fulfill(json({
     weekly: { kind: 'weekly', week_of: '2026-09-07', title: 'Week of 31 Aug 2026', body: 'A steady week.', worded: 'model', flagged: false, created_at: NOW - 3600 },
     health: [
@@ -110,9 +112,23 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
       { kind: 'health', system: 's2', name: 'Hybrid', week_of: '2026-09-07', title: 't', body: 'less', worded: 'solarlens', flagged: true, created_at: NOW - 3600, data: { verdict: 'declining', weekly: [0.8, 0.7, null, 0.64] } },
     ],
   })));
-  await page.route('**/api/ask', (r) => r.fulfill(json({ question: 'q', tool: 'energy', args: {}, answer: 'Made 40 kWh.', worded: 'model', used: 3, limit: 100, model: 'm',
-    result: { tool: 'energy', title: 'Energy', period: { from: '2026-09-01', to: '2026-09-07', label: 'last week' }, columns: ['Day', 'Made (kWh)'], rows: [['Mon', 40], ['Tue', null]],
-      facts: { total_made_kwh: 40 }, notes: ['A note.'], summary: 'Made 40 kWh.', freshness: { newest: NOW - 60, offline: ['Hybrid'] } } })));
+  const energyPart = { tool: 'energy', title: 'Energy', period: { from: '2026-09-01', to: '2026-09-07', label: 'last week' }, columns: ['Day', 'Made (kWh)'],
+    rows: [['Mon', 40], ['Tue', null], ['Wed', 38]], facts: { total_made_kwh: 78 }, notes: ['A note.'], summary: 'Made 78 kWh.', freshness: { newest: NOW - 60, offline: ['Hybrid'] } };
+  const chatReply = (kind: string, answer: string, results: unknown[]) => ({
+    answer, worded: kind === 'help' ? 'solarlens' : 'model', understood: 'model', kind, calls: [{ tool: 'energy', args: { range: 'last_week' } }],
+    results, errors: kind === 'figures' ? ['One call could not be answered.'] : [], used: 3, limit: 100, model: 'm', provider: 'workers-ai',
+  });
+  const chatReplies = [
+    { status: 200, body: chatReply('figures', 'Made 78 kWh.\n- Most on Monday.', [energyPart]) },
+    { status: 200, body: chatReply('report', 'Last week in short.', [{ ...energyPart, tool: 'report', title: 'Report', sections: [energyPart, { ...energyPart, tool: 'faults', title: 'Faults', rows: [], notes: [] }] }]) },
+    { status: 200, body: chatReply('help', 'Settings → Alerts elsewhere.', [{ ...energyPart, tool: 'app_help', title: 'In SolarLens', period: null, columns: ['Topic', 'Where'], rows: [['Alerts', '#/settings']], freshness: { newest: null, offline: [] } }]) },
+    { status: 401, body: { error: 'signin' } },
+  ];
+  await page.route('**/api/chat', (r) => {
+    const next = chatReplies.shift() ?? { status: 400, body: { error: 'A message is at most 500 characters.' } };
+    return r.fulfill({ ...json(next.body), status: next.status });
+  });
+  await page.route('**/api/ask', (r) => r.fulfill(json({ ...chatReply('figures', 'Made 40 kWh.', [energyPart]), question: null, tool: 'day_report', args: {}, result: energyPart })));
   await page.route('**/api/devices', (r) => r.fulfill(json({
     now: NOW,
     devices: [
@@ -226,12 +242,22 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     await page.waitForTimeout(150);
   }
 
-  // Ask: a question typed, an example tapped, and a Why? from Historical Data.
+  // Ask: an example tapped, follow-ups typed - a report, a word on the app, a
+  // refusal - an answer and a report downloaded, a new conversation, and a Why?
+  // from Historical Data.
   await page.goto('/#/ask');
-  await page.locator('#askq').fill('How much last week?').catch(() => {});
-  await page.locator('#askform button').click({ timeout: 2000 }).catch(() => {});
-  await page.waitForTimeout(150);
   await page.locator('[data-ask]').first().click({ timeout: 2000 }).catch(() => {});
+  await page.waitForTimeout(150);
+  for (const message of ['And a report on it?', 'How do I get alerts?', 'And now?', 'x'.repeat(20)]) {
+    await page.locator('#askq').fill(message).catch(() => {});
+    await page.locator('#askform button[type="submit"]').click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(150);
+  }
+  for (const n of [0, 1]) {
+    await Promise.all([page.waitForEvent('download', { timeout: 3000 }).catch(() => null),
+      page.locator('[data-download]').nth(n).click({ timeout: 2000 }).catch(() => {})]);
+  }
+  await page.locator('#chatnew').click({ timeout: 2000 }).catch(() => {});
   await page.waitForTimeout(150);
   await page.goto('/#/history');
   await page.locator('[data-why-day]').first().click({ timeout: 2000 }).catch(() => {});

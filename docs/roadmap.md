@@ -226,12 +226,43 @@ rotate and last a year from their last use; a copied one, or a code used twice,
 disconnects the app. Settings lists the apps connected and disconnects one at a
 tap.
 
+### 13. The assistant
+
+Ask SolarLens grown into an assistant: a conversation, not one question at a
+time. Ask anything about the systems and follow up; ask for statistics or a
+report and download it; ask how to do something in the app. The model can run
+on Workers AI, on any server that speaks OpenAI's API - the owner's own
+included - or not at all, and apps outside SolarLens can hold the conversation
+themselves through the MCP server.
+
+**As built:** `src/assistant.ts` behind `POST /api/chat`. The model is shown
+the last few turns and chooses up to three tool calls - "compare this month with
+last" is two - or replies in a sentence with no figure for a greeting; a
+follow-up takes the calls of the answer before and changes only what it
+changes. Without a model, `guessCalls` reads the message itself: its kind from
+its words, a period (a named one, a month by name, a date, a year), a system,
+and a follow-up moved to another period, the one before or another system. The
+wording is held to every figure of every call, a report to 220 words or so.
+Three new tools: `stats` (whole days only), `report` (energy, systems
+compared, statistics, faults and health, each as its own part, with headline
+figures) and `app_help`, from entries written into `src/help.ts` rather than
+anything a model knows. `AI_BASE_URL` points the same calls at any server
+speaking OpenAI's chat completions - https, or the same computer - with
+`AI_API_KEY` as its key; the daily cap covers it too. Anyone who may read may
+ask; only someone signed in spends a model call. The conversation lives in the
+browser tab, which sends the last four exchanges with each message; an answer
+downloads as a page with no script, every value escaped, that prints to a PDF.
+`/api/ask` stays, as the one-question door and for "Why?". The MCP server gets
+the three new tools, and a report's parts as text.
+
 ## Order
 
 - **1 first**: its fixture contract keeps the test data honest for every later phase.
 - **3 before 5**: the demo becomes the public face once the login is on.
 - **3 before 7**: the site map is shown only behind the login.
 - **11 before 12**: the MCP server reuses the tools Ask SolarLens builds.
+- **11 and 12 before 13**: the assistant grows out of Ask SolarLens, and its new
+  tools reach apps through the MCP server with no change there.
 
 ## Left out, on purpose
 

@@ -93,6 +93,27 @@ async function stubApi(page: Page) {
   })));
 }
 
+/**
+ * A conversation already on the Ask tab, as this tab's own storage keeps it:
+ * figures with a chart, a report with its parts, a word on the app with its
+ * link, and a refusal - every kind of message the tab draws.
+ */
+async function seedChat(page: Page) {
+  const part = {
+    tool: 'energy', title: 'Energy per day', period: { from: '2026-09-01', to: '2026-09-07', label: 'last week' }, columns: ['Day', 'Made (kWh)'],
+    rows: [['Mon 1 Sep', 40], ['Tue 2 Sep', 38], ['Wed 3 Sep', 41]], facts: {}, notes: ['A note.'], summary: 'Made 119 kWh.', freshness: { newest: NOW - 60, offline: ['Hybrid'] },
+  };
+  const turn = (question: string, kind: string, answer: string, results: unknown[]) =>
+    ({ question, answer, worded: 'model', understood: 'model', kind, model: 'm', calls: [], results, errors: [], at: NOW });
+  const chat = [
+    turn('How much last week?', 'figures', 'Made 119 kWh.', [part]),
+    turn('A report on it', 'report', 'In short:\n- 119 kWh made.', [{ ...part, tool: 'report', title: 'Report', sections: [part] }]),
+    turn('How do I get alerts?', 'help', 'Settings.', [{ ...part, tool: 'app_help', title: 'In SolarLens', period: null, columns: ['Topic', 'Where'], rows: [['Alerts', '#/settings']] }]),
+    { question: 'And now?', error: 'This dashboard is private: sign in to ask.' },
+  ];
+  await page.addInitScript((c) => { if (!sessionStorage.getItem('sl-chat')) sessionStorage.setItem('sl-chat', c); }, JSON.stringify(chat));
+}
+
 /** Serious and critical only: see the note at the top of this file. */
 async function seriousViolations(page: Page) {
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
@@ -112,13 +133,16 @@ const views = [
   ['Guide', '#/guide'],
   ['Settings', '#/settings'],
   ['Ask', '#/ask'],
+  ['Ask, with a conversation', '#/ask'],
 ] as const;
 
 for (const [name, hash] of views) {
   test(`${name} has no serious or critical accessibility violations`, async ({ page }) => {
     await stubApi(page);
+    if (name === 'Ask, with a conversation') await seedChat(page);
     await page.goto(`/${hash}`);
     await expect(page.locator('#view')).not.toBeEmpty();
+    if (name === 'Ask, with a conversation') await expect(page.locator('.chatlog .msg.bot')).toHaveCount(4);
     // Settings draws in two steps; check what it settles on, not its loading line.
     if (hash === '#/settings') await expect(page.locator('.settings')).toBeVisible();
     expect(await seriousViolations(page)).toEqual([]);
@@ -168,8 +192,10 @@ async function focusedControl(page: Page) {
 for (const [name, hash] of views) {
   test(`every control on ${name} shows when it has the keyboard`, async ({ page }) => {
     await stubApi(page);
+    if (name === 'Ask, with a conversation') await seedChat(page);
     await page.goto(`/${hash}`);
     await expect(page.locator('#view')).not.toBeEmpty();
+    if (name === 'Ask, with a conversation') await expect(page.locator('.chatlog .msg.bot')).toHaveCount(4);
 
     // A full lap, not a fixed prefix: tab until the order comes back round to a
     // control it has already passed, so a control added at the end of a view is

@@ -290,7 +290,9 @@
     });
 
     return {
-      '/api/ask/status': { available: true, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', used: 4, limit: 100, can_ask: true },
+      // The demo has no model: SolarLens reads each question itself, as a
+      // deployment with none does, and the Ask tab says so.
+      '/api/ask/status': { available: false, model: null, provider: null, used: 0, limit: 100, can_ask: true },
       '/api/agents': {
         weekly: {
           kind: 'weekly', week_of: weekOf, title: `Week of ${weekWords}`, worded: 'solarlens', flagged: false, created_at: now - 3 * 3600,
@@ -347,7 +349,10 @@
     const data = sample(now);
     const rows = data['/api/history'].rows;
     const period = (days) => ({ from: days[days.length - 1], to: days[0], label: `${days[days.length - 1]} to ${days[0]}` });
-    const reply = (question, tool, answer, result) => ({ question, tool, args: body.args ?? {}, answer, worded: 'solarlens', used: 4, limit: 100, model: null, result });
+    const reply = (question, tool, answer, result) => ({
+      question, tool, args: body.args ?? {}, answer, worded: 'solarlens', understood: 'solarlens', kind: 'figures',
+      used: 0, limit: 100, model: null, provider: null, result, results: [result],
+    });
     const freshness = { newest: now - 60, offline: [] };
     if (body.tool === 'day_report') {
       const sys = SYSTEMS.find((x) => x.name === body.args?.system) ?? SYSTEMS[0];
@@ -365,16 +370,50 @@
       });
     }
     const days = [...new Set(rows.map((r) => r.day))].sort().reverse().slice(1, 8);
-    const perDay = days.map((d) => [d, r1(rows.filter((r) => r.day === d).reduce((a, r) => a + r.yield_kwh, 0))]);
+    // Oldest first, as the Worker lists a period's days.
+    const perDay = [...days].reverse().map((d) => [d, r1(rows.filter((r) => r.day === d).reduce((a, r) => a + r.yield_kwh, 0))]);
     const total = r1(perDay.reduce((a, [, v]) => a + v, 0));
-    const said = `In the demo, every question gets this answer: the three made-up systems made ${total} kWh from ${days[6]} to ${days[0]}. Deployed, a model chooses the figures a question needs.`;
+    const said = `In the demo, every question gets this answer: the three made-up systems made ${total} kWh from ${days[6]} to ${days[0]}. Deployed, the assistant looks up the figures each question needs.`;
     return reply(String(body.question ?? ''), 'energy', said, {
       tool: 'energy', title: 'Energy per day', period: period(days), columns: ['Day', 'Made (kWh)'], rows: perDay,
       facts: { total_made_kwh: total }, notes: ['A demo answer, from made-up figures.'], summary: said, freshness,
     });
   }
 
-  const api = { sample, SYSTEMS, demoAsk };
+  /**
+   * The assistant in the demo, where there is no model: a report, a word on
+   * using the app, or the last seven days - each from the sample's own
+   * made-up figures, said to be the demo's, and in the shape the Worker answers.
+   */
+  function demoChat(body, now) {
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    const question = String(messages[messages.length - 1]?.content ?? '').toLowerCase();
+    const week = demoAsk({ question }, now);
+    const reply = (kind, answer, results, calls) => ({
+      answer, worded: 'solarlens', understood: 'solarlens', kind, calls, results, errors: [], used: 0, limit: 100, model: null, provider: null,
+    });
+    if (/\b(how (do|can|to)|where|set ?up|turn on|enable|connect)\b/.test(question)) {
+      const said = 'In the demo, the guide answers questions like this one: open Settings (the gear) and look for the card named after what you want - Alerts elsewhere for Telegram or Discord, Home Assistant, Connected apps for Claude.';
+      return reply('help', said, [{
+        tool: 'app_help', title: 'In SolarLens', period: null, columns: ['Topic', 'How', 'Where'],
+        rows: [['Alerts on ntfy, Telegram, Discord or a webhook', 'Settings → Alerts elsewhere → Add a place.', '#/settings']],
+        facts: {}, notes: ['A demo answer.'], summary: said, freshness: { newest: null, offline: [] },
+      }], [{ tool: 'app_help', args: { question } }]);
+    }
+    if (/\breport\b|\bsummar/.test(question)) {
+      const energy = week.result;
+      const said = `In the demo, every report is this one: the three made-up systems made ${energy.facts.total_made_kwh} kWh over the seven days shown, with no faults. Deployed, a report covers the period you ask for, and every figure comes from your own systems.`;
+      return reply('report', said, [{
+        tool: 'report', title: 'Report', period: energy.period, columns: ['', 'Figure'],
+        rows: [['Made (kWh)', energy.facts.total_made_kwh], ['Faults', '0'], ['Health', 'Garage: declining']],
+        facts: { total_made_kwh: energy.facts.total_made_kwh }, notes: ['A demo report, from made-up figures.'], summary: said, freshness: energy.freshness,
+        sections: [energy],
+      }], [{ tool: 'report', args: {} }]);
+    }
+    return reply('figures', week.answer, [week.result], [{ tool: 'energy', args: {} }]);
+  }
+
+  const api = { sample, SYSTEMS, demoAsk, demoChat };
   if (typeof globalThis !== 'undefined') globalThis.SolarLensDemo = api;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
@@ -401,6 +440,11 @@
       // The tariff and groups forms expect what was kept back; they get the demo's own, unchanged.
       if (path === '/api/settings/tariff' || path === '/api/settings/groups') return json(sample(Math.floor(Date.now() / 1000))[path]);
       if (path === '/api/settings/summary') return json({ sent: 1, of: 1 });
+      if (path === '/api/chat') {
+        let body = {};
+        try { body = JSON.parse(init.body || (typeof input === 'object' && input.body) || '{}'); } catch { body = {}; }
+        return json(demoChat(body, Math.floor(Date.now() / 1000)));
+      }
       if (path === '/api/ask') {
         let body = {};
         try { body = JSON.parse(init.body || (typeof input === 'object' && input.body) || '{}'); } catch { body = {}; }

@@ -37,6 +37,16 @@ INCLUDE_PLANTS=
 API_TOKEN=
 INGEST_TOKEN=
 
+# --- The assistant's model (optional; see docs/ask-solarlens.md) ---
+# Unset: Workers AI, through the "ai" binding. Set AI_BASE_URL and AI_MODEL to
+# use any server that speaks OpenAI's chat API instead - https, or a model on
+# this computer, such as Ollama at http://localhost:11434/v1 with AI_MODEL=llama3.1.
+AI_BASE_URL=
+AI_MODEL=
+AI_API_KEY=
+# Model calls a day, every feature together (default 100).
+AI_DAILY_CALLS=
+
 # Worker origin the relay agent pushes to (agent/solis-relay.mjs reads this file)
 SOLARLENS_URL=
 

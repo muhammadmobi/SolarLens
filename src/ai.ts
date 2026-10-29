@@ -14,6 +14,12 @@
  *   count is per UTC day, as Cloudflare's allowance is.
  * - **One model**, AI_MODEL or Llama 3.3 70B: good at choosing a tool, able to
  *   answer in JSON when asked, and cheap enough for the cap to mean something.
+ * - **Or a server of the owner's choosing.** With AI_BASE_URL (and AI_MODEL)
+ *   set, the same calls go to any server that speaks OpenAI's chat completions
+ *   - OpenAI itself, Groq, OpenRouter, or a model on the owner's own computer
+ *   behind a tunnel - with AI_API_KEY as its key. https only, but for a model
+ *   on the same computer: a key never crosses a network in the clear. The cap
+ *   applies all the same, since such a server may charge by the call.
  * - **Failure is ordinary.** No binding, no allowance left, a model that did
  *   not answer: every caller has an answer that needs no model, and uses it.
  */
@@ -28,8 +34,39 @@ export interface ChatMessage {
   content: string;
 }
 
-/** Whether this Worker has Workers AI at all: the `ai` binding in wrangler.jsonc. */
-export const hasAi = (env: Pick<Env, 'AI'>): boolean => !!env.AI && typeof env.AI.run === 'function';
+export type Provider = 'workers-ai' | 'openai-compatible';
+type AiSettings = Pick<Env, 'AI' | 'AI_BASE_URL' | 'AI_MODEL'>;
+
+/** Addresses that never leave the computer the Worker runs on. */
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * An AI_BASE_URL the Worker will send a key to, with a model named: https -
+ * or plain http to this very computer, for trying a model that runs beside
+ * `wrangler dev`, where nothing crosses a network.
+ */
+function externalReady(env: AiSettings): boolean {
+  try {
+    const u = new URL(env.AI_BASE_URL!);
+    return (u.protocol === 'https:' || (u.protocol === 'http:' && LOOPBACK.has(u.hostname))) && !!env.AI_MODEL?.trim();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Which model service answers: the owner's own server when AI_BASE_URL is set
+ * (and usable), else Workers AI when the `ai` binding is there, else none. A
+ * base URL that is set but unusable means none, rather than quietly falling
+ * back: the owner asked for their data to go there and nowhere else.
+ */
+export function providerOf(env: AiSettings): Provider | null {
+  if (env.AI_BASE_URL) return externalReady(env) ? 'openai-compatible' : null;
+  return env.AI && typeof env.AI.run === 'function' ? 'workers-ai' : null;
+}
+
+/** Whether there is a model to ask at all. */
+export const hasAi = (env: AiSettings): boolean => providerOf(env) !== null;
 
 export const aiModel = (env: Pick<Env, 'AI_MODEL'>): string => env.AI_MODEL?.trim() || DEFAULT_MODEL;
 
@@ -101,6 +138,7 @@ export function firstJsonObject(text: string): unknown {
 export async function chat(
   env: Env, messages: ChatMessage[], opts: { schema?: Record<string, unknown>; maxTokens?: number } = {},
 ): Promise<{ text: string; json: unknown }> {
+  if (providerOf(env) === 'openai-compatible') return chatExternal(env, messages, opts);
   if (!env.AI) throw new Error('no AI binding');
   const out = (await env.AI.run(aiModel(env), {
     messages,
@@ -113,4 +151,29 @@ export async function chat(
   if (typeof r === 'string') return { text: r.trim(), json: opts.schema ? firstJsonObject(r) : null };
   if (r && typeof r === 'object') return { text: JSON.stringify(r), json: r };
   throw new Error('the model gave no answer');
+}
+
+/**
+ * The same call to a server that speaks OpenAI's chat completions. JSON is
+ * asked for as a JSON object, which such servers widely support, and read
+ * leniently all the same. Errors name the status only - never the address,
+ * which may carry a key in it.
+ */
+async function chatExternal(
+  env: Env, messages: ChatMessage[], opts: { schema?: Record<string, unknown>; maxTokens?: number },
+): Promise<{ text: string; json: unknown }> {
+  const res = await fetch(`${env.AI_BASE_URL!.replace(/\/+$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(env.AI_API_KEY ? { authorization: `Bearer ${env.AI_API_KEY}` } : {}) },
+    body: JSON.stringify({
+      model: aiModel(env), messages, max_tokens: opts.maxTokens ?? 300, temperature: 0.2,
+      ...(opts.schema ? { response_format: { type: 'json_object' } } : {}),
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) { await res.body?.cancel(); throw new Error(`the model's server said ${res.status}`); }
+  const out = (await res.json().catch(() => null)) as { choices?: { message?: { content?: unknown } }[] } | null;
+  const text = out?.choices?.[0]?.message?.content;
+  if (typeof text !== 'string' || !text.trim()) throw new Error('the model gave no answer');
+  return { text: text.trim(), json: opts.schema ? firstJsonObject(text) : null };
 }

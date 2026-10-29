@@ -47,6 +47,24 @@ test('draws every view from the sample data, and asks no server for any of it', 
   expect(urls.filter((u) => u.includes('/api/') || u.includes('/auth/'))).toEqual([]);
 });
 
+test('the assistant answers from the sample, says so, and asks no server', async ({ page }) => {
+  const urls = watch(page);
+  await page.goto('/demo/#/ask');
+  await expect(page.locator('#fleet-today')).not.toHaveText('—');
+  await page.getByRole('button', { name: 'A report on last month' }).click();
+  const bot = page.locator('.chatlog .msg.bot').last();
+  await expect(bot.locator('.said')).toContainText('In the demo, every report is this one');
+  await expect(bot.getByRole('button', { name: 'Download report' })).toBeVisible();
+  await page.locator('#askq').fill('How do I get alerts on Telegram?');
+  await page.getByRole('button', { name: 'Ask', exact: true }).click();
+  await expect(page.locator('.chatlog .msg.bot').last().getByRole('link', { name: 'Open' })).toHaveAttribute('href', '#/settings');
+  await page.locator('#askq').fill('How much did I make last week?');
+  await page.getByRole('button', { name: 'Ask', exact: true }).click();
+  await expect(page.locator('.chatlog .msg.bot')).toHaveCount(3);
+  await expect(page.locator('.chatlog .msg.bot').last().locator('.minichart svg')).toBeVisible();
+  expect(urls.filter((u) => u.includes('/api/') || u.includes('/auth/'))).toEqual([]);
+});
+
 test('reaches for nothing at the root of the site it is served on', async ({ page }) => {
   const urls = watch(page);
   await page.goto('/demo/');

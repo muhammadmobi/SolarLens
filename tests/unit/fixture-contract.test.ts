@@ -230,6 +230,29 @@ describe('the demo matches what the Worker sends', () => {
     for (const a of mine.apps) expect(fields(a)).toEqual(fields(real.apps[0]));
   });
 
+  it("its assistant answers in the Worker's shape, a report with its sections", async () => {
+    const src = readFileSync('demo/demo.js', 'utf8');
+    const box: { SolarLensDemo?: { demoChat(body: unknown, now: number): Record<string, unknown> } } = {};
+    new Function('globalThis', 'window', 'document', src)(box, undefined, undefined);
+    const real = (await (await h.fetch('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'How much did I make last week?' }] }) })).json()) as Record<string, unknown>;
+    for (const q of ['a report on last month', 'how do I set up alerts?', 'how much last week?']) {
+      const mine = box.SolarLensDemo!.demoChat({ messages: [{ role: 'user', content: q }] }, Math.floor(Date.now() / 1000));
+      expect(fields(mine), q).toEqual(fields(real));
+    }
+    const report = box.SolarLensDemo!.demoChat({ messages: [{ role: 'user', content: 'a report' }] }, Math.floor(Date.now() / 1000)) as { results: { sections?: unknown[] }[] };
+    expect(report.results[0].sections?.length).toBeGreaterThan(0);
+  });
+
+  it("its one-question answers - a question, and \"Why?\" - have the Worker's shape", async () => {
+    const src = readFileSync('demo/demo.js', 'utf8');
+    const box: { SolarLensDemo?: { demoAsk(body: unknown, now: number): Record<string, unknown> } } = {};
+    new Function('globalThis', 'window', 'document', src)(box, undefined, undefined);
+    const real = (await (await h.fetch('/api/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: 'How much did I make last week?' }) })).json()) as Record<string, unknown>;
+    const now = Math.floor(Date.now() / 1000);
+    const why = box.SolarLensDemo!.demoAsk({ tool: 'day_report', args: { system: 'Garage' } }, now);
+    for (const mine of [box.SolarLensDemo!.demoAsk({ question: 'how much last week?' }, now), why]) expect(fields(mine)).toEqual(fields(real));
+  });
+
   it('its groups name systems it has', () => {
     const ids = new Set(rowsOf(demo['/api/latest'], 'inverters').map((i) => i.id));
     const groups = (demo['/api/settings/groups'] as { groups: Record<string, string> }).groups;

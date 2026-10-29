@@ -556,7 +556,17 @@
   .askform input:focus-visible { outline: 2px solid var(--solarman); outline-offset: 1px; }
   .askchips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
   .askchips .filterbtn:disabled, .askform button:disabled, .askform input:disabled { opacity: .55; cursor: not-allowed; }
-  .answer .asked { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .answer .asked, .askpage .asked { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
+  .chatlog { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+  .msg.me { align-self: flex-end; max-width: min(80%, 560px); background: var(--ink); color: var(--surface); border-radius: 14px 14px 4px 14px; padding: 9px 14px; }
+  .msg.me p { margin: 0; overflow-wrap: anywhere; }
+  .msg.bot { background: var(--surface-2); border-radius: 14px 14px 14px 4px; padding: 12px 16px; min-width: 0; }
+  .msg.bot .said p { margin: 0 0 8px; font-size: 15.5px; } .msg.bot .said ul { margin: 0 0 8px; padding-left: 20px; }
+  .msg.bot .said p:last-child { margin-bottom: 0; }
+  .minichart { margin: 8px 0 4px; }
+  .minichart svg { width: 100%; height: 90px; display: block; }
+  .minichart rect { fill: var(--solarman); }
+  .minichart figcaption { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .answer .said, .askpage .said { margin: 0; font-size: 16.5px; line-height: 1.5; }
   .answer .by, .askpage .by { margin: 8px 0 0; font-size: 12.5px; color: var(--faint); }
   .evidence { margin-top: 12px; }
@@ -907,7 +917,7 @@
     alerts           the Alerts tab: what is wrong now, and fault history
     historical data  the Historical Data tab
     devices          the Devices tab: each datalogger and its week, hardware, SolisCloud relays
-    ask              the Ask tab: a question in words, the weekly report, each system's health
+    ask              the Ask tab: the assistant's conversation, the weekly report, each system's health
     system detail    one system in full: the blocks Power and a system page share
     signing in and settings    the sign-in page, and Settings behind the gear icon
     alerts elsewhere and Home Assistant    Settings' cards for ntfy, Telegram, Discord, webhooks and Home Assistant
@@ -971,7 +981,7 @@
   // functions: the newest reading per system, today's samples, the hardware,
   // the poll log, and which chart lines the reader has switched off.
   const state = { latest: null, series: null, devices: [], deviceHistory: null, health: null, error: null, hidden: savedHidden,
-    favs: savedFavourites(), groups: {}, analysisDays: {}, asked: [] };
+    favs: savedFavourites(), groups: {}, analysisDays: {}, chat: null };
 
   /**
    * Each system's colour, for its chart line, its card and its name.
@@ -3285,29 +3295,47 @@
 
   // ---------- ask ----------
   /**
-   * The Ask tab: a question in words, answered with its evidence; the weekly
-   * report; and each system's health - whether it is slowly making less for
-   * its sunlight.
+   * The Ask tab: a conversation with SolarLens's assistant - questions in plain
+   * words and their follow-ups, statistics, reports, and how to use the app -
+   * with the weekly report and each system's health below it.
    *
-   * A question goes to POST /api/ask, where a model chooses one of the
-   * read-only tools, the Worker computes the figures, and the model says them
-   * in a sentence (src/ask.ts). The answer is shown with the table it came
-   * from, the period it covers and how fresh the data was, and says who worded
-   * it. Asking is for anyone signed in, the owner or a share link, since each
-   * question spends model calls from the day's allowance; everyone else still
-   * gets the report, the health and "why was this day low?" from the figures.
+   * Each message goes to POST /api/chat with the last few turns of the
+   * conversation: the Worker keeps none of it, and this tab keeps it only until
+   * the tab closes. The assistant (src/assistant.ts) works out which read-only
+   * tools answer it, the Worker computes every figure, and the answer comes back
+   * with them: each table, its period, a chart where one helps, how fresh the
+   * data was, and who worded it. Any answer can be downloaded as a page, to keep
+   * or to print - a report most of all.
+   *
+   * Anyone who can see the dashboard can ask. Someone signed in - the owner, or
+   * a share link - gets the model's words, which spend the day's model calls;
+   * anyone else gets SolarLens's own reading of the question, and the figures'
+   * own words.
    */
   const ASK_EXAMPLES = [
+    'A report on last month',
     'Which month produced the most this year?',
     'How much did I export last week?',
     'Compare my systems per kWp last month',
+    'Statistics for the last 30 days',
     'Why was yesterday low?',
     'Is any system slowly making less?',
-    'What is it doing right now?',
+    'How do I get alerts on Telegram?',
   ];
   const ASK_STALE_MS = 5 * 60 * 1000;
+  /** Turns of the conversation kept in this tab, and sent with each message. */
+  const CHAT_KEEP = 20;
+  const CHAT_SENT = 4;
 
-  /** Whether asking works here, and the week's report and health: fetched when the tab opens, at most every five minutes. */
+  /** The conversation so far, from this tab's own storage: it survives a reload, and goes when the tab closes. */
+  function savedChat() {
+    try { return JSON.parse(sessionStorage.getItem('sl-chat') || '[]'); } catch { return []; }
+  }
+  function saveChat() {
+    try { sessionStorage.setItem('sl-chat', JSON.stringify(state.chat.slice(-CHAT_KEEP))); } catch { /* kept in memory only */ }
+  }
+
+  /** Whether there is a model here and who may use it, and the week's report and health: when the tab opens, at most every five minutes. */
   async function loadAskContext(force = false) {
     const fresh = state.askAt && Date.now() - state.askAt < ASK_STALE_MS;
     if (fresh && !force) return;
@@ -3319,63 +3347,164 @@
   }
 
   /**
-   * Ask - a question, or a tool by name from a "Why?" button - and keep the
-   * answer, newest first. Someone who may not ask still gets a tool's own
-   * answer from GET /api/tools/<name>, which needs no model.
+   * Send a message, with the conversation so far - or, from a "Why?" button, a
+   * tool asked for directly - and add the answer to the conversation.
    */
-  async function askSolarLens(body) {
-    state.asking = body.question ?? 'Working it out…';
+  async function sendChat(message, direct = null) {
+    state.chat ??= savedChat();
+    const history = state.chat.filter((t) => !t.error).slice(-CHAT_SENT).flatMap((t) => [
+      { role: 'user', content: t.question },
+      { role: 'assistant', content: t.answer, calls: t.calls ?? [] },
+    ]);
+    state.asking = message;
     renderAsk();
     let entry;
     try {
-      const res = await fetch('/api/ask', {
-        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      const res = await fetch(direct ? '/api/ask' : '/api/chat', {
+        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(direct ?? { messages: [...history, { role: 'user', content: message }] }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 401 && body.tool) {
-        const q = new URLSearchParams(Object.entries(body.args ?? {}).map(([k, v]) => [k, String(v)]));
-        const ran = await api(`/api/tools/${encodeURIComponent(body.tool)}?${q}`);
-        entry = { question: null, answer: ran.result.summary, worded: 'solarlens', result: ran.result };
-      } else if (!res.ok) {
-        entry = { question: body.question ?? null, error: data.error === 'signin'
-          ? 'Sign in to ask: each question spends model calls from the day\'s allowance, so asking is for the owner and the people they share with.'
-          : data.error || `The server said ${res.status}.` };
+      if (!res.ok) {
+        entry = { question: message, error: data.error === 'signin' ? 'This dashboard is private: sign in to ask.' : data.error || `The server said ${res.status}.` };
       } else {
-        entry = data;
+        entry = {
+          question: message, answer: data.answer, worded: data.worded, understood: data.understood, kind: data.kind, model: data.model,
+          calls: data.calls ?? (data.tool ? [{ tool: data.tool, args: data.args }] : []),
+          results: data.results ?? (data.result ? [data.result] : []), errors: data.errors ?? [], at: Math.floor(Date.now() / 1000),
+        };
         if (state.askStatus) { state.askStatus.used = data.used; state.askStatus.limit = data.limit; }
       }
     } catch (e) {
-      entry = { question: body.question ?? null, error: e.message };
+      entry = { question: message, error: e.message };
     }
     state.asking = null;
-    state.asked = [entry, ...state.asked].slice(0, 5);
-    if (location.hash === '#/ask') renderAsk();
+    state.chat = [...state.chat, entry].slice(-CHAT_KEEP);
+    saveChat();
+    if (location.hash === '#/ask') {
+      renderAsk();
+      document.querySelector('.chatlog .msg:last-child')?.scrollIntoView({ block: 'nearest' });
+    }
   }
 
-  /** A figure for a table: numbers with the reader's own separators, a dash for nothing. */
-  const cell = (v) => (v === null || v === undefined ? '—' : typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : esc(v));
+  /** A figure for a table: numbers with the reader's own separators, a dash for nothing, a page of the dashboard as a link. */
+  const cell = (v) => (v === null || v === undefined ? '—'
+    : typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+      : /^#\/[a-z]*$/.test(v) ? `<a href="${esc(v)}">Open</a>` : esc(v));
 
-  /** One answer, with its evidence: the table, the period, how fresh, and who worded it. */
-  function answerCard(a, i) {
-    if (a.error) {
-      return `<section class="card answer"><div class="body">${a.question ? `<p class="asked">${esc(a.question)}</p>` : ''}
-        <p class="autherr">${esc(a.error)}</p></div></section>`;
+  /** An answer's words: a paragraph a line, and lines that start "- " as a list. Escaped, all of it. */
+  function paragraphs(text) {
+    const out = [];
+    let list = [];
+    const flush = () => { if (list.length) { out.push(`<ul>${list.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`); list = []; } };
+    for (const line of String(text ?? '').split('\n').map((l) => l.trim()).filter(Boolean)) {
+      if (line.startsWith('- ')) list.push(line.slice(2));
+      else { flush(); out.push(`<p>${esc(line)}</p>`); }
     }
-    const r = a.result;
-    const fresh = r?.freshness;
-    return `<section class="card answer" aria-label="Answer${a.question ? `: ${esc(a.question)}` : ''}"><div class="body">
-      ${a.question ? `<p class="asked">${esc(a.question)}</p>` : r ? `<p class="asked">${esc(r.title)}</p>` : ''}
-      <p class="said">${esc(a.answer)}</p>
-      <p class="by">${a.worded === 'model' ? 'Worded by the model from the figures below, which SolarLens worked out.' : 'In SolarLens\'s own words, from the figures below.'}${
-        r?.period ? ` Covers ${esc(r.period.label)}.` : ''}${
-        fresh?.newest ? ` Data up to ${esc(when(fresh.newest))} (${esc(ago(fresh.newest))})${fresh.offline?.length ? `; not reporting now: ${esc(fresh.offline.join(', '))}` : ''}.` : ''}</p>
-      ${r && r.rows.length ? `<details class="evidence" ${i === 0 ? 'open' : ''}><summary>The figures (${r.rows.length} row${r.rows.length === 1 ? '' : 's'})</summary>
-        <div class="tablewrap" tabindex="0" role="region" aria-label="The figures, scrolls sideways"><table class="devices">
-          <thead><tr>${r.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
-          <tbody>${r.rows.map((row) => `<tr>${row.map((v) => `<td>${cell(v)}</td>`).join('')}</tr>`).join('')}</tbody>
-        </table></div></details>` : ''}
-      ${r?.notes?.length ? `<ul class="asknotes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
-    </div></section>`;
+    flush();
+    return out.join('');
+  }
+
+  /**
+   * Bars for a result over time - energy per day, week, month or year; the
+   * weekly ratio - from its first figure. The drawing stretches to its box, so
+   * the first and last labels sit beneath it as text, where stretching cannot
+   * reach them.
+   */
+  function miniChart(p) {
+    if (!['energy', 'performance_trend'].includes(p.tool) || p.rows.length < 3) return '';
+    const col = p.rows[0].findIndex((v, k) => k > 0 && p.rows.some((r) => typeof r[k] === 'number'));
+    if (col < 1) return '';
+    const values = p.rows.map((r) => (typeof r[col] === 'number' ? r[col] : 0));
+    const W = 600, H = 100, T = 6;
+    const max = Math.max(0.1, ...values);
+    const bw = W / values.length;
+    const bars = values.map((v, i) => {
+      const h = (v / max) * (H - T);
+      return `<rect x="${(i * bw + bw * 0.15).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${(bw * 0.7).toFixed(1)}" height="${Math.max(0.5, h).toFixed(1)}"><title>${esc(p.rows[i][0])}: ${esc(cellText(values[i]))}</title></rect>`;
+    }).join('');
+    const first = p.rows[0][0], last = p.rows[p.rows.length - 1][0];
+    return `<figure class="minichart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(`${p.columns[col]}, ${first} to ${last}`)}">${bars}</svg>
+      <figcaption aria-hidden="true"><span>${esc(first)}</span><span>${esc(last)}</span></figcaption></figure>`;
+  }
+  const cellText = (v) => (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? '—'));
+
+  /** A result's evidence: its title and period, a chart where one helps, the table, the notes - and a report's parts, each the same. */
+  function evidence(r, open) {
+    return [r, ...(r.sections ?? [])].map((p, n) => `<details class="evidence" ${open && n === 0 ? 'open' : ''}>
+      <summary>${esc(p.title)}${p.period ? ` · ${esc(p.period.label)}` : ''}</summary>
+      ${n > 0 ? `<p class="cardnote">${esc(p.summary)}</p>` : ''}
+      ${miniChart(p)}
+      ${p.rows.length ? `<div class="tablewrap" tabindex="0" role="region" aria-label="${esc(p.title)}, scrolls sideways"><table class="devices">
+        <thead><tr>${p.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+        <tbody>${p.rows.map((row) => `<tr>${row.map((v) => `<td>${cell(v)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>` : ''}
+      ${p.notes?.length ? `<ul class="asknotes">${p.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    </details>`).join('');
+  }
+
+  /** One answer in the conversation, with its evidence. */
+  function botMessage(t, i) {
+    if (t.error) return `<div class="msg bot"><p class="autherr">${esc(t.error)}</p></div>`;
+    const results = t.results ?? [];
+    const fresh = results.find((r) => r.freshness?.newest)?.freshness;
+    const who = t.worded === 'model' ? 'Worded by the model from the figures below, which SolarLens worked out.'
+      : results.length ? "In SolarLens's own words, from the figures below." : '';
+    const read = t.understood === 'solarlens' && results.length ? ' SolarLens read the question itself.' : '';
+    const freshText = fresh?.newest ? ` Data up to ${when(fresh.newest)} (${ago(fresh.newest)})${fresh.offline?.length ? `; not reporting now: ${fresh.offline.join(', ')}` : ''}.` : '';
+    return `<div class="msg bot">
+      <div class="said">${paragraphs(t.answer)}</div>
+      ${who || read || freshText ? `<p class="by">${esc(who + read + freshText)}</p>` : ''}
+      ${results.map((r, k) => evidence(r, i === state.chat.length - 1 && k === 0)).join('')}
+      ${t.errors?.length ? `<ul class="asknotes">${t.errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}
+      ${results.length ? `<div class="formrow"><button type="button" class="rangebtn" data-download="${i}">${t.kind === 'report' ? 'Download report' : 'Download'}</button></div>` : ''}
+    </div>`;
+  }
+
+  /**
+   * An answer as a page of its own, to keep or to print: the words, then every
+   * table it rests on, with the periods, how fresh the data was, and who worded
+   * it. Plain HTML with its own styles, no script, every value escaped.
+   */
+  function reportHtml(t) {
+    const results = t.results ?? [];
+    const main = results[0];
+    const period = main?.period?.label ?? '';
+    const table = (p) => (p.rows.length ? `<table><thead><tr>${p.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+      <tbody>${p.rows.map((row) => `<tr>${row.map((v) => `<td>${esc(cellText(v))}</td>`).join('')}</tr>`).join('')}</tbody></table>` : '');
+    const part = (p, level) => `<h${level}>${esc(p.title)}${p.period ? ` <small>${esc(p.period.label)}</small>` : ''}</h${level}>
+      <p>${esc(p.summary)}</p>${table(p)}${p.notes?.length ? `<ul class="notes">${p.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
+    const fresh = results.find((r) => r.freshness?.newest)?.freshness;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SolarLens - ${esc(t.kind === 'report' ? `report, ${period}` : t.question)}</title>
+<style>
+  body { font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: #17191a; max-width: 880px; margin: 32px auto; padding: 0 20px; }
+  h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 18px; margin: 30px 0 6px; } h3 { font-size: 15px; margin: 22px 0 6px; }
+  small { color: #5d6360; font-weight: 500; } .meta { color: #5d6360; font-size: 13px; }
+  .words p { margin: 0 0 10px; } table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e4de; } th { font-size: 12px; color: #5d6360; }
+  .notes { color: #5d6360; font-size: 13px; }
+  @media print { body { margin: 0; } h2, h3 { break-after: avoid; } table { break-inside: auto; } tr { break-inside: avoid; } }
+</style></head><body>
+<h1>${esc(t.kind === 'report' ? `SolarLens report${period ? `: ${period}` : ''}` : t.question)}</h1>
+<p class="meta">${t.kind === 'report' ? `${esc(t.question)} · ` : ''}Made ${esc(when(t.at ?? Math.floor(Date.now() / 1000)))}. Every figure worked out by SolarLens${t.worded === 'model' ? `; the words by ${esc(t.model || 'the model')}` : ''}.${fresh?.newest ? ` Data up to ${esc(when(fresh.newest))}.` : ''}</p>
+<div class="words">${paragraphs(t.answer)}</div>
+${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).join('')}`).join('')}
+</body></html>`;
+  }
+
+  function downloadAnswer(i) {
+    const t = state.chat[i];
+    if (!t || t.error) return;
+    const blob = new Blob([reportHtml(t)], { type: 'text/html' });
+    const a = document.createElement('a');
+    const period = (t.results?.[0]?.period?.label ?? '').replace(/[^\w -]+/g, '').trim();
+    a.href = URL.createObjectURL(blob);
+    a.download = `SolarLens ${t.kind === 'report' ? 'report' : 'answer'}${period ? ` - ${period}` : ''}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   /** A system's weekly performance ratio as a small line, oldest week first. */
@@ -3393,15 +3522,17 @@
 
   function renderAsk() {
     loadAskContext();
+    state.chat ??= savedChat();
     const st = state.askStatus;
     const agents = state.agents;
     const invs = state.latest?.inverters ?? [];
-    const canAsk = st?.can_ask && st?.available;
     const left = st ? Math.max(0, st.limit - st.used) : null;
-    const why = !st ? '' : !st.available
-      ? 'Questions in words need Workers AI, which this server does not have: the tools still answer from the figures - try "Why?" next to a low day under Historical Data.'
-      : !st.can_ask ? 'Sign in to ask: each question spends model calls from the day\'s allowance, so asking is for the owner and the people they share with.'
-        : left === 0 ? 'Today\'s model calls are used up; asking starts again at midnight UTC.' : '';
+    const where = st?.provider === 'openai-compatible' ? st.model : `${st?.model} on Cloudflare`;
+    const note = !st ? ''
+      : !st.available ? 'No model is set up here: SolarLens reads each question itself, and answers from the figures.'
+        : !st.can_ask ? "Answered in SolarLens's own words, from the figures. Sign in for the model's."
+          : left === 0 ? "Today's model calls are used up: until midnight UTC, SolarLens reads each question itself."
+            : `Worded by ${where}; SolarLens works out every figure. ${left} of ${st.limit} model calls left today.`;
 
     const health = (agents?.health ?? []).map((h) => {
       const inv = invs.find((i) => i.id === h.system);
@@ -3413,20 +3544,20 @@
         <span class="healthtext">${esc(h.body)}</span></li>`;
     }).join('');
 
+    const log = state.chat.map((t, i) => `<div class="msg me"><p>${esc(t.question)}</p></div>${botMessage(t, i)}`).join('');
     $('view').innerHTML = `<div class="stack askpage">
       <section class="card"><h2>Ask SolarLens</h2><div class="body">
+        <div class="chatlog" aria-live="polite">${log || `<p class="cardnote">Ask about your energy, your systems, a day or any period - statistics, a report - or how to do something in SolarLens. Follow-ups work too: "and the month before?"</p>`}
+          ${state.asking ? `<div class="msg me"><p>${esc(state.asking)}</p></div><div class="msg bot"><p class="said faint">Working it out…</p></div>` : ''}</div>
         <form class="askform" id="askform">
-          <label for="askq" class="vh">Your question</label>
-          <input id="askq" maxlength="300" autocomplete="off" placeholder="How much did I export last week?" ${canAsk && left !== 0 ? '' : 'disabled'}>
-          <button type="submit" class="authbtn" ${canAsk && left !== 0 ? '' : 'disabled'}>Ask</button>
+          <label for="askq" class="vh">Your message</label>
+          <input id="askq" maxlength="500" autocomplete="off" placeholder="${state.chat.length ? 'Ask a follow-up…' : 'How much did I export last week?'}" ${state.asking ? 'disabled' : ''}>
+          <button type="submit" class="authbtn" ${state.asking ? 'disabled' : ''}>Ask</button>
+          ${state.chat.length ? '<button type="button" class="rangebtn" id="chatnew">New conversation</button>' : ''}
         </form>
-        <div class="askchips" role="group" aria-label="Examples">${ASK_EXAMPLES.map((q) => `<button type="button" class="filterbtn" data-ask="${esc(q)}" ${canAsk && left !== 0 ? '' : 'disabled'}>${esc(q)}</button>`).join('')}</div>
-        ${why ? `<p class="cardnote">${esc(why)}</p>` : ''}
-        <p class="cardnote">A model chooses which figures answer the question and puts them in words; SolarLens works out every number, and each answer shows them.${
-          st?.available && left !== null ? ` ${left} of ${st.limit} model calls left today.` : ''}</p>
+        ${state.chat.length ? '' : `<div class="askchips" role="group" aria-label="Examples">${ASK_EXAMPLES.map((q) => `<button type="button" class="filterbtn" data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>`}
+        ${note ? `<p class="cardnote">${esc(note)}</p>` : ''}
       </div></section>
-      ${state.asking ? `<section class="card answer"><div class="body"><p class="asked">${esc(state.asking)}</p><p class="said faint">Working it out…</p></div></section>` : ''}
-      ${state.asked.map(answerCard).join('')}
       <section class="card"><h2>This week's report</h2><div class="body">
         ${agents?.weekly ? `<p class="asked">${esc(agents.weekly.title)}</p><p class="said">${esc(agents.weekly.body)}</p>
           <p class="by">${agents.weekly.worded === 'model' ? 'Written by the model from the week\'s figures.' : 'Written by SolarLens from the week\'s figures.'} Every Monday morning.</p>`
@@ -3437,18 +3568,19 @@
         ${health ? `<ul class="healthlist">${health}</ul>` : '<p class="cardnote">The first check runs on Monday morning.</p>'}
       </div></section>
     </div>`;
-    const form = $('askform');
-    form.onsubmit = (ev) => {
+    $('askform').onsubmit = (ev) => {
       ev.preventDefault();
       const q = $('askq').value.trim();
-      if (q.length >= 3) askSolarLens({ question: q });
+      if (q.length >= 2 && !state.asking) sendChat(q);
     };
-    for (const b of document.querySelectorAll('[data-ask]')) b.onclick = () => askSolarLens({ question: b.dataset.ask });
+    for (const b of document.querySelectorAll('[data-ask]')) b.onclick = () => sendChat(b.dataset.ask);
+    for (const b of document.querySelectorAll('[data-download]')) b.onclick = () => downloadAnswer(Number(b.dataset.download));
+    if ($('chatnew')) $('chatnew').onclick = () => { state.chat = []; saveChat(); renderAsk(); };
     // A "Why?" from Historical Data, waiting for this tab to open.
     if (state.askPending) {
-      const pending = state.askPending;
+      const p = state.askPending;
       state.askPending = null;
-      askSolarLens(pending);
+      sendChat(`Why was ${p.args.date} low${p.args.system ? ` for ${p.args.system}` : ''}?`, p);
     }
   }
 
@@ -4736,7 +4868,7 @@
       ['Whether a system is making what the weather allowed', `the system's page - Against the weather; and the dashed line on its day curve, on ${tab('#/', 'Overview')} and ${tab('#/power', 'Power')}`],
       ['What the sun has saved, and the CO₂ it has avoided', `each system's page - Money and carbon; and ${tab('#/history', 'Historical Data')}, by day, month or year. The owner sets the prices under ${tab('#/settings', 'Settings')}`],
       ['Which system is doing best, for its size', `${tab('#/compare', 'Compare')} - kWh per kWp, today and this month (with two systems or more)`],
-      ['Ask a question in words - "how much did I export last week?"', `${tab('#/ask', 'Ask')} - signed in; the answer shows the figures it came from`],
+      ['Ask anything in words, with follow-ups - statistics, a report, how to do something', `${tab('#/ask', 'Ask')} - every answer shows the figures it came from, and Download keeps it as a page`],
       ['Why was a day low?', `${tab('#/history', 'Historical Data')} - "Why?" next to a low day; or ask on ${tab('#/ask', 'Ask')}`],
       ['Whether a system is slowly making less', `${tab('#/ask', 'Ask')} - Health, checked every Monday`],
       ['A day hour by hour: made against used, and the peaks', `${tab('#/analysis', 'Analysis')} - any of the last seven days, one system or all`],

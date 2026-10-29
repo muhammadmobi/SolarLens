@@ -59,7 +59,7 @@ describe('the tools', () => {
   it('lists each with its arguments as JSON Schema, marked read-only', async () => {
     const { body } = await send(call(3, 'tools/list'));
     const tools = body!.result.tools as Record<string, any>[];
-    expect(tools.map((t) => t.name)).toEqual(['status_now', 'energy', 'compare_systems', 'faults', 'day_report', 'performance_trend']);
+    expect(tools.map((t) => t.name)).toEqual(['status_now', 'energy', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
     expect(tools[1]).toMatchObject({
       title: 'Energy over a period', inputSchema: { type: 'object', additionalProperties: false },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -127,5 +127,19 @@ describe('a result as text', () => {
     expect(text).toContain('Note: A note.');
     expect(text).not.toContain('none');
     expect(text).not.toContain('Data up to');
+  });
+});
+
+describe('a report, as text', () => {
+  it("shows each of its parts in brief, after the headline", () => {
+    const part = (title: string, n: number): ToolResult => ({
+      tool: 'x', title, period: { from: 'a', to: 'b', label: 'last month' }, columns: ['Day', 'kWh'],
+      rows: Array.from({ length: n }, (_, i) => [`d${i}`, i]), facts: {}, notes: [], summary: `${title} in a sentence.`, freshness: { newest: null, offline: [] },
+    });
+    const r: ToolResult = { ...part('Report', 2), sections: [part('Energy per day', 25), part('Faults', 0)] };
+    const text = resultText(r, NOW);
+    expect(text).toContain('## Energy per day - last month\nEnergy per day in a sentence.\nDay | kWh');
+    expect(text).toContain('… and 5 more rows.');
+    expect(text).toContain('## Faults - last month\nFaults in a sentence.');
   });
 });

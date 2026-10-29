@@ -98,7 +98,7 @@ describe('arguments', () => {
     expect(s.properties.from.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
     expect((jsonSchemaOf(toolByName('performance_trend')!) as { properties: Record<string, unknown> }).properties.weeks)
       .toMatchObject({ type: 'integer', minimum: 8, maximum: 26 });
-    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'energy', 'compare_systems', 'faults', 'day_report', 'performance_trend']);
+    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'energy', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
   });
 });
 
@@ -357,5 +357,69 @@ describe('running a tool by name', () => {
     expect(await runTool(h.env.DB, 'delete_everything', {}, NOW)).toEqual({ error: 'There is no tool called delete_everything.' });
     expect(await runTool(h.env.DB, 'energy', { range: 'someday' }, NOW)).toEqual({ error: expect.stringContaining('range is one of') });
     expect(await runTool(h.env.DB, 'energy', { system: 'Shed' }, NOW)).toEqual({ error: expect.stringContaining('no one system called "Shed"') });
+  });
+});
+
+// ------------------------------------------------------------------ statistics, reports, and the app itself
+
+describe('stats', () => {
+  it("gives each system's days in figures: total, average, median, best and worst, spread, per kWp, capacity factor", async () => {
+    await months();
+    const r = await run('stats', { range: 'last_month' });
+    expect(r.rows).toEqual([
+      ['Roof', 31, 620, 20, 20, 'Sat 1 Aug 2026: 20', 'Sat 1 Aug 2026: 20', 0, 124, 16.7, 0, null],
+      ['Garage', 31, 465, 15, 15, 'Sat 1 Aug 2026: 15', 'Sat 1 Aug 2026: 15', 0, 116.3, 15.6, 0, null],
+    ]);
+    expect(r.facts).toMatchObject({ s1_total_kwh: 620, s1_capacity_factor_pct: 16.7, s2_kwh_per_kwp: 116.3, s1_change_pct: null });
+    expect(r.summary).toContain('Roof: 31 days, 620 kWh - 20 kWh on an average day (median 20); best Sat 1 Aug 2026 with 20 kWh');
+    noIds(r);
+  });
+
+  it('leaves today out, and sets the period against as many days before it', async () => {
+    await months();
+    const r = await run('stats', { range: 'this_month', system: 'Roof' });
+    expect(r.period).toMatchObject({ from: '2026-09-01', to: '2026-09-27', label: 'this month (1 – 28 Sep 2026), to yesterday' });
+    expect(r.notes[0]).toBe('Today is left out: it is not over yet.');
+    // September to the 27th, 18 a day, against 5 to 31 August, 20 a day: 10% less.
+    expect(r.facts).toMatchObject({ days: 27, total_kwh: 486, change_pct: -10 });
+    expect(r.summary).toContain('10% less than the 27 days before');
+    await expect(run('stats', { range: 'today' })).rejects.toThrow('at least one whole day');
+  });
+});
+
+describe('report', () => {
+  it('puts a period together: the headline figures, and each part as a section of its own', async () => {
+    await months();
+    const r = await run('report', { range: 'last_month' });
+    expect(r.title).toBe('Report');
+    expect(r.sections?.map((s) => s.tool)).toEqual(['energy', 'compare_systems', 'stats', 'faults', 'performance_trend']);
+    expect(r.rows).toEqual(expect.arrayContaining([['Made (kWh)', 1085], ['Sold (kWh)', 155], ['Best per kWp', 'Roof: 124 kWh/kWp'], ['Faults', '0']]));
+    expect(r.rows.find((x) => x[0] === 'Health')?.[1]).toBe('Roof: not enough data; Garage: not enough data');
+    expect(r.facts).toMatchObject({ total_made_kwh: 1085, best_system: 'Roof', faults: 0 });
+    expect(r.summary.startsWith('Your systems made 1085 kWh last month (1 – 31 Aug 2026).')).toBe(true);
+    expect(r.summary).toContain('No faults were recorded');
+    noIds(r);
+  });
+
+  it('for one system: its best and worst day in the headline, and no comparison', async () => {
+    await months();
+    const r = await run('report', { range: 'last_month', system: 'Roof' });
+    expect(r.title).toBe('Report: Roof');
+    expect(r.sections?.map((s) => s.tool)).toEqual(['energy', 'stats', 'faults', 'performance_trend']);
+    expect(r.rows).toEqual(expect.arrayContaining([['Best day', 'Sat 1 Aug 2026: 20 kWh'], ['Worst day', 'Sat 1 Aug 2026: 20 kWh']]));
+  });
+});
+
+describe('app_help', () => {
+  it("answers how to do something in the app from the guide, with where it is", async () => {
+    const r = await run('app_help', { question: 'How do I get alerts on Telegram?' });
+    expect(r.rows[0]).toEqual(['Alerts on ntfy, Telegram, Discord or a webhook', expect.stringContaining('Settings → Alerts elsewhere'), '#/settings']);
+    expect(r.summary).toBe(r.rows[0][1]);
+    expect((await run('app_help', { question: 'turn on phone notif' })).rows[0][0]).toBe('Notifications on a phone');
+    expect((await run('app_help', { question: 'why is my garage offline?' })).rows[0][0]).toBe('A system reads offline');
+    const nothing = await run('app_help', { question: 'blue elephants' });
+    expect(nothing.notes).toEqual(['Nothing in the guide matched the question; this is what the assistant can do.']);
+    expect(nothing.rows[0][0]).toBe('The assistant, and reports');
+    await expect(run('app_help', {})).rejects.toThrow('question is needed');
   });
 });

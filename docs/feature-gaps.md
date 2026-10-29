@@ -92,7 +92,7 @@ live database after 2.10.0.
 | **Suggested treatment text** | ● | ◐ | ● each vendor's advice beside each alarm, where it gives any - SolarMan has none for most faults |
 | Fault / warning history per device | ● | ◐ | ● per system, back to installation, newest first |
 | Notification on fault or outage | ◐ | ◐ | ● a notification on any signed-up phone or computer, dashboard open or not: a system stopped mid-generation, a fault, a SolisCloud login running out, a vendor not answering |
-| Email or webhook alerts | ◐ | ◐ | ○ out of scope |
+| Email or webhook alerts | ◐ | ◐ | ● ntfy, Telegram, Discord or any webhook, each alert told once (3.0); no email |
 
 ### History and reporting
 
@@ -101,19 +101,21 @@ live database after 2.10.0.
 | Day / month / year / lifetime charts | ● | ● | ● by day, month and year; months and years use the vendor's own totals back to installation, each row saying whose figure it is |
 | One system's history on its own, or all together | ◐ one plant per page | ◐ one plant per page | ● a switch on Historical Data narrows charts, tables and CSV to one system, or shows every system at once |
 | Battery SOC history | ◐ | ● | ● today's charge curve with its low and high, on the system page |
-| Power-analysis view (generation vs consumption vs grid) | ◐ | ● | ○ out of scope |
+| Power-analysis view (generation vs consumption vs grid) | ◐ | ● | ● the Analysis tab (3.0): a day hour by hour, made against used, the peaks, and how much of the sun's output the house used itself |
 | CSV / data export | ● | ○ | ● Download CSV on the Historical Data tab: the rows on screen, by day, month or year (2.9) |
-| Scheduled email reports | ● | ○ | ○ out of scope |
+| Scheduled email reports | ● | ○ | ◐ a summary every Monday to ntfy, Telegram, Discord or a webhook (3.0); no email |
+| A report on any period, on request | ◐ downloadable reports | ○ | ● the assistant writes one - energy, systems compared, statistics, faults and health - to read, download or print (3.0) |
+| Ask questions in words | ○ | ○ | ● the assistant on the Ask tab, with follow-ups; every figure worked out by SolarLens, and shown with the answer (3.0) |
 | Raw sample retention you control | ○ | ○ | ● full payload kept in your own D1 |
 
 ### Financial, environmental, weather
 
 | Feature | SolisCloud | SolarMan | SolarLens |
 |---|:--:|:--:|---|
-| Earnings today / month / lifetime, tariff config | ● | ● | ○ out of scope |
-| CO₂ avoided, trees, coal saved | ● | ● | ○ out of scope |
-| Current weather, 7-day forecast, sunrise/sunset | ● | ● | ◐ today's conditions, min/max and sunrise/sunset where the vendor ships them with the snapshot; nothing is fetched, so no forecast |
-| Irradiance | ◐ | ◐ | ○ needs a weather station |
+| Earnings today / month / lifetime, tariff config | ● | ● | ● the owner's tariff in Settings: saved today, this month, this year and in the system's life, and per row on History (3.0) |
+| CO₂ avoided, trees, coal saved | ● | ● | ◐ CO₂ avoided, by the grid's CO₂ per kWh set with the tariff (3.0); trees and coal only restate it |
+| Current weather, 7-day forecast, sunrise/sunset | ● | ● | ◐ today's conditions, min/max and sunrise/sunset where the vendor ships them, and each hour's sunlight from Open-Meteo (3.0); no forecast |
+| Irradiance | ◐ | ◐ | ◐ the sunlight at each system's position, hour by hour, from Open-Meteo (3.0) - modelled, not measured on the panels |
 
 ### Fleet, presentation, control
 
@@ -121,15 +123,16 @@ live database after 2.10.0.
 |---|:--:|:--:|---|
 | Multiple plants in one account | ● | ● | ● one panel per unit |
 | **Two vendors on one screen** | ○ | ○ | ● the entire point |
-| Favourites, grouping, tags | ● | ◐ | ○ |
-| Physical layout / site map | ● | ○ | ○ |
+| Favourites, grouping, tags | ● | ◐ | ● a star puts a system first; groups lay the Overview out under headings (3.0); no tags |
+| Physical layout / site map | ● | ○ | ◐ a map of where each system is, for the owner only (3.0); no panel layout |
 | Large-screen / TV mode | ● | ○ | ● `#/tv`: no chrome, sized to the screen, keeps the display awake |
 | Native mobile app | ● | ● | ◐ installable web app — home screen, own window, offline shell; no native build |
 | Stays current after an update | ● app stores | ● app stores | ● an open dashboard offers *Reload* when a new version is out; a TV display reloads itself |
 | In-app guide to the features | ◐ help pages | ◐ help pages | ● the **Guide** button (an open book) on every page: what each tab holds, where to find things, what is new |
 | Fits a phone screen | ● native app | ● native app | ● every view held to the screen width by a test |
 | Remote control (charge schedules, export limit, firmware) | ● | ◐ | ○ **deliberately not** — read-only by design |
-| Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API, reads open, writes gated |
+| Open API for your own tools | ◐ approval-gated | ◐ keys by email | ● JSON API, reads open, writes gated; sensors for Home Assistant (3.0) |
+| AI apps, such as Claude | ○ | ○ | ● an MCP server, for apps the owner approves once (3.0) |
 
 ---
 
@@ -172,6 +175,11 @@ live database after 2.10.0.
    their own day on the same screen.
 8. **Both vendors' fault histories on one page**, each alarm with its severity, code and how
    long it lasted, beside SolisCloud's advice - from two portals that each show only their own.
+9. **An assistant that answers from your own figures** (3.0). Ask in words and follow up -
+   statistics, comparisons, why a day was low, a report on any period, how to do something in
+   the app. A model reads the question and words the answer; SolarLens works out every number,
+   shows the tables with the answer, and throws out words that state a number the figures do
+   not hold. The model can be Workers AI, any server speaking OpenAI's API, or none at all.
 
 ---
 
@@ -203,12 +211,17 @@ each check; `Security` in the repository carries what the scanners found.
 - ~~**CSV export.**~~ **Built in 2.9**: the Historical Data tab has a Download CSV button that
   writes the rows on screen - day, month or year - as a file, quoting properly and marking a
   figure the vendor never reported as empty rather than zero. Built in the page from data
-  already fetched, so it costs no database read. *Scheduled reports* remain out of scope.
-- **Weather, CO₂/trees, earnings and tariffs.**
+  already fetched, so it costs no database read. ~~*Scheduled reports*~~ came in 3.0 as the
+  weekly summary, and the assistant writes a report on any period to download or print.
+- ~~**Weather, CO₂/trees, earnings and tariffs.**~~ **Built in 3.0**: the sunlight from
+  Open-Meteo and each system's output against it; money saved and CO₂ avoided by the owner's
+  tariff. Trees and coal stay out: they only restate the CO₂.
 - ~~**Notifications that arrive with the browser closed.**~~ **Built**: Web Push, set up with
   one command and turned on per device from the Alerts tab. See the README's *Notifications on
   your phone*.
-- **Email and webhook alerts** remain out of scope.
+- ~~**Email and webhook alerts.**~~ **Webhooks built in 3.0**, with ntfy, Telegram and Discord
+  ([alerts-elsewhere.md](alerts-elsewhere.md)). Email stays out: it needs a mail service and a
+  sender's reputation to keep.
 - **Battery on the on-grid system** — it has none, so the block is hidden rather than showing
   zeros. Only the hybrid renders it.
 - **Remote control** — charge/discharge schedules, grid switch, export limits, firmware updates.
