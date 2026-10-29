@@ -20,7 +20,8 @@
  *   atomic update, the loser sees that it lost, and for two minutes the token
  *   just replaced is still accepted - without renewing again.
  * - **Only hashes are stored.** A copy of the database signs nobody in.
- * - **The session is signed**, with a key derived from API_TOKEN, and is also
+ * - **The session is signed**, with a key derived from the key secret
+ *   (./crypto keySecret: SECRET_KEY, or API_TOKEN without one), and is also
  *   checked against its device row on every request, so signing a device out
  *   takes effect at once rather than when its hour runs out.
  */

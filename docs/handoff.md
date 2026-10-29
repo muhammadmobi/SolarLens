@@ -12,7 +12,7 @@ like the rest of the repository.
 
 ## Contents
 
-1. [Start here](#1-start-here)
+1. [Start here](#1-start-here) - and [where things stand](#where-things-stand)
 2. [What SolarLens is](#2-what-solarlens-is)
 3. [How data flows](#3-how-data-flows)
 4. [The code, file by file](#4-the-code-file-by-file)
@@ -50,7 +50,7 @@ credentials: the end-to-end suite serves the real dashboard from a static
 server and stubs every `/api/*` route with fixtures.
 
 Then read, in this order: section 3 below (how data flows), `README.md`'s
-architecture section, and `docs/api-notes.md` if you are touching anything that
+*How it works*, and `docs/api-notes.md` if you are touching anything that
 parses a vendor payload.
 
 **If you are an assistant picking this up**, four things will save you from the
@@ -68,18 +68,92 @@ mistakes already made here:
   decision. A change that reads like it was written by a different hand is a
   change that will be reverted.
 - **Keep the documents current in the same change.** `README.md`, this file,
-  `CHANGELOG.md` and `docs/feature-gaps.md` are part of the deliverable.
+  `CHANGELOG.md`, `docs/feature-gaps.md` and the guides in `docs/` are part of
+  the deliverable.
+
+### Where things stand
+
+- **Live:** 2.11.0, deployed from `main`.
+- **Ready, not yet released:** 3.0 - every phase of `docs/roadmap.md`, 1 to 14,
+  the review before release included - on the `roadmap` branch, pull request
+  #34. Every test that runs outside GitHub passes: the type check, 898 unit
+  tests with coverage above every threshold, 13 integration tests against the
+  real Worker, about 600 end-to-end tests, and the guards. Lighthouse, CodeQL,
+  dependency review, the secret scan, workflow lint and the screenshot
+  comparison run only on GitHub, on the push. What the Worker ships with has
+  no known advisory; the development tools have one, moderate, in `undici`
+  under wrangler's local simulator, for the next dependency update.
+
+**To release 3.0, in this order:**
+
+1. **Push, and answer the review.** Every review thread must be resolved before
+   the merge - the ruleset refuses it otherwise. Two from 25 September, on the
+   service worker's offline cache and the passkey counter, are fixed by the
+   commit "Phase 3 review: the installed app keeps no API answers, and a
+   passkey's counter moves atomically": reply naming it, and resolve them.
+   Copilot then reviews the new commits: fix, reply, resolve, until none is open.
+2. **Three GitHub settings, once, before the merge:**
+   Settings → Actions → General → *Allow GitHub Actions to create and approve
+   pull requests*, for the owner's own pull requests to be approved once ready;
+   Settings → Pages → source *GitHub Actions*, for the demo, whose address
+   answers 404 until then; and a **repository** secret `SOLARLENS_URL` for the
+   production watcher, which does not see the `production` environment's own
+   copy. `PRIVACY_VALUES`, also a repository secret, is optional: the real
+   values, for the privacy guard to refuse by name.
+3. **Set `SECRET_KEY` before the deploy:** `npm run cf -- secret put SECRET_KEY`,
+   a long random value, kept with the other secrets. Set before the first 3.0
+   deploy, every key is made with it from the start, and nothing has to move
+   over later.
+4. **Record the screenshot pictures, in the pull request:** once its last
+   commit has been through Checks, add the files of that run's
+   *visual-baselines* artifact to `tests/visual/__screenshots__/linux/`, and
+   make the README's *Screenshot comparison* row and section 14 say they are
+   there. `main` then starts with them, and nothing is left for after the
+   release.
+5. **Merge** with *Rebase and merge*, so each phase stays a commit of its own.
+6. **Approve the deploy** - the `production` environment asks. It takes a
+   restore point, applies migrations 0014 to 0022, deploys, and asks the live
+   site whether it works. If it fails on the `ai` binding, give the deploy's
+   Cloudflare API token the *Workers AI* permission (Cloudflare dashboard → My
+   Profile → API Tokens) and run it again.
+7. **Release:** Actions → Release → Run workflow, version 3.0.0. The changelog
+   dates it 29 October 2026; if the tag comes later, change that date first.
+8. **Then, on the live site:** sign in with the setup code, set a password, add
+   a passkey on each phone and computer, and decide on *Require sign-in to view*.
+
+**Decisions left to the owner:** which Cloudflare plan this runs on (everything
+is held to the free plan's limits); *Require sign-in to view*, which also keeps
+strangers from spending the database's daily reads; the optional rate limit
+(`ratelimits` in `wrangler.jsonc`); `DB_WARN_MB` on a paid plan; the
+repository's About box - a description, topics, and the demo's address as its
+website; and the local branches already merged, which can go.
+
+**Every week:** renew a SolisCloud login when the dashboard says (section 7).
+
+**After 3.0:** a dependency update in one pull request (wrangler, for
+`undici`), and the items left on purpose in section 14.
+
+The release rewrites this part: it is the one place in this file that
+describes a moment rather than the system.
 
 ## 2. What SolarLens is
 
-Two solar systems, two vendor clouds, one page:
+Solar systems on two vendor clouds, on one page. It takes any number of
+systems; the deployment it was built for has two:
 
-- **A 12 kWp on-grid system** on SolisCloud (Ginlong). No battery.
-- **A 3.5 kW hybrid system with a battery** on SolarMan.
+- **An on-grid system** on SolisCloud (Ginlong), with no battery.
+- **A hybrid system with a battery** on SolarMan.
 
 A Cloudflare Worker collects readings every five minutes into a D1 database and
-serves a public dashboard - live power, today's and lifetime energy, battery
-state, per-string DC, per-phase AC, fault history, daily and monthly totals.
+serves a dashboard - live power, today's and lifetime energy, battery state,
+per-string DC, per-phase AC, fault history, daily and monthly totals - open to
+anyone with its address until the owner makes it private. Around it, since
+3.0: the weather and what each system should have made, money and CO₂ by the
+owner's tariff, an Analysis tab, alerts on phones and on ntfy, Telegram,
+Discord or a webhook with a summary every Monday, Home Assistant, an assistant
+that answers questions from the figures, weekly agents that check each
+system's health and write the week up, and an MCP server for AI apps the owner
+approves.
 
 Readings reach it two different ways, and that difference shapes everything:
 
@@ -136,8 +210,11 @@ GET /api/health      → poll log, newest line per feed, relay list
 Reads are open until the owner turns on *Require sign-in to view* in Settings;
 then they need the owner or a share link (`src/auth/`). Writes need the owner -
 `/api/poll` because it spends vendor quota - and `/api/ingest/*` needs
-`INGEST_TOKEN`, which the relays carry. `/api/status` (feed freshness only)
-stays open for monitoring.
+`INGEST_TOKEN`, which the relays carry; a Worker with no `API_TOKEN` refuses
+every write. `/api/status` (feed freshness and the database's size) stays open
+for monitoring. A caller not signed in is held to a year a question, and to a
+rate per address when the `RATE_LIMIT` binding is set.
+`tests/unit/access.test.ts` holds every write route to its guard.
 
 ## 4. The code, file by file
 
@@ -145,12 +222,12 @@ stays open for monitoring.
 |---|---|
 | `src/index.ts` | Every route, the auth middleware, the security headers, the scheduled handler that tells the two crons apart. Hono. |
 | `src/cron.ts` | The two crons' expressions, and the hourly run: its steps, and what waits in the hour the agents run. |
-| `src/db.ts` | All SQL. Upserts, the latest-per-inverter query, series, daily rollups, the poll log, alarms, period totals, relays, a token store. |
+| `src/db.ts` | Most of the SQL: upserts, the latest-per-inverter query, series, daily rollups, a day curve stored in batches (`insertHistory`), the poll log, alarms, period totals, relays, the housekeeping (`forgetOldRaw`, `forgetExpiredKv`), the database's size (`dbBytes`), and the vendors' token store, sealed under `SECRET_KEY`. The newer modules keep their own tables' SQL beside them. |
 | `src/poll.ts` | The cron fan-out: which providers to call, in what order, what to do when one fails, and - past four plants a vendor - which share of them this run reads (`plantsThisRun`). |
-| `src/auth/sessions.ts` | Who is asking: the signed session, the silent refresh and its rotation, signed-in devices, share links, the lockout. Its header explains the design. |
-| `src/auth/routes.ts` | The sign-in routes under `/auth`, Settings, and share links at `/s/`. |
-| `src/auth/webauthn.ts` | Passkeys: the CBOR, the keys and the two ceremonies, verified with WebCrypto. |
-| `src/auth/crypto.ts` | Tokens, hashes, HMAC and the password, all WebCrypto. |
+| `src/auth/sessions.ts` | Who is asking: the signed session, the silent refresh and its rotation, signed-in devices, share links, the lockout (the setup code held to its caller's own), and the passkey sign-in challenges, signed rather than stored and spent once. Its header explains the design. |
+| `src/auth/routes.ts` | The sign-in routes under `/auth`, Settings, and share links at `/s/`. A password keyed before `SECRET_KEY` was set is moved over the next time it signs in (`passwordMatches`). |
+| `src/auth/webauthn.ts` | Passkeys: the CBOR, the keys and the two ceremonies, verified with WebCrypto. A passkey must be unlocked - a fingerprint, a face or the PIN - not only touched. |
+| `src/auth/crypto.ts` | Tokens, hashes, HMAC, sealing and the password, all WebCrypto - and the key secret every key comes from: `keySecret` (`SECRET_KEY`, else `API_TOKEN`), with `previousKeySecret` for what was keyed with `API_TOKEN` before `SECRET_KEY` was set. |
 | `src/weather.ts` | Each system's position (from the vendor's plant record, owner-only) and its hourly weather from Open-Meteo, fetched by the hourly cron. |
 | `src/settings.ts` | The owner's settings in `app_settings`: the tariff and the systems' groups, each checked (`parseTariff`, `parseGroups`) before it is kept. Groups are stored by real id and served by alias. The page does the money sums (`valueOf` in `public/index.html`). |
 | `src/expected.ts` | What each system should make of its sun: its performance ratio learned from its recent sunny days, and today's expected output. |
@@ -158,29 +235,31 @@ stays open for monitoring.
 | `src/relays.ts` | Validates a relay's report on itself into a narrow shape. |
 | `src/channels.ts` | Alerts elsewhere: ntfy, Telegram, Discord and webhooks. What the owner types, checked; the secret sealed with a key derived from the key secret (`SECRET_KEY`, or `API_TOKEN` without one) and moved over when `SECRET_KEY` is set (`resealChannels`); the request each service expects; delivery and its record. A channel taking alerts is one more listener to `announce()` in `src/push.ts`. |
 | `src/summary.ts` | The weekly summary: the last seven days from the daily rows, the tariff and the alarms, in words, and `sendWeekly` - Monday 08:00 on the first system's clock, waiting up to three hours for the week's report (`REPORT_WAIT_S`), claimed in one conditional write so it goes once. |
-| `src/tools.ts` | The read-only tools every question goes through - the assistant, the agents, and the MCP server: status now, outages, what the inverter shows, energy, a day's power, a chart of any measure, the battery, systems compared, statistics, faults, a day explained, the performance trend, an analysis (every finding with what to do, from one read of each kind of record), any figure the records hold (`figures`: a measure, how, by what, above or below an amount), a full report, and help with the app and its words. Arguments checked before anything runs; every figure computed and labelled here. `DEFAULT_RANGE` is the period each covers when none is named. |
+| `src/tools.ts` | The read-only tools every question goes through - the assistant, the agents, and the MCP server: status now, outages, what the inverter shows, energy, a day's power, a chart of any measure, the battery, systems compared, statistics, faults, a day explained, the performance trend, an analysis (every finding with what to do, from one read of each kind of record), any figure the records hold (`figures`: a measure, how, by what, above or below an amount), a full report, and help with the app and its words. Arguments checked before anything runs; every figure computed and labelled here. `DEFAULT_RANGE` is the period each covers when none is named; a caller not signed in is held to `ANONYMOUS_DAYS`. |
 | `src/ai.ts` | The one place that talks to a model: Workers AI, or any server speaking OpenAI's chat API when `AI_BASE_URL` is set (https, or the same computer); the daily cap (per UTC day, in kv); JSON replies. |
 | `src/assistant.ts` | The assistant behind `/api/chat`: a conversation understood (by the model, up to three tool calls, or by `guessCalls` reading the words itself), computed by the tools, and worded - held to every figure by `numbersAgree`. Follow-ups move the calls of the answer before. The conversation is the browser's; the Worker keeps none of it. |
 | `src/help.ts` | What the assistant knows about using SolarLens: an entry per feature - the words a question uses, the answer, the tab - and a glossary of the words the figures use (`term: true`), preferred when a question asks what a word means. **Keep it in step with the page**: when a feature moves, its entry moves with it. |
 | `src/ask.ts` | One question at a time (`/api/ask`), and a tool asked for directly ("Why?" on Historical Data): a thin door onto the assistant. |
 | `src/mcp.ts` | The MCP server at `/mcp`: JSON-RPC over Streamable HTTP, answering `initialize`, `ping`, `tools/list` and `tools/call` from `src/tools.ts`. Stateless: no event stream, no session. |
-| `src/oauth.ts` | OAuth for the MCP server: discovery documents, dynamic registration, the approval page (drawn here, not in `public/`), codes, rotating tokens, revocation, and the connected apps for Settings. |
+| `src/oauth.ts` | OAuth for the MCP server: discovery documents, dynamic registration, the approval page (drawn here, not in `public/`), codes, rotating tokens, revocation, and the connected apps for Settings. A registration nobody approves is cleared after an hour (`STALE_CLIENT_S`). |
 | `src/agents.ts` | The weekly health check (flags a system slowly making less; the alert is in `src/push.ts`) and the weekly report, run once a week from the hourly cron, marked done only once both are written; a failed run is tried again the next hour, `MAX_TRIES` times in all. |
 | `src/sensors.ts` | `/api/sensors`, what Home Assistant reads: flat, fixed units, the page's own offline rule. |
-| `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. |
+| `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. Each wake gives up after ten seconds. |
 | `src/providers/types.ts` | The `Provider` interface every adapter implements, plus shared shapes. |
 | `src/providers/soliscloud.ts` | SolisCloud's official API adapter (dormant until an API key exists) and the relay payload normaliser. |
-| `src/providers/solarman.ts` | SolarMan's Business API adapter and its normaliser. |
+| `src/providers/solarman.ts` | SolarMan's Business API adapter and its normaliser; the plant list read page by page. |
 | `src/providers/solarman-web.ts` | The browser-session fallback used today, refresh-token based. |
 | `src/providers/events.ts` | Alarms and vendor period totals from both vendors, into one shape. |
-| `src/providers/units.ts` | W / kWh / timestamp / timezone scaling. Small, and the source of the worst bug in section 13. |
-| `src/providers/queue.ts` | A call queue holding 1.5-2s between vendor calls. |
+| `src/providers/units.ts` | W / kWh / timestamp / timezone scaling, and where a plant is (`locationOf`). Small, and the source of the worst bug in section 13. |
+| `src/providers/queue.ts` | A call queue holding 1.5-2s between vendor calls, and `CALL_TIMEOUT_MS`, the 20 seconds every vendor call gives up after. |
 | `agent/solis-relay.mjs` | The relay: drives Chrome, waits for the portal's own responses, pushes. |
 | `agent/solis-extras.mjs` | Its slower reads - alarm history, period totals. |
 | `agent/relay-status.mjs` | Login expiry from the portal cookie, the relay's random id, its nickname. |
 | `public/index.html` | The whole dashboard - markup, styles and script in one file, no build step. The script opens with a map of its sections; search for `---------- <name>` to jump to one. |
-| `public/sw.js` | The service worker: network-first fetching for the installable app, and what a push shows. |
-| `scripts/` | Operational tooling: the wrangler wrapper and its shared config step (`wrangler-config.mjs`), the relay installer, login renewal, token rotation, the capture tool, the push key (`make-vapid-key.mjs`), the reading-offset backfill, and `scripts/ci/` (the guards). |
+| `public/sw.js` | The service worker: network-first for the installable app, keeping only the page and its icons for offline - never an `/api` or `/auth` answer - and what a push shows. |
+| `demo/demo.js` | The demo's made-up data, answering every `/api` and `/auth` request in the visitor's browser; held to the real Worker's answers by `tests/unit/fixture-contract.test.ts`. |
+| `migrations/` | The schema, 0001 to 0022, applied in order - section 5. |
+| `scripts/` | Operational tooling: the wrangler wrapper (it runs wrangler's own entry with Node, every argument whole) and its shared config step (`wrangler-config.mjs`), the relay installer, login renewal, token rotation, the local seed (`seed-local.mjs`, through the wrapper's config), the README's pictures (`screenshots.mjs`, of the demo), the capture tool, the push key (`make-vapid-key.mjs`), the reading-offset backfill, and `scripts/ci/` (the guards). |
 
 Every one of these files starts with a comment saying what it is for - except
 `public/index.html`, which opens with its HTML; its explanation is the map at
@@ -190,7 +269,12 @@ rule: each file says what it holds the code to. The shared helpers - a SQLite
 database behind D1's interface, and a Worker to send requests to - are in
 `tests/helpers/`; the stand-ins for a push service and for a service worker's
 scope belong to one test each, and are explained where they are defined in
-`tests/unit/push.test.ts` and `tests/unit/service-worker.test.ts`.
+`tests/unit/push.test.ts` and `tests/unit/service-worker.test.ts`. Two unit
+files guard the Worker as a whole rather than one part of it:
+`tests/unit/access.test.ts` (who may call each route that changes something)
+and `tests/unit/budgets.test.ts` (D1 queries in one invocation). Beside
+`tests/unit/` are `tests/e2e/` (the page, in Chrome), `tests/integration/`
+(the real Worker in workerd) and `tests/visual/` (each view's picture).
 
 ## 5. The data model
 
@@ -205,6 +289,12 @@ correction of stored values (0021) and one index dropped that repeated a key
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC. A logger's `logger` (link, signal bars, uptime, make date) is public |
 | `device_network` | datalogger | Its operator and cell, or MAC address. Owner only, never served - and a table of its own, because a Worker rolled back to 2.10 would serve any new column on `devices` |
 | `plant_location` | system | Its position. Owner-only; sent to Open-Meteo only rounded to about a kilometre |
+| `auth_owner` | the owner | The password's keyed hash, or none for passkeys only, and the *Require sign-in to view* switch |
+| `auth_passkeys` | passkey | Its public key and signature counter; nothing that signs anyone in by itself |
+| `auth_devices` | signed-in browser | Owner or viewer, a name like "Chrome on Android", the hash of its refresh token and of the one before (so a copy is caught), when it runs out or was signed out; a viewer carries the share link it came through |
+| `auth_shares` | share link | A hash of its secret, a name, and when it runs out or was taken back |
+| `auth_challenges` | passkey challenge | A registration's challenge in flight, and each sign-in challenge once it is used - five minutes each; a sign-in challenge is otherwise signed, not stored |
+| `auth_attempts` | caller, and everyone | Failed sign-ins, keyed by a hash of the address, for the lockout |
 | `oauth_clients` · `oauth_codes` · `oauth_grants` · `oauth_access` | registered app · approval · connected app · access token | The MCP server's OAuth; only hashes of codes and tokens. A grant is a connected app, revoked from Settings |
 | `agent_reports` | report a week | The weekly report and each system's health check; `flagged` when a system is slowly making less, which the alerts read. Kept a year |
 | `channels` | place alerts are posted to | ntfy, Telegram, Discord or a webhook. The token or address in `secret`, AES-GCM encrypted under a key derived from the key secret; only a `label` is ever served, and only to the owner. At most five |
@@ -220,7 +310,7 @@ correction of stored values (0021) and one index dropped that repeated a key
 | `push_subscriptions` | device signed up for notifications | The push endpoint is the secret and is never served; at most ten |
 | `push_messages` | notification text | What a woken device shows, for every device or one; kept a week |
 
-Two things worth knowing before writing SQL here:
+Three things worth knowing before writing SQL here:
 
 - **The free tier's read budget is a real constraint** - about 5 million rows a
   day. It has been blown twice, both times by a query that looked innocent. Use
@@ -238,10 +328,12 @@ Two things worth knowing before writing SQL here:
 ## 6. The dashboard
 
 One file, `public/index.html`: markup, styles and script, no build step and no
-framework. It polls `/api/latest` and `/api/series`, pauses while the tab is
-hidden, and renders its views - Overview, Power, Historical Data, Alerts,
-Devices, a TV mode for a wall display, and the Guide behind the book icon in the
-header, which explains all of them to someone who has never seen the app. The
+framework. It polls `/api/latest` and `/api/series` every ten minutes, pauses
+while the tab is hidden, and renders its views - Overview, Power, Analysis,
+Compare (with two systems or more), Map (the owner's), Historical Data, Alerts,
+Devices, Ask, a page per system, Settings behind the gear, a TV mode for a wall
+display, and the Guide behind the book icon in the header, which explains all
+of them to someone who has never seen the app. The
 Guide carries the release number in `RELEASE`; a unit test fails if it differs
 from package.json, so bumping the version means bumping it there too, and
 writing its "What is new" card.
@@ -250,7 +342,9 @@ Two behaviours to know before changing it:
 
 - **Alerts are computed in the page, not stored.** Staleness, an offline
   inverter, an expired relay login and a vendor fault all become rows there,
-  each with a sentence saying what to do.
+  each with a sentence saying what to do. What reaches the phones and the places
+  under *Alerts elsewhere* is judged in the Worker instead (`announce()` in
+  `src/push.ts`), after each five-minute poll, and told once.
 - **A plant is "offline" when the vendor says so, or when its newest reading is
   older than `STALE_AFTER_S`** (25 minutes). That threshold must stay
   comfortably above the poll interval, or healthy systems flip to offline.
@@ -298,8 +392,13 @@ Two behaviours to know before changing it:
   plugged in; a closed lid that sleeps is the same outage.
 - More than one relay is fine: duplicate readings are stored once, and whichever
   laptop is awake fills the gaps.
+- **A laptop takes its code from `main`**: the installer and
+  `renew-solis-login.cmd` update the checkout, and the installer installs
+  exactly what the lockfile records (`npm ci`). Pinning the laptops to release
+  tags instead is in section 14.
 
-The permanent fix is SolisCloud's official API key (a support ticket is open).
+The permanent fix is SolisCloud's official API key, requested from their
+support.
 `SolisCloudProvider` is already written and activates the moment the key and
 secret are set, and the relay disappears entirely.
 
@@ -311,7 +410,9 @@ once per device, renewed silently, never asked again) and anyone holding a
 share link. The 2.x per-device unlock was removed because it cost a step on
 every device and locked people out when the local copy was lost; the 3.0 login
 avoids both - a passkey or password once, and a year-long refresh token that
-renews itself. `src/auth/sessions.ts` has the design and its reasons.
+renews itself. `src/auth/sessions.ts` has the design and its reasons. The 2.x
+unlock link, `/auth?t=<API_TOKEN>`, signs nothing in since 3.0: it put the key
+to everything into an address, where history and logs keep it.
 
 **What a read can carry** is the same either way, and `src/public-view.ts`
 decides it:
@@ -328,6 +429,13 @@ decides it:
   point, since the plant records carry notes, codes and a zone name beside the
   measurements. A device's own alert count goes out as `alert_status`, and a
   device is named by a positional alias ("s1-datalogger-1"), not its serial.
+- **The payload itself is kept 30 days.** The hourly housekeeping clears `raw`
+  from readings older than a month; the figures stay. A copy of the database
+  holds a month of vendor replies, not years of them.
+- **What the Worker must keep and read back is sealed**: an alert channel's
+  token or address, and - with `SECRET_KEY` set - the vendors' cached login
+  tokens, AES-GCM under a key derived from the key secret, which the database
+  never holds.
 - **A system's position is the owner's alone.** It is read from the vendor's
   plant record into `plant_location`, served by `/api/locations` to the owner
   only (a share link does not get it), and sent to Open-Meteo rounded to two
@@ -365,11 +473,16 @@ somewhere safe. Everything else can be rebuilt from this repository.
 ## 10. How a change reaches production
 
 1. Branch, commit, open a pull request.
-2. **Twelve checks run, and all must pass**: type check, unit tests with
-   coverage thresholds, end-to-end tests, a build dry run, four project-specific
-   guards, a Windows job for the relay scripts, CodeQL, dependency review,
+2. **Fifteen checks run.** The ruleset requires twelve of them, a review, and
+   every conversation resolved; the owner's own pull request is approved only
+   once all fifteen have passed. They are the nine jobs of `checks.yml` (type check,
+   unit tests with coverage thresholds, end-to-end tests, a build dry run,
+   integration tests against the real Worker in workerd, screenshot comparison,
+   Lighthouse, the four project-specific guards, and a Windows job for the relay
+   scripts) and the six of `security.yml` (CodeQL, dependency review,
    `npm audit`, a secret scan of the whole history, workflow lint, and a check
-   that every action is pinned to a commit.
+   that every action is pinned to a commit). The three the ruleset does not
+   require are the integration tests, the screenshot comparison and Lighthouse.
 3. **Wait for Copilot's review** of the latest commit, then for each suggestion:
    fix it or explain why not, reply on the conversation, and resolve it. A push
    brings a fresh review, so repeat until nothing is open - the ruleset refuses
@@ -377,13 +490,14 @@ somewhere safe. Everything else can be rebuilt from this repository.
    a review can land after the merge.
 4. Merge. The checks run again on the merged result.
 5. **A person approves the deploy** on GitHub - the `production` environment
-   requires a reviewer.
+   requires a reviewer. A deploy started by hand runs only from `main`.
 6. Migrations, deploy, then a **smoke test against the live site**: the page and
    its security policy, health and latest answering, a vendor feed current, no
    identifiers in the public responses, and the token-protected routes still
    refusing a caller without one.
 7. **If the smoke test fails, the previous version is restored automatically**
-   and the run is marked failed.
+   and the run is marked failed. (Until 3.0 that restore would itself have
+   failed: see section 13.)
 8. Releases: set the version in `package.json` (`npm version X.Y.Z --no-git-tag-version`),
    the same number in `RELEASE` in `public/index.html`, and rewrite the guide's
    "What is new" card beside it; write the changelog section and its link
@@ -435,6 +549,7 @@ and running a relay in a visible window, since a hidden relay writes no log.
 |---|---|---|
 | One system reads offline while the sun is up | Relay laptop asleep, off, or its login expired | Devices tab says which; `renew-solis-login.cmd` |
 | A relay reports *error* although its login is valid | SolisCloud moved a page the relay reads | Run the relay once in a window to see which step fails; the plant page's addresses are `PLANT_PAGES` in `agent/solis-relay.mjs` |
+| A system shows production while its inverter is off or away | It ran somewhere else - a test, a repair - through another datalogger: SolisCloud files data under the inverter's serial number, whichever stick carries it | The Devices tab gives it away: the inverter seen recently while the plant's own datalogger has been silent for days. The inverter's `devices` row names the logger it used (`collectorsn` in `raw`). Nothing to fix |
 | Both feeds stale | The Worker's cron, or Cloudflare | Cloudflare dashboard → the Worker's logs |
 | A deploy failed | The smoke test refused it; the old version is already back | The run's log names the failing check in words |
 | A deploy failed at the first step | The Cloudflare token expired or was rolled | New token → update the `production` secret |
@@ -442,6 +557,11 @@ and running a relay in a visible window, since a hidden relay writes no log.
 | Rolling back by hand | | `npm run cf -- rollback <version-id> -y -m "why"`; list with `npm run cf -- deployments list` |
 | A screen shows an old version of the page | It was opened before the reload notice itself was deployed, after 2.10.0, so it has no notice to show | Reload it once by hand (Ctrl + F5, or close and reopen the phone app) |
 | A `.cmd` window stays open saying something failed | That run failed on purpose, so you can read why | The lines above it say what |
+| A watcher issue: *The database is filling up* | It is past 400 MB; the free plan stops every write at 500 | Readings shed their vendor payload after 30 days, which slows the growth a great deal; on a paid plan, set `DB_WARN_MB` higher |
+| Every change refused: *This server has no API_TOKEN* (503) | The Worker has lost its `API_TOKEN` | `npm run cf -- secret put API_TOKEN` |
+| The password stopped working after a new `API_TOKEN` | `SECRET_KEY` is not set, so the password was keyed with the old token | *Forgot your password?* with the new token as the setup code; then set `SECRET_KEY` |
+| The Monday summary came late, or without the week's report | The agents failed, and are tried again the next hour, three times at most; the summary waits up to three hours for their report | `npm run cf -- tail` shows the `agents:` or `summary:` line |
+| *Too many requests from this address* (429) | The optional rate limit, for a caller not signed in | Wait a minute, or sign in |
 
 **Where the reports are**: coverage and Playwright artifacts hang off each
 workflow run; CodeQL findings, dependency alerts and secret scanning live in the
@@ -465,7 +585,7 @@ something.
   The one that changes rows, 0021, corrects values in place (SolarMan charging
   stored as discharging) and drops nothing, so an older Worker still reads
   them - rightly, now. A correction like it must also be safe to run twice:
-  after a rollback to 2.10, 0021 is run again by hand to put right what 2.10
+  after a rollback to 2.x, 0021 is run again by hand to put right what 2.x
   stored meanwhile. 0022 drops an index, which only repeated the readings
   table's own key: an index changes how fast a query is, never what it
   answers, so no Worker notices.
@@ -479,7 +599,11 @@ something.
 - **Comments explain why, in prose**, and cite the measurement or the incident.
   The codebase reads as one voice; keep it.
 - **Documents ship with the change**: `README.md`, this file, `CHANGELOG.md`,
-  `docs/feature-gaps.md` and `docs/api-notes.md`.
+  `docs/feature-gaps.md`, `docs/api-notes.md`, the guide for whatever changed
+  (`docs/ask-solarlens.md`, `docs/mcp.md`, `docs/alerts-elsewhere.md`,
+  `docs/home-assistant.md`), `src/help.ts`, which the assistant answers
+  how-to questions from, and the README's pictures - `npm run screenshots`
+  retakes them of the demo when a view they show has changed.
 - **Verify, do not assert.** Check `/api/health`, run `d1 insights`, run the
   script, take the screenshot. Section 13 is what assuming cost.
 - **Never lower a coverage threshold to make a red build go green.**
@@ -504,10 +628,13 @@ The short history a newcomer would otherwise repeat.
 | **A deploy's rollback target was read with a command substitution inside `echo`**, which cannot fail, so a failed lookup silently left the run unable to undo itself | A step that cannot fail cannot protect you |
 | **The privacy guard read the digits inside a pinned commit hash as a plant id**, and Dependabot's sign-off as a leaked address | A guard's false positives are its own bug; fix them, do not weaken the rule |
 | **A maintenance script passed every local test and answered `undefined` against production**: `wrangler d1 execute --file` returns rows from a local database but import statistics from a remote one, and `--command` through `scripts/wrangler.mjs` is split at every space by the shell | Dry-run against the real thing before `--apply`. A script that talks to D1 runs wrangler's own entry point with node, as `scripts/backfill-reading-offsets.mjs` does - and since 3.0 so does the wrapper itself, every argument whole, after the review before release found the same split would have broken the deploy's rollback |
+| **`npm run seed:local` seeded a database the dashboard never read**: it ran `npx wrangler` with the committed config, whose database id is a placeholder, and wrangler keys a local database by its id - so the seed and `npm run dev` each had one of their own | Every script that talks to D1 goes through the wrapper's filled-in config (`scripts/wrangler.mjs`), locally as well as remotely |
+| **A reading pushed to `/api/ingest` with fields missing was refused with a 500** - D1 cannot bind `undefined` - and nothing had tried one until the review before 3.0 wrote the test | Turn every optional field into `null` before binding. The test database refuses `undefined` as D1 does, so a test finds it before a deploy does |
 | **The review before 3.0 counted a Monday's cron at some ninety-five D1 queries**, where the free plan allows fifty in one invocation - and the week was claimed before the work, so a run cut short would have lost the week's report for good | Count, do not estimate: `tests/unit/budgets.test.ts`. Mark a job done after it is done, not before |
 | **A dashboard tab left open across a release kept running the old page**, so the 2.10 guide went unseen on a screen that had been open all along | A page refreshes its figures, never itself; it now compares its own script with the server's and offers a reload |
 | **On a phone the page was wider than the screen**: the tab bar could not shrink, the browser zoomed the layout out, and a notice fixed to the bottom landed below it where it could not be tapped | Test layouts at phone width, and hold the page to the screen width - `tests/e2e/phone-width.spec.ts` does |
 | **Several Copilot review rounds found real bugs** - a notification repeating every five minutes, a race in the reload check - and some threads had been resolved without a word | Every pull request: wait for the review, fix, reply, resolve, repeat until none is open. The ruleset now refuses a merge with an open conversation |
+| **A system showed an hour of production while its inverter was away being tested**: the installer ran it through their own datalogger, SolisCloud filed the readings under the inverter's serial number - so on the owner's plant - and the relay, its laptop off at the time, copied them with the day's chart when it next ran | A reading nobody expected is the vendor's before it is a bug: find which datalogger carried it (section 11) before suspecting the code |
 | **SolisCloud moved its plant page, and no Solis reading arrived for two days**: the relay waited on an address the portal no longer had, logged in or not, while the other laptop's relay had stopped weeks before, with nothing to start it again | A relay is a browser reading someone else's site: when it fails with a valid login, look at the site first. And a hidden process needs something to start it again - the task now checks every ten minutes |
 
 ## 14. What is still missing
@@ -535,6 +662,14 @@ purpose. `docs/feature-gaps.md` is the honest list. SolarMan alarm detail and no
   `node scripts/make-vapid-key.mjs` has run, the Alerts tab says notifications to
   a closed browser are not set up - which is the state to check first when a
   phone is not being told anything.
+- **The screenshot comparison has nothing to compare with yet.** No picture is
+  committed under `tests/visual/__screenshots__/linux/`, so each run records
+  its own and passes. The last step before 3.0 is merged adds the files of a
+  run's **visual-baselines** artifact to that folder (section 1); from then on
+  a view that changes fails the job.
+- **On GitHub, outside the code:** Pages is not on yet, so the demo and the
+  README's link to it answer 404 until it is (section 11 says how), and the
+  repository's About box - description, website, topics - is empty.
 - **Left from the review before 3.0, on purpose:**
   - *A daily rollup of the readings.* Historical Data and the tools sum the
     day from every reading, so a long period reads many rows. A table of day
@@ -569,6 +704,19 @@ None is urgent. Each is written down so it is not rediscovered as a surprise.
 | **Alias** | `s1`, `s2` - the positional name a plant id becomes in public responses |
 | **Smoke test** | `scripts/ci/smoke.mjs`, run against the live site after a deploy |
 | **Guard** | One of the four project-specific checks in `scripts/ci/` |
+| **Owner** | Whoever holds the setup code and signs in with a password or passkey; the one account that can change anything |
+| **Setup code** | `API_TOKEN`, typed on the sign-in page to set up sign-in, or to set a forgotten password |
+| **Share link, viewer** | A view-only link, `/s/<link>`, and whoever opened it; its token as a bearer header is how Home Assistant reads a private dashboard |
+| **Key secret** | What every key is derived from: `SECRET_KEY`, or `API_TOKEN` where it is not set (`keySecret` in `src/auth/crypto.ts`) |
+| **Channel** | A place under *Alerts elsewhere* - ntfy, Telegram, Discord or a webhook |
+| **Listener** | A signed-up phone, or a channel taking alerts; with none, nothing is announced |
+| **Told once** | The state in `kv` that keeps an event from being announced twice |
+| **The hourly run** | The second cron, at seven minutes past each hour: the agents, the summary, the weather and the housekeeping (`src/cron.ts`) |
+| **Housekeeping** | The hourly clearing: old messages, link history and kv entries, readings' payloads past 30 days, and channels moved over to `SECRET_KEY` |
+| **Invocation** | One request, or one cron run: D1's free plan allows fifty queries in each (`tests/unit/budgets.test.ts`) |
+| **Tool** | One of the sixteen read-only functions in `src/tools.ts` that the assistant, the agents and the MCP server answer with |
+| **Agents** | The weekly health check and report (`src/agents.ts`) |
+| **Connected app** | An AI app the owner has approved, through OAuth, to read over `/mcp` |
 
 ## 16. Rebuilding from nothing
 

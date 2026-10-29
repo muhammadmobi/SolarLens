@@ -10,6 +10,8 @@ import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { writeLocalConfig } from './wrangler-config.mjs';
+import { wranglerArgs } from './wrangler.mjs';
 
 const now = Math.floor(Date.now() / 1000);
 const day = new Date();
@@ -52,5 +54,10 @@ sql.push(`INSERT INTO poll_log (ts, provider, ok, detail) VALUES (${now}, 'seed'
 
 const file = join(mkdtempSync(join(tmpdir(), 'solarlens-seed-')), 'seed.sql');
 writeFileSync(file, sql.join('\n'));
-const r = spawnSync('npx', ['wrangler', 'd1', 'execute', 'solar-lens', '--local', `--file=${file}`], { stdio: 'inherit', shell: true });
+// Through the wrapper's filled-in config, as `npm run db:local` and `npm run dev` are. wrangler keys a
+// local database by its id, and the committed wrangler.jsonc carries only a placeholder for it, so
+// `npx wrangler` here once seeded a database of its own that the dashboard never read. And with Node
+// and no shell, as the wrapper runs it, so a temporary path with a space in it stays one argument.
+const r = spawnSync(process.execPath, wranglerArgs(['d1', 'execute', 'solar-lens', '--local', `--file=${file}`], writeLocalConfig()), { stdio: 'inherit' });
+if (r.error) console.error(`Could not start wrangler (${r.error.message}). Run "npm ci" first.`);
 process.exit(r.status ?? 1);

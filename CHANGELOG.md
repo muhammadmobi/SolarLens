@@ -268,8 +268,8 @@ checkout of any tag says which release it is.
   every column of the devices table it does not know to strip - cannot serve
   them.
 
-- **A roadmap to 3.0.** `docs/roadmap.md` sets out the twelve phases of the
-  next release - the owner login, any number of inverters, a public demo,
+- **A roadmap to 3.0.** `docs/roadmap.md` sets out the release phase by phase -
+  the owner login, any number of inverters, a public demo,
   weather and expected output with a site map, savings, questions answered in
   the app and an MCP server - and what was left out on purpose.
 
@@ -355,6 +355,33 @@ checkout of any tag says which release it is.
   runs `npm ci`, not `npm install`, as does the README. The development tools
   want Node.js 22.13 or newer.
 
+- **The handover covers 3.0 as a whole.** `docs/handoff.md` had the sign-in's
+  six tables missing from its data model, the 2.x views, twelve checks where
+  fifteen run (the ruleset requires twelve), and nothing on what to do when
+  the new parts go wrong. It
+  now has every table, view and check; a line on each file 3.0 changed; what
+  a full database, a missing `API_TOKEN`, a late Monday summary or the rate
+  limit look like, and the fix; and a glossary of 3.0's words - owner, setup
+  code, share link, key secret, channel, the hourly run, invocation, tool.
+  `docs/feature-gaps.md` no longer promises the vendor payload is kept for
+  good. And a cron is run by hand with `npm run dev -- --test-scheduled`: the
+  README said `npm run dev` alone, under which wrangler serves no
+  `/__scheduled` at all.
+
+- **The README's pictures are of 3.0.** Retaken of the demo, they show the
+  tabs 3.0 added, the groups, the expected line and the Settings gear; two are
+  new - the assistant analysing the week, and the Analysis tab - and the two
+  that were taken but never shown, Historical Data and TV mode, are in the
+  gallery now.
+
+- **The README says who SolarLens is for, and what it cannot do.** Badges for
+  the checks, the release and the licence; a way to deploy your own beside the
+  demo; every guide in its contents; its known limitations - the relay and its
+  weekly login, the free plan's limits, read-only, no email or forecast; and
+  the Home Assistant configuration described as Settings writes it. The
+  feature list's hardware rows are back in their own table, from the Access
+  table they had strayed into.
+
 ### Fixed
 
 - **A SolarMan battery charging now reads as charging.** SolarMan's live
@@ -411,6 +438,13 @@ checkout of any tag says which release it is.
 - **A body that is not JSON is answered 400** on every ingest route, not 500; a
   device list is 50 records at most; and a `days` that is not a number reads as
   the default, where `NaN` reached the query.
+
+- **`npm run seed:local` seeds the database the dashboard reads.** It ran
+  `npx wrangler` with the committed config, whose database id is a
+  placeholder, and wrangler keeps a local database per id - so the day of
+  made-up readings went into a database of its own, and `npm run dev` showed
+  nothing. It now goes through the same filled-in config as every other
+  wrangler command.
 
 - **A poll that fails no longer takes the rest of the run with it**: the alerts
   are judged regardless, and an alarm or totals read that fails is logged - it

@@ -38,7 +38,7 @@ loadDevVars();
 const keyId = process.env.SOLIS_KEY_ID;
 const keySecret = process.env.SOLIS_KEY_SECRET;
 if (!keyId || !keySecret) {
-  console.error('Set SOLIS_KEY_ID and SOLIS_KEY_SECRET (env or .dev.vars). Get them at SolisCloud -> Service -> API Management.');
+  console.error('Set SOLIS_KEY_ID and SOLIS_KEY_SECRET (env or .dev.vars). Get them at SolisCloud -> avatar -> Basic Settings -> API Management.');
   process.exit(1);
 }
 

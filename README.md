@@ -1,23 +1,35 @@
 # SolarLens
 
+[![Checks](https://github.com/muhammadmobi/SolarLens/actions/workflows/checks.yml/badge.svg)](https://github.com/muhammadmobi/SolarLens/actions/workflows/checks.yml)
+[![Release](https://img.shields.io/github/v/release/muhammadmobi/SolarLens)](https://github.com/muhammadmobi/SolarLens/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **One screen for all your inverters.** SolarLens polls SolisCloud and SolarMan, stores every
 reading in your own database, and shows every system side by side — live power, today /
 month / year / lifetime energy, grid import & export, battery state — on a page you can open
 from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or locally.
 
+It is for the owner of solar systems on either cloud - one system or many - who wants them on
+one page, the readings kept in a database of their own, and nothing to pay for hosting; and
+for whoever looks after such a deployment, for whom [docs/handoff.md](docs/handoff.md) is
+written.
+
 **[See it running](https://muhammadmobi.github.io/SolarLens/)** — the real dashboard, on made-up
-data, with no server behind it.
+data, with no server behind it. **[Deploy your own](#quick-start-10-minutes)** on Cloudflare's
+free tier in about ten minutes.
 
 | | |
 |---|---|
-| ![The Overview: three systems, each with its energy flow, its figures and its day](docs/screenshots/overview.png) | ![Compare: every system per kWp of panels](docs/screenshots/compare.png) |
+| ![The Overview: three systems in two groups, each with its energy flow, its figures, and its day against what the sun allowed](docs/screenshots/overview.png) | ![Ask: the assistant analysing the week - what needs a look, and what to do](docs/screenshots/ask.png) |
+| ![Analysis: a day hour by hour, what was made against what the house used](docs/screenshots/analysis.png) | ![Compare: every system per kWp of panels](docs/screenshots/compare.png) |
 | ![The same Overview in the dark theme](docs/screenshots/overview-dark.png) | ![Devices: each datalogger and its week](docs/screenshots/devices.png) |
-| ![A system in full](docs/screenshots/system.png) | ![On a phone](docs/screenshots/phone.png) |
+| ![Historical Data: day by day, with the money saved and the CO₂ avoided](docs/screenshots/history.png) | ![TV mode, for a screen on a wall](docs/screenshots/tv.png) |
+| ![A system in full: its flow, the weather, money and carbon, the battery](docs/screenshots/system.png) | ![On a phone](docs/screenshots/phone.png) |
 
 <sub>Screenshots of the demo: three invented systems, made-up figures. `npm run screenshots` retakes them.</sub>
 
 - **Two vendors, one model.** SolisCloud and SolarMan are normalised into the same reading shape, so the UI never cares where a number came from.
-- **Your data, kept.** Every sample is stored (with the untouched vendor payload), so you get history the vendor apps don't let you keep or export.
+- **Your data, kept.** Every sample is stored - its figures for good, and the untouched vendor payload for a month - so you get history the vendor apps don't let you keep or export.
 - **Works with whatever access you have.** Official API keys are best; a browser-session fallback for SolarMan and a local relay agent for SolisCloud cover you while keys are pending.
 - **Honest about freshness.** Every panel shows *when* it was last updated. A system reads **offline** the moment either the vendor says so or nothing has arrived for 25 minutes — and an offline system's live figures are zero, not whatever it managed just before it dropped.
 - **Reads well in either theme.** A three-state toggle in the top-right corner follows your system, or forces light or dark; the choice is remembered and applied before first paint.
@@ -32,7 +44,7 @@ data, with no server behind it.
 - **Ask from Claude, or any AI app.** SolarLens is an MCP server at `/mcp`: approve an app once, on SolarLens's own page, and it can ask the same read-only questions - whether the relay laptops are on or off.
 - **It watches for slow decline.** Every Monday each system's output is set against the sunlight on its panels; a system making 8% less than it did - dirt, shade, a string down - is flagged and told like any alert, and a short report on the week goes out with the summary.
 - **Told where you already look.** The same alerts a phone gets, and a summary every Monday morning, posted to ntfy, Telegram, Discord or any webhook - each told once, with the tokens kept encrypted. No email.
-- **In Home Assistant.** Every figure as a sensor - power, energy, battery, online or not - with the configuration written for you, and a read-only token when the dashboard is private.
+- **In Home Assistant.** The configuration written for you - power, energy today and in total, and each battery's charge, as sensors - with every other figure, online or not and today's saving among them, there to add; and a read-only token when the dashboard is private.
 - **A site map, for the owner.** Where each system is, on OpenStreetMap - served to the signed-in owner and nobody else.
 - **Each system's day ends where its own sun sets.** Every plant's timezone is stored, and every figure, curve and daily row is cut at that plant's midnight rather than at the reader's — so two systems in different countries are each shown their own day, on the same screen.
 - **Fault history, with what the vendor advises.** Every alarm each vendor has on record, back to installation: when, how severe, the fault code, how long it lasted, and the vendor's own advice where it gives any. SolarMan's alert list says only when a fault was raised; its timeline, read for the newest alerts each hour, supplies when each one cleared, and the occurrences the list folds into one entry per day.
@@ -43,7 +55,7 @@ data, with no server behind it.
 - **Each system on its own, or all together.** Historical Data shows every system one after the other, or - with the switch at the top - just one, with its chart, table and CSV.
 - **History that goes back to the start.** Days, months or years. Months and years use each vendor's own totals, which reach back to the day the plant was installed, and every row says whether its figure is the vendor's or SolarLens's own and how many of its days SolarLens saw.
 - **Installable.** Add it to a phone's home screen and it opens in its own window. The worker behind that goes to the network first and falls back to a cache only when there is none, so an installed copy can never show a stale reading as a live one. It keeps only the page and its icons, never an answer from the API, which since 3.0 depends on who is asking.
-- **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
+- **Tested.** Unit tests for every normaliser and unit conversion, every route and who may call it, and every cron run held to the database's per-run limit; Playwright end-to-end tests for the dashboard on desktop and mobile; integration tests against the real Worker; and a picture of every view compared on each change.
 
 > Not affiliated with Ginlong/Solis or IGEN Tech/SolarMan. 
 
@@ -65,8 +77,8 @@ data, with no server behind it.
 12. [Project layout](#project-layout)
 13. [Troubleshooting](#troubleshooting)
 14. [Security and privacy](#security-and-privacy)
-15. [Changelog](CHANGELOG.md) · [Handover](docs/handoff.md)
-16. [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license)
+15. [Changelog](CHANGELOG.md) · [Handover](docs/handoff.md) · the guides: [Alerts elsewhere](docs/alerts-elsewhere.md) · [Home Assistant](docs/home-assistant.md) · [Ask SolarLens](docs/ask-solarlens.md) · [MCP server](docs/mcp.md) · [vendor API notes](docs/api-notes.md) · [against the vendor apps](docs/feature-gaps.md) · [the 3.0 roadmap](docs/roadmap.md)
+16. [Roadmap](#roadmap) · [Known limitations](#known-limitations) · [Contributing](#contributing) · [License](#license)
 
 ---
 
@@ -538,9 +550,11 @@ written - Monday from 08:00 on the first system's clock - or three hours after
 up at the next run. `GET /api/summary` serves the same.
 
 **Home Assistant.** Settings → *Home Assistant* writes a `configuration.yaml`
-block that reads `GET /api/sensors` every five minutes into sensors - power,
-energy today and lifetime, battery, whether each system is online, today's
-saving. When the dashboard is private it also makes Home Assistant a token: a
+block that reads `GET /api/sensors` every five minutes into sensors - the
+fleet's power and energy, each system's power and energy today, and each
+battery's charge; the same answer carries whether each system is online and
+today's saving, for sensors of your own. When the dashboard is private it also
+makes Home Assistant a token: a
 share link, sent as a bearer token, that can only read and is taken back under
 *Share to view*. Alerts can go the other way, to an automation's webhook. See
 [docs/home-assistant.md](docs/home-assistant.md).
@@ -752,7 +766,7 @@ npm run db:local                 # schema into the local D1
 npm run dev                      # http://localhost:8787
 ```
 
-`npm run seed:local` inserts a day of synthetic readings so the UI has something to draw without any credentials. With `npm run dev` running, trigger the cron handler by hand at `http://localhost:8787/__scheduled`, then inspect rows with:
+`npm run seed:local` inserts a day of synthetic readings so the UI has something to draw without any credentials. To run a cron by hand, start the Worker with `npm run dev -- --test-scheduled` - wrangler serves `/__scheduled` only then: `http://localhost:8787/__scheduled` runs the five-minute cron, and `http://localhost:8787/__scheduled?cron=7+*+*+*+*` the hourly one, since the Worker tells the two apart by the expression it is given. Then inspect rows with:
 
 ```bash
 npm run cf -- d1 execute solar-lens --local --command "SELECT * FROM readings ORDER BY ts DESC LIMIT 5"
@@ -1008,7 +1022,7 @@ or a SolisCloud login, so a fork gets the same checks.
 | **End-to-end tests** | Dashboard regressions on desktop and mobile Chrome. On failure the screenshots and traces are attached. |
 | **Build check** | A Worker that would not bundle, found by `wrangler deploy --dry-run`, which uploads nothing. |
 | **Integration (real Worker)** | What only workerd can show: the page from the assets binding with its security headers, cookies surviving the header rebuild, the password and passkeys in workerd's WebCrypto, and the deploy's own smoke test passing against a real Worker. Started by wrangler on a throwaway local database with made-up tokens - `npm run test:integration`. |
-| **Screenshot comparison** | A view that looks different from its recorded picture - a colour gone, a card collapsed - at a fixed moment of the demo. Pictures are recorded on Linux in CI (`tests/visual/__screenshots__/linux/`); a view without one gets one recorded and the run says so, and after that any difference fails, with before, after and the difference attached. |
+| **Screenshot comparison** | A view that looks different from its recorded picture - a colour gone, a card collapsed - at a fixed moment of the demo. Pictures are recorded on Linux in CI (`tests/visual/__screenshots__/linux/`); a view without one gets one recorded and the run says so, and after that any difference fails, with before, after and the difference attached. None is committed yet: until a run's **visual-baselines** artifact is added to that folder, each run records its own pictures and so compares nothing. |
 | **Lighthouse** | The demo scoring under 0.95 for accessibility or 0.9 for best practices (performance under 0.8 is a warning). The reports are attached to the run, not sent anywhere. |
 | **Privacy, attribution and headers** | The four guards below. |
 | **Relay scripts (Windows)** | PowerShell that will not parse, analyser errors, and a relay that hangs instead of refusing when its settings are missing. |
@@ -1138,7 +1152,8 @@ opens nothing.
 
 `.github/workflows/deploy.yml` runs only when **Checks** has passed on `main`,
 so a merge that combines two changes which each passed alone cannot reach the
-live dashboard. Then it stops: the `production` environment carries a required
+live dashboard. Started by hand from the Actions tab, it runs only from `main`
+too: another branch's code never reaches production without a merge. Then it stops: the `production` environment carries a required
 reviewer, and nothing deploys until someone approves the run on GitHub.
 
 1. **Remember the version serving right now**, which is what a rollback needs.
@@ -1212,7 +1227,7 @@ node scripts/ci/check-privacy.mjs     # the guard, over the working tree
 
 ## Data model
 
-Twenty-one tables in D1, made by the files in `migrations/`, applied in order:
+Twenty-eight tables in D1, made by the files in `migrations/`, applied in order:
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (the untouched vendor JSON, kept 30 days and then cleared by the hourly housekeeping, a day of readings at a time - the figures stay), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
@@ -1552,13 +1567,13 @@ is the quickest way to learn it. Three places to start:
 - **What it last saw**: `/api/health` answers with the recent poll log, the
   newest line per vendor feed, and every relay's state and login expiry. The
   dashboard's footer and Devices tab show the same.
-- **What is in the database**: run a query against production with wrangler's
-  own entry point, so the statement reaches it in one piece (`npm run cf` goes
-  through a shell, which splits a statement at its spaces). Any `npm run cf`
-  command first writes the filled-in config it needs:
+- **What is in the database**: run a query against production through the
+  wrapper, which hands wrangler the statement whole. (Until 3.0 it went through
+  a shell, which split a statement at its spaces, and this said to call
+  wrangler's own entry point instead.)
 
   ```bash
-  node node_modules/wrangler/bin/wrangler.js d1 execute solar-lens --remote --json --config .wrangler.local.jsonc --command "SELECT provider, ok, detail FROM poll_log ORDER BY ts DESC LIMIT 10"
+  npm run cf -- d1 execute solar-lens --remote --json --command "SELECT provider, ok, detail FROM poll_log ORDER BY ts DESC LIMIT 10"
   ```
 
   Use `--command`, not `--file`, for a query: against the remote database a
@@ -1757,6 +1772,23 @@ Third parties the dashboard talks to: the page loads its web font from Google, w
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed
 
+### Known limitations
+
+- **SolisCloud needs a relay, and a login each week.** Its portal cannot be read from a
+  server, so a laptop runs the relay, and a person logs in again every seven days. An
+  official SolisCloud API key would retire both: the adapter is written, and waits for one.
+- **The free plan's limits are real.** D1 allows 5 million rows read and 100,000 written a
+  day, 500 MB a database and fifty queries in one invocation. Every cron run is held to the
+  last by a test, readings keep their vendor payload for 30 days, the watcher warns at
+  400 MB, and a dashboard open to anyone can have the rate limit - or be made private.
+- **Read-only, by design.** Nothing here changes an inverter.
+- **No email, and no forecast.** Alerts go to phones, ntfy, Telegram, Discord or a webhook;
+  the weather is what happened, not what will.
+
+What is still missing, and what was left out on purpose, with the reasons:
+[docs/handoff.md](docs/handoff.md#14-what-is-still-missing) and
+[docs/feature-gaps.md](docs/feature-gaps.md).
+
 ## Contributing
 
 Issues and pull requests are welcome. Please:
@@ -1764,12 +1796,16 @@ Issues and pull requests are welcome. Please:
 - keep vendor field names and sign conventions documented in `docs/api-notes.md` when you add or change a mapping;
 - add or update a fixture and a unit test for any normaliser change, and an e2e assertion for anything a person can see;
 - never commit credentials, tokens, plant ids or portal captures — the `.gitignore` is set up for this, keep it that way;
+- give a new route that changes anything its place in `tests/unit/access.test.ts`, and a new query in a cron run or an ingest route its count in `tests/unit/budgets.test.ts` - both fail until you do;
 - run `npm run typecheck && npm test` before opening a PR.
 
-The same suites run on the pull request itself, along with the privacy,
+The same suites run on the pull request itself, along with integration tests
+against the real Worker, a screenshot comparison, Lighthouse, the privacy,
 attribution, header and batch-file guards, vulnerability scanning and a Windows
-job for the relay scripts. All twelve must pass before a pull request can merge;
-[what runs on every pull request](#what-runs-on-every-pull-request) says what
+job for the relay scripts. The repository's ruleset requires twelve of them -
+all but the integration tests, the screenshot comparison and Lighthouse - and a
+review; the owner's own pull requests are approved only once all fifteen pass.
+[What runs on every pull request](#what-runs-on-every-pull-request) says what
 each one refuses. Two are worth knowing before you write the commit: an
 identifier in **any** commit of the branch fails the privacy guard even if a
 later commit removes it, and every commit must be authored by the repository's

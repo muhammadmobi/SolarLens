@@ -154,8 +154,8 @@ export const PASSWORD_MIN = 12;
 
 /**
  * A password's stored form: PBKDF2-SHA256 with a random salt, then an HMAC of
- * that under a key derived from API_TOKEN (the "pepper"). Returned as
- * "pbkdf2$<rounds>$<salt>$<hash>".
+ * that under a key derived from the key secret (the "pepper"; keySecret above).
+ * Returned as "pbkdf2$<rounds>$<salt>$<hash>".
  */
 export async function hashPassword(password: string, pepper: string, rounds = PASSWORD_ROUNDS): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));

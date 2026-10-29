@@ -7,7 +7,7 @@
 # Without this line every `npm run dev|deploy|db:remote|cf` fails.
 CF_D1_DATABASE_ID=
 
-# --- SolisCloud: Service -> API Management -> Activate Now ---
+# --- SolisCloud: avatar -> Basic Settings -> API Management -> Activate Now ---
 SOLIS_KEY_ID=
 SOLIS_KEY_SECRET=
 
@@ -33,7 +33,8 @@ SOLARMAN_WEB_ACCESS_TOKEN=
 # Find ids in the portal URL of a plant page (SolisCloud) or the station page (SolarMan).
 INCLUDE_PLANTS=
 
-# --- Shared secret gating /api/* and the local agent's /api/ingest ---
+# --- The owner's key (API_TOKEN: the sign-in setup code, and the gate on every
+# write) and the relays' key (INGEST_TOKEN: the /api/ingest routes) ---
 API_TOKEN=
 INGEST_TOKEN=
 

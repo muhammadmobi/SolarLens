@@ -25,7 +25,7 @@ export const HELP: readonly HelpEntry[] = [
   {
     topic: 'Signing in, and passkeys',
     words: ['sign', 'signin', 'login', 'log', 'password', 'passkey', 'fingerprint', 'face', 'setup', 'code', 'forgot', 'locked'],
-    answer: 'Settings (the gear) → Set up sign-in, with the setup code (the API_TOKEN SolarLens was deployed with) and a password of at least 12 characters. Add a passkey under Passkeys on each phone or computer. A device stays signed in: you sign in once per device. Forgot your password? on the sign-in page takes the setup code again.',
+    answer: 'Settings (the gear) → Set up sign-in, with the setup code (the API_TOKEN SolarLens was deployed with) and a password of at least 12 characters. Add a passkey under Passkeys on each phone or computer: it signs in with a fingerprint, a face or the device PIN. A device stays signed in: you sign in once per device. Forgot your password? on the sign-in page takes the setup code again.',
     where: '#/settings',
   },
   {
@@ -55,7 +55,7 @@ export const HELP: readonly HelpEntry[] = [
   {
     topic: 'The weekly summary',
     words: ['weekly', 'summary', 'monday', 'week', 'digest', 'email'],
-    answer: 'Every Monday from 08:00, the places under Settings → Alerts elsewhere that take the weekly summary get last week against the week before, each system, the savings and the faults, with the weekly report. Send last week\'s summary now sends one straight away. There is no email.',
+    answer: 'Every Monday morning, once the week\'s report is written (from 08:00), the places under Settings → Alerts elsewhere that take the weekly summary get last week against the week before, each system, the savings and the faults, with the weekly report. Send last week\'s summary now sends one straight away. There is no email.',
     where: '#/settings',
   },
   {

@@ -2,7 +2,7 @@
   "name": "solar-lens",
   "version": "2.11.0",
   "private": true,
-  "description": "One screen for both inverters: SolisCloud + SolarMan, unified.",
+  "description": "One screen for all your inverters: SolisCloud + SolarMan, unified.",
   "type": "module",
   "engines": {
     "node": ">=22.13"

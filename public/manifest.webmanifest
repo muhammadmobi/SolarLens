@@ -1,7 +1,7 @@
 {
   "name": "SolarLens",
   "short_name": "SolarLens",
-  "description": "Two solar systems, two vendors, one screen.",
+  "description": "Every solar system, both vendors, one screen.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

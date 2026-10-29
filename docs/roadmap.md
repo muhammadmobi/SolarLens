@@ -32,6 +32,12 @@ to make, and can take back.
 
 ## The phases
 
+Each phase's *As built* is what it built at the time, and a later phase can
+change it: phase 13 grew the six tools of phases 11 and 12 to sixteen, and let
+anyone ask, with the model for someone signed in; phase 14 moved every key from
+`API_TOKEN` to `SECRET_KEY`, and the weekly work to an hourly cron whose
+summary waits for the week's report.
+
 ### 1. Gap 5, and test data that cannot drift
 
 The dashboard reads each vendor's raw payload, which the public view has never
