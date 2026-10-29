@@ -224,6 +224,9 @@ const kw = (w: number) => (w >= 1000 ? `${(w / 1000).toFixed(1)} kW` : `${Math.r
  * - **A vendor not answering.** Every poll failed since the last one that
  *   worked, at least three of them, across at least fifteen minutes - one
  *   failure is weather, a run of them is usually a token.
+ * - **Slowly making less.** The weekly health check (./agents) found a system
+ *   making 8% or more less for its sunlight than it did: told once, and again
+ *   only if it recovers and falls back.
  */
 export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEvent[]> {
   const out: PushEvent[] = [];
@@ -325,6 +328,21 @@ export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEv
       title: `${providerName(r.provider)} is not answering`,
       body: `Every read for ${Math.max(1, Math.round((now - r.since) / 60))} min has failed: ${String(r.detail ?? 'no detail given').slice(0, 140)}`,
     });
+  }
+
+  // --- a system slowly making less for its sunlight (./agents) ------------
+  // Its newest health check, while it is recent: a check runs every Monday,
+  // so eight days keeps a standing decline standing between two of them.
+  const { results: declines } = await db
+    .prepare(
+      `SELECT a.inverter_id, a.body, i.name FROM agent_reports a JOIN inverters i ON i.id = a.inverter_id
+       WHERE a.kind = 'health' AND a.flagged = 1 AND a.created_at >= ?1
+         AND a.week = (SELECT MAX(week) FROM agent_reports b WHERE b.kind = 'health' AND b.inverter_id = a.inverter_id)`,
+    )
+    .bind(now - 8 * 86400)
+    .all<{ inverter_id: string; body: string; name: string }>();
+  for (const d of declines) {
+    out.push({ key: `decline:${d.inverter_id}`, title: `${d.name}: slowly making less`, body: d.body });
   }
 
   return out;

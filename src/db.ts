@@ -51,6 +51,15 @@ export interface Env {
   INGEST_TOKEN?: string;
   /** Web Push signing key, a private P-256 JWK. Unset = no notifications to a closed browser. */
   VAPID_KEY?: string;
+  /**
+   * Workers AI, for Ask SolarLens and the agents (src/ai.ts): the `ai` binding
+   * in wrangler.jsonc. Unset = those answer from the figures alone.
+   */
+  AI?: { run(model: string, inputs: Record<string, unknown>): Promise<unknown> };
+  /** The model, when not the default (src/ai.ts DEFAULT_MODEL). */
+  AI_MODEL?: string;
+  /** Model calls a day, every feature together; 100 unless set. */
+  AI_DAILY_CALLS?: string;
 }
 
 /** The current time in epoch seconds, the unit every table here uses. */

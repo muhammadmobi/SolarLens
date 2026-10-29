@@ -195,6 +195,19 @@ which could write and could not be taken back.
   watches for slow decline.
 - All of them share one layer of read-only tools.
 
+**As built:** six tools in `src/tools.ts` - status now, energy, systems compared,
+faults, a day explained, the performance trend - served as they are at
+`/api/tools`, so phase 12 has them ready. The model (Llama 3.3 70B by default)
+chooses a tool and words its result; a sentence with a number the figures do
+not hold is replaced by the tool's own, and every answer shows its figures. A
+daily cap of model calls, every feature together, keeps inside the free
+allowance. The health check is the figures alone, never the model: it flags a
+fall of 8% or more in output for the sunlight, and the flag is an alert told
+once. The weekly report is the one agent the model writes, held to its figures.
+"Why was this day low?" is the day_report tool, from a button on Historical
+Data, and works without a model. Asking needs a sign-in, since it spends the
+day's calls; the rest is for every reader.
+
 ### 12. An MCP server
 
 The same read-only tools, offered at `/mcp` so AI apps outside SolarLens can ask

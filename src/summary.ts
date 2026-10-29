@@ -267,7 +267,21 @@ export async function sendWeekly(env: Env, now = nowSec()): Promise<boolean> {
     .bind(SENT_KEY, String(slot), slot)
     .run();
   if (!claimed.meta.changes) return false;
-  const msg = summaryMessage(await buildSummary(env.DB, now));
+  const msg = await withReport(env.DB, summaryMessage(await buildSummary(env.DB, now)), slot);
   for (const row of rows) await deliver(env, row, msg, now);
   return true;
+}
+
+/**
+ * The summary with the agents' note on the same week (./agents weeklyReport)
+ * added, when it has been written - which, at the same Monday run, it has.
+ */
+export async function withReport(db: D1Database, msg: Message, slot: number): Promise<Message> {
+  const report = await db.prepare("SELECT body FROM agent_reports WHERE kind = 'weekly' AND week = ?1").bind(slot).first<{ body: string }>();
+  return report ? { ...msg, body: `${msg.body}\n\nIn short: ${report.body}` } : msg;
+}
+
+/** The week a summary sent now belongs to, on the first system's clock. */
+export async function currentSlot(db: D1Database, now = nowSec()): Promise<number> {
+  return weekSlot(now, await zoneOf(db));
 }

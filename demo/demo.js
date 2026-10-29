@@ -265,7 +265,39 @@
       { ts: now - 110, provider: 'solarman', ok: 1, detail: 'plants=2 inverters=2 new=2' },
     ];
 
+    // The agents' week, from the same history: last week against the one
+    // before, and Garage slowly making less for its sunlight.
+    const weekKwh = (from, to) => r1(rows.filter((r) => {
+      const n = Math.round((day - Date.parse(`${r.day}T00:00:00Z`) / 1000 - tz) / 86400);
+      return n >= from && n <= to;
+    }).reduce((a, r) => a + r.yield_kwh, 0));
+    const lastWeek = weekKwh(1, 7);
+    const weekBefore = weekKwh(8, 14);
+    const change = Math.round((lastWeek / weekBefore - 1) * 100);
+    const weekOf = plantDate(day - 7 * 86400, tz).toISOString().slice(0, 10);
+    const weekWords = new Date(`${weekOf}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    const ratios = (base, fall) => Array.from({ length: 12 }, (_, w) => Math.round((base - (w >= 8 ? fall : 0) + 0.01 * Math.sin(w)) * 100) / 100);
+    const health = SYSTEMS.map((sys, i) => {
+      const weekly = ratios([0.82, 0.79, 0.8][i], i === 2 ? 0.1 : 0);
+      const falling = i === 2;
+      return {
+        kind: 'health', week_of: weekOf, title: `${sys.name}: health`, worded: 'solarlens', flagged: falling, created_at: now - 3 * 3600,
+        system: sys.id, name: sys.name, data: { verdict: falling ? 'declining' : 'steady', change_pct: falling ? -12 : 0, recent: weekly[11], earlier: weekly[3], weekly, mondays: [] },
+        body: falling
+          ? `${sys.name}: for its sunlight it is making 12% less (performance ratio ${weekly[11]} over the last 4 weeks, against ${weekly[3]} in the 8 before) - worth a look for dirt, shade or a string down.`
+          : `${sys.name}: steady (performance ratio ${weekly[11]} over the last 4 weeks, against ${weekly[3]} in the 8 before).`,
+      };
+    });
+
     return {
+      '/api/ask/status': { available: true, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', used: 4, limit: 100, can_ask: true },
+      '/api/agents': {
+        weekly: {
+          kind: 'weekly', week_of: weekOf, title: `Week of ${weekWords}`, worded: 'solarlens', flagged: false, created_at: now - 3 * 3600,
+          body: `A made-up week: ${lastWeek} kWh, ${Math.abs(change)}% ${change >= 0 ? 'more' : 'less'} than the week before. ${health[2].body}`,
+        },
+        health,
+      },
       '/api/latest': { now, inverters },
       '/api/series': { from: day, to: now, points },
       '/api/devices': { now, devices },
@@ -301,7 +333,43 @@
     };
   }
 
-  const api = { sample, SYSTEMS };
+  /**
+   * What Ask SolarLens answers in the demo, where there is no model: the last
+   * seven days from the sample's own history, or - for "Why?" - that day
+   * against the fourteen before it. Said to be the demo's, every time.
+   */
+  function demoAsk(body, now) {
+    const data = sample(now);
+    const rows = data['/api/history'].rows;
+    const period = (days) => ({ from: days[days.length - 1], to: days[0], label: `${days[days.length - 1]} to ${days[0]}` });
+    const reply = (question, tool, answer, result) => ({ question, tool, args: body.args ?? {}, answer, worded: 'solarlens', used: 4, limit: 100, model: null, result });
+    const freshness = { newest: now - 60, offline: [] };
+    if (body.tool === 'day_report') {
+      const sys = SYSTEMS.find((x) => x.name === body.args?.system) ?? SYSTEMS[0];
+      const mine = rows.filter((r) => r.inverter_id === sys.id);
+      const at = mine.findIndex((r) => r.day === body.args?.date);
+      const theDay = mine[at] ?? mine[1];
+      const before = mine.slice(at + 1, at + 15).map((r) => r.yield_kwh).sort((a, b) => a - b);
+      const usual = before.length ? before[Math.floor(before.length / 2)] : theDay.yield_kwh;
+      const share = Math.round((theDay.yield_kwh / usual) * 100);
+      const said = `In the demo: ${sys.name} made ${theDay.yield_kwh} kWh on ${theDay.day}, ${share}% of a usual day (${usual} kWh): less sun, with a cloudy afternoon.`;
+      return reply(null, 'day_report', said, {
+        tool: 'day_report', title: `${theDay.day}, explained`, period: { from: theDay.day, to: theDay.day, label: theDay.day },
+        columns: ['System', 'Made (kWh)', 'Usual day (kWh)', 'Of usual (%)'], rows: [[sys.name, theDay.yield_kwh, usual, share]],
+        facts: { made_kwh: theDay.yield_kwh, usual_kwh: usual, of_usual_pct: share }, notes: ['A demo answer, from made-up figures.'], summary: said, freshness,
+      });
+    }
+    const days = [...new Set(rows.map((r) => r.day))].sort().reverse().slice(1, 8);
+    const perDay = days.map((d) => [d, r1(rows.filter((r) => r.day === d).reduce((a, r) => a + r.yield_kwh, 0))]);
+    const total = r1(perDay.reduce((a, [, v]) => a + v, 0));
+    const said = `In the demo, every question gets this answer: the three made-up systems made ${total} kWh from ${days[6]} to ${days[0]}. Deployed, a model chooses the figures a question needs.`;
+    return reply(String(body.question ?? ''), 'energy', said, {
+      tool: 'energy', title: 'Energy per day', period: period(days), columns: ['Day', 'Made (kWh)'], rows: perDay,
+      facts: { total_made_kwh: total }, notes: ['A demo answer, from made-up figures.'], summary: said, freshness,
+    });
+  }
+
+  const api = { sample, SYSTEMS, demoAsk };
   if (typeof globalThis !== 'undefined') globalThis.SolarLensDemo = api;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
@@ -328,6 +396,11 @@
       // The tariff and groups forms expect what was kept back; they get the demo's own, unchanged.
       if (path === '/api/settings/tariff' || path === '/api/settings/groups') return json(sample(Math.floor(Date.now() / 1000))[path]);
       if (path === '/api/settings/summary') return json({ sent: 1, of: 1 });
+      if (path === '/api/ask') {
+        let body = {};
+        try { body = JSON.parse(init.body || (typeof input === 'object' && input.body) || '{}'); } catch { body = {}; }
+        return json(demoAsk(body, Math.floor(Date.now() / 1000)));
+      }
       return json({ ok: true, required: false, signedOut: 1, id: 'demo', url: `${location.origin}${location.pathname}#/`, password: true });
     }
     const answers = sample(Math.floor(Date.now() / 1000));

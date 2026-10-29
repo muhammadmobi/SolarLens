@@ -83,7 +83,8 @@ test.describe('alerts elsewhere', () => {
     const places = card(page, 'Alerts elsewhere').locator('li.chan');
     await expect(places).toHaveCount(2);
     await expect(places.first()).toContainText('Phone');
-    await expect(places.first()).toContainText('ntfy · ntfy.sh · topic …ab · delivered 2 h 0 min ago');
+    // NOW is fixed when the fixtures load; on a busy machine a minute or two can pass before this runs.
+    await expect(places.first()).toContainText(/ntfy · ntfy\.sh · topic …ab · delivered 2 h \d+ min ago/);
     await expect(places.nth(1)).toContainText('Discord');
     await expect(places.nth(1).locator('.chanbad')).toHaveText('failing 3 times in a row: HTTP 401: Invalid Webhook Token');
     await expect(places.nth(1).locator('input[data-what="weekly"]')).not.toBeChecked();

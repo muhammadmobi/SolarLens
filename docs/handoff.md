@@ -147,6 +147,10 @@ stays open for monitoring.
 | `src/relays.ts` | Validates a relay's report on itself into a narrow shape. |
 | `src/channels.ts` | Alerts elsewhere: ntfy, Telegram, Discord and webhooks. What the owner types, checked; the secret sealed with a key derived from `API_TOKEN`; the request each service expects; delivery and its record. A channel taking alerts is one more listener to `announce()` in `src/push.ts`. |
 | `src/summary.ts` | The weekly summary: the last seven days from the daily rows, the tariff and the alarms, in words, and `sendWeekly` - Monday 08:00 on the first system's clock, claimed in one conditional write so it goes once. |
+| `src/tools.ts` | The read-only tools every question goes through - Ask SolarLens, the agents, and the MCP server of phase 12: status now, energy, systems compared, faults, a day explained, the performance trend. Arguments checked before anything runs; every figure computed and labelled here. |
+| `src/ai.ts` | The one place that talks to Workers AI: the model, the daily cap (per UTC day, in kv), JSON replies. |
+| `src/ask.ts` | Ask SolarLens: the model chooses a tool, the tool computes, the model words it, and `numbersAgree` holds the words to the figures. |
+| `src/agents.ts` | The weekly health check (flags a system slowly making less; the alert is in `src/push.ts`) and the weekly report, run once a week from the cron. |
 | `src/sensors.ts` | `/api/sensors`, what Home Assistant reads: flat, fixed units, the page's own offline rule. |
 | `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. |
 | `src/providers/types.ts` | The `Provider` interface every adapter implements, plus shared shapes. |
@@ -184,6 +188,7 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC. A logger's `logger` (link, signal bars, uptime, make date) is public |
 | `device_network` | datalogger | Its operator and cell, or MAC address. Owner only, never served - and a table of its own, because a Worker rolled back to 2.10 would serve any new column on `devices` |
 | `plant_location` | system | Its position. Owner-only; sent to Open-Meteo only rounded to about a kilometre |
+| `agent_reports` | report a week | The weekly report and each system's health check; `flagged` when a system is slowly making less, which the alerts read. Kept a year |
 | `channels` | place alerts are posted to | ntfy, Telegram, Discord or a webhook. The token or address in `secret`, AES-GCM encrypted under a key derived from `API_TOKEN`; only a `label` is ever served, and only to the owner. At most five |
 | `app_settings` | setting | The owner's tariff and groups, as JSON; read by anyone who may read the dashboard, written by the owner |
 | `weather_hourly` | system and hour | Sunlight, temperature and cloud from Open-Meteo; kept 400 days |
@@ -193,7 +198,7 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `poll_log` | poll attempt | The health endpoint and the footer read this; pruned after a week |
 | `tokens` | provider | A vendor's cached bearer and refresh tokens, so a token outlives one cron run |
 | `relays` | relay computer | Random id, state, login expiry, last seen |
-| `kv` | scheduled job | "Is this hourly job due yet", the week the last summary was sent for (`summary:week`), and which notification events have been told |
+| `kv` | scheduled job | "Is this hourly job due yet", the week the last summary was sent for (`summary:week`), the week the agents last ran (`agents:week`), today's model calls (`ai:calls:<date>`), and which notification events have been told |
 | `push_subscriptions` | device signed up for notifications | The push endpoint is the secret and is never served; at most ten |
 | `push_messages` | notification text | What a woken device shows, for every device or one; kept a week |
 

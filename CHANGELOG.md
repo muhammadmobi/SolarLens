@@ -18,6 +18,25 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **Ask SolarLens.** An Ask tab for questions in plain words - "Which month
+  produced the most this year?", "How much did I export last week?", "Why was
+  yesterday low?". A model on Workers AI chooses which of six read-only tools
+  answers it and fills in their arguments, which are checked like any input;
+  the Worker computes every figure; the model words them, and a sentence
+  stating a number the figures do not hold is replaced by the tool's own. Each
+  answer shows its figures, period, freshness and who worded it. For anyone
+  signed in; a daily cap (`AI_DAILY_CALLS`, 100) keeps inside the free
+  allowance. `POST /api/ask`, `GET /api/ask/status`, and `GET /api/tools`,
+  `/api/tools/<name>`, which run a tool with no model.
+
+- **The agents.** A weekly health check sets each system's output against the
+  sunlight on its panels over twelve weeks and flags a fall of 8% or more, which
+  becomes an alert told once. A weekly report, written by the model from the
+  figures and held to them, goes out with the weekly summary. And "Why?" beside
+  a low day on Historical Data explains it: less sun, a gap in the readings, a
+  fault, or a system making less than its sunlight allowed. Migration 0019;
+  `GET /api/agents`. See docs/ask-solarlens.md.
+
 - **Alerts elsewhere: ntfy, Telegram, Discord and webhooks.** Settings has a
   card for up to five places that get the same alerts as a phone - told once
   each, one post a run however many - and a summary every Monday. Each is

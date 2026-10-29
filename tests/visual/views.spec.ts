@@ -29,6 +29,7 @@ const VIEWS: [string, string, string, { dark?: boolean; width?: number; height?:
   ['overview-dark', '#/', '.ovsys', { dark: true }],
   ['power', '#/power', '#legend .legitem'],
   ['analysis', '#/analysis', '#anchart'],
+  ['ask', '#/ask', '.healthrow'],
   ['compare', '#/compare', 'table.cmp'],
   ['history', '#/history', '#view table'],
   ['alerts', '#/alerts', 'details.syssec'],

@@ -160,6 +160,22 @@ describe('signing in, in workerd', () => {
       .toEqual({ channels: [], max: 5, ready: true });
     expect((await fetch(url('/api/settings/channels'), { headers: ha })).status).toBe(401);
   });
+
+  it('asks without a model: a question is refused, and a tool asked for directly answers from the figures', async () => {
+    // This suite runs without the AI binding, as src/ask.ts must when there is none.
+    const owner = { 'content-type': 'application/json', cookie: b.header() };
+    expect(await (await fetch(url('/api/ask/status'), { headers: owner })).json()).toMatchObject({ available: false, model: null, can_ask: true });
+    const question = await fetch(url('/api/ask'), { method: 'POST', headers: owner, body: JSON.stringify({ question: 'How much today?' }) });
+    expect(question.status).toBe(503);
+    const direct = await fetch(url('/api/ask'), { method: 'POST', headers: owner, body: JSON.stringify({ tool: 'status_now' }) });
+    expect(direct.status).toBe(200);
+    const answer = (await direct.json()) as { tool: string; worded: string; result: { facts: Record<string, unknown> } };
+    expect(answer).toMatchObject({ tool: 'status_now', worded: 'solarlens' });
+    expect(answer.result.facts.systems).toBe(2);
+    const tools = (await (await fetch(url('/api/tools'), { headers: owner })).json()) as { tools: unknown[] };
+    expect(tools.tools).toHaveLength(6);
+    expect((await fetch(url('/api/ask'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"tool":"status_now"}' })).status).toBe(401);
+  });
 });
 
 describe("the deploy's own smoke test", () => {

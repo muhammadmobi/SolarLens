@@ -18,7 +18,9 @@
  *   tariff, the systems' groups or the places alerts are posted to
  *   (/api/settings/*), or forcing a poll.
  * - Home Assistant, reading /api/sensors on a timer - with a share link as a
- *   bearer token when the dashboard is private. Those need the owner signed in, or API_TOKEN as a header - except
+ *   bearer token when the dashboard is private.
+ * - Ask SolarLens (/api/ask), for anyone signed in - the owner, or someone
+ *   with a share link - since each question spends the day's model calls. Those need the owner signed in, or API_TOKEN as a header - except
  *   turning a phone's notifications off, which needs only that phone's own
  *   push address (see the middleware below).
  * - The sign-in routes under /auth (./auth/routes), and share links at /s/.
@@ -41,7 +43,11 @@ import { locationOf, locations, refreshWeather, upsertLocation, weatherSince } f
 import { expectedToday } from './expected';
 import { getGroups, getTariff, parseGroups, parseTariff, setGroups, setTariff } from './settings';
 import { MAX_CHANNELS, addChannel, channelsFor, deliver, getChannel, listChannels, parseChannel, publicChannel, removeChannel, testMessage, updateChannel } from './channels';
-import { buildSummary, sendWeekly, summaryMessage } from './summary';
+import { buildSummary, currentSlot, sendWeekly, summaryMessage, withReport } from './summary';
+import { aiModel, callsUsed, dailyCalls, hasAi } from './ai';
+import { ask } from './ask';
+import { latestReports, runWeeklyAgents } from './agents';
+import { TOOLS, jsonSchemaOf, runTool } from './tools';
 import { sensors } from './sensors';
 import { daily, deviceNetworks, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
@@ -196,6 +202,8 @@ app.get('/s/:link', openShareLink);
  * device that is signed up, and the service worker asking has no session to
  * show once its hour is up.
  */
+/** The writes a share link's viewer may make, besides reading: asking a question. */
+const VIEWER_WRITES = new Set(['/api/ask']);
 const ALWAYS_OPEN = new Set(['/api/status', '/api/push/key', '/api/push/recent', '/api/push/unsubscribe']);
 app.use('/api/*', async (c, next) => {
   if (c.req.path === '/api/ingest' || c.req.path.startsWith('/api/ingest/')) return next();
@@ -217,6 +225,9 @@ app.use('/api/*', async (c, next) => {
     return next();
   }
   if (caller.role === 'owner') return next();
+  // Asking reads and spends only the day's model calls, which a viewer may too;
+  // anyone else is asked to sign in, as a read would be.
+  if (VIEWER_WRITES.has(c.req.path)) return caller.role === 'viewer' ? next() : c.json({ error: 'signin' }, 401);
   return c.json({ error: 'unauthorized' }, 401);
 });
 
@@ -443,6 +454,54 @@ app.get('/api/summary', async (c) => {
   return c.json({ ...s, message: { title, body } });
 });
 
+// ---------- Ask SolarLens, the tools and the agents (./ask, ./tools, ./agents) ----------
+
+/** Whether asking works here, for whom, and how much of today's allowance is used. */
+app.get('/api/ask/status', async (c) => {
+  c.header('Cache-Control', CACHE);
+  return c.json({
+    available: hasAi(c.env), model: hasAi(c.env) ? aiModel(c.env) : null,
+    used: await callsUsed(c.env.DB), limit: dailyCalls(c.env), can_ask: !!c.get('caller').role,
+  });
+});
+
+/**
+ * A question - `{question}` - or a tool asked for directly - `{tool, args}`.
+ * For anyone signed in: the owner, or someone with a share link. Not an
+ * anonymous caller, even on an open dashboard: each question spends model
+ * calls from the day's allowance, and a stranger could spend them all.
+ */
+app.post('/api/ask', async (c) => {
+  if (!c.get('caller').role) return c.json({ error: 'signin' }, 401);
+  const out = await ask(c.env, await c.req.json().catch(() => null));
+  c.header('Cache-Control', 'no-store');
+  return c.json(out.body, out.status as 200);
+});
+
+/** The read-only tools: what each answers and the arguments it takes, as JSON Schema. */
+app.get('/api/tools', (c) => {
+  c.header('Cache-Control', CACHE);
+  return c.json({ tools: TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: jsonSchemaOf(t) })) });
+});
+
+/**
+ * One tool, run with its arguments as the query string, answered in its own
+ * words: no model, and so a read like any other - open, or with sign-in
+ * required, for the owner and a share link.
+ */
+app.get('/api/tools/:name', async (c) => {
+  const out = await runTool(c.env.DB, c.req.param('name'), c.req.query());
+  c.header('Cache-Control', CACHE);
+  if ('error' in out) return c.json({ error: out.error }, TOOLS.some((t) => t.name === c.req.param('name')) ? 400 : 404);
+  return c.json(out);
+});
+
+/** The newest weekly report, and each system's newest health check. */
+app.get('/api/agents', async (c) => {
+  c.header('Cache-Control', CACHE);
+  return c.json(await latestReports(c.env.DB));
+});
+
 // ---------- the places alerts are posted to (./channels) ----------
 
 /** Channels need API_TOKEN: what posting to them needs is sealed with a key derived from it. */
@@ -517,7 +576,7 @@ app.post('/api/settings/summary', async (c) => {
   const rows = await channelsFor(c.env.DB, 'weekly');
   if (!rows.length) return c.json({ error: 'No channel takes the weekly summary.' }, 409);
   const now = nowSec();
-  const msg = summaryMessage(await buildSummary(c.env.DB, now));
+  const msg = await withReport(c.env.DB, summaryMessage(await buildSummary(c.env.DB, now)), await currentSlot(c.env.DB, now));
   let sent = 0;
   for (const row of rows) if ((await deliver(c.env, row, msg, now)).ok) sent++;
   return c.json({ sent, of: rows.length, title: msg.title, body: msg.body });
@@ -929,7 +988,13 @@ export default {
       } catch (e) {
         console.error('push:', String(e));
       }
-      // The weekly summary, on Monday mornings; see ./summary.
+      // The week's agents, then the weekly summary that carries their report,
+      // on Monday mornings; see ./agents and ./summary.
+      try {
+        await runWeeklyAgents(env);
+      } catch (e) {
+        console.error('agents:', String(e));
+      }
       try {
         await sendWeekly(env);
       } catch (e) {
