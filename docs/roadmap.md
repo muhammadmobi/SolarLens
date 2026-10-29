@@ -172,6 +172,17 @@ sorted list and a system added later could move it.
 Webhooks to ntfy, Telegram or Discord, a weekly summary, and a Home Assistant
 integration. No email.
 
+**As built:** four kinds of place - ntfy, Telegram, Discord, and any webhook,
+which is also how alerts reach Home Assistant - at most five, set up in
+Settings. They get the same events as Web Push through the same told-once
+state, so a channel is just another listener. Their secrets are encrypted with
+a key derived from `API_TOKEN` rather than kept as Worker secrets, so the owner
+can add one from a phone; the price is that rotating `API_TOKEN` means adding
+them again. The weekly summary goes Monday 08:00 on the first system's clock.
+Home Assistant reads `/api/sensors` with its REST integration; on a private
+dashboard it uses a share link as a bearer token, rather than `API_TOKEN`,
+which could write and could not be taken back.
+
 ### 11. Ask SolarLens, and agents, on Workers AI
 
 - **Ask SolarLens**: a question box in the app. "Which month produced the most

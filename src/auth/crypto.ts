@@ -2,14 +2,17 @@
  * The small pieces of cryptography the owner login is built from.
  *
  * Everything here is WebCrypto, which the Workers runtime provides natively,
- * so the login adds no dependency. Three jobs:
+ * so the login adds no dependency. Four jobs:
  *
  * - random tokens, and their SHA-256 hashes: a refresh token, a share link and
  *   a WebAuthn challenge are random, and only a hash of a token is ever stored,
  *   so a copy of the database signs nobody in;
  * - signing: the one-hour session cookie is an HMAC over who it is for and when
  *   it ends, keyed from API_TOKEN, so it cannot be forged or stretched;
- * - the password: PBKDF2, then an HMAC with a key the database never sees.
+ * - the password: PBKDF2, then an HMAC with a key the database never sees;
+ * - sealing: what the Worker must keep and read back - a channel's bot token
+ *   or webhook address (../channels) - is encrypted with AES-GCM under a key
+ *   derived from API_TOKEN, so a copy of the database holds nothing usable.
  */
 
 const enc = new TextEncoder();
@@ -63,6 +66,42 @@ async function hmacKey(secret: string, label: string): Promise<CryptoKey> {
   const base = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const derived = await crypto.subtle.sign('HMAC', base, enc.encode(label));
   return crypto.subtle.importKey('raw', derived, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+}
+
+/**
+ * An AES-256-GCM key, derived from a secret and a label the same way: the
+ * HMAC of the label under the secret is 32 bytes, which is the key.
+ */
+async function aesKey(secret: string, label: string): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const derived = await crypto.subtle.sign('HMAC', base, enc.encode(label));
+  return crypto.subtle.importKey('raw', derived, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+/**
+ * Encrypt text under a key derived from `secret` for `label`, as
+ * "v1.<iv>.<ciphertext>" in base64url. A fresh random IV every time, so the
+ * same text sealed twice never looks the same.
+ */
+export async function seal(secret: string, label: string, text: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const box = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(secret, label), enc.encode(text));
+  return `v1.${b64url(iv)}.${b64url(box)}`;
+}
+
+/**
+ * The text seal() sealed, or null: sealed under another secret (API_TOKEN has
+ * changed since), for another label, or altered. GCM's tag catches all three.
+ */
+export async function unseal(secret: string, label: string, sealed: string): Promise<string | null> {
+  const [v, ivText, boxText] = sealed.split('.');
+  if (v !== 'v1' || !ivText || !boxText) return null;
+  try {
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64url(ivText) }, await aesKey(secret, label), fromB64url(boxText));
+    return new TextDecoder().decode(plain);
+  } catch {
+    return null;
+  }
 }
 
 /** HMAC-SHA256 of text under a key derived from `secret` for `label`, as base64url. */

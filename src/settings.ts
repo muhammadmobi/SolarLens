@@ -120,3 +120,25 @@ export async function setTariff(db: D1Database, tariff: Tariff | null, at = nowS
     .bind(JSON.stringify(tariff), at)
     .run();
 }
+
+/**
+ * What an amount of energy was worth, by the owner's tariff - the Worker's copy
+ * of the page's valueOf (public/index.html), for the weekly summary and the
+ * Home Assistant sensors, and held to the same rules: a kWh used at home is
+ * worth one bought; one exported earns the export price, or with net metering
+ * the import price; every kWh made avoids the grid's CO2 for it. `assumed`
+ * marks a figure worked out without knowing the export, which counts every
+ * kWh at the import price - an upper bound.
+ */
+export function valueOf(madeKwh: number | null | undefined, exportKwh: number | null | undefined, t: Tariff | null):
+  { money: number; co2: number; assumed: boolean } | null {
+  if (!t || madeKwh == null || !Number.isFinite(madeKwh)) return null;
+  const made = Math.max(0, madeKwh);
+  const known = exportKwh != null && Number.isFinite(exportKwh);
+  const sold = t.netMetering || !known ? 0 : Math.min(made, Math.max(0, exportKwh));
+  return {
+    money: (made - sold) * t.importPrice + sold * t.exportPrice,
+    co2: made * t.co2KgPerKwh,
+    assumed: !known && !t.netMetering && t.exportPrice !== t.importPrice,
+  };
+}

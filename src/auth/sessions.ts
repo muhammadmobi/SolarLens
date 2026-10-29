@@ -33,8 +33,11 @@ export interface Caller {
   role: Role | null;
   /** The device row behind a cookie sign-in; null for a token or nobody. */
   deviceId: string | null;
-  /** How it was identified: a session, a refresh just now, the API token, or not at all. */
-  via: 'session' | 'refresh' | 'token' | 'none';
+  /**
+   * How it was identified: a session, a refresh just now, the API token, a
+   * share link sent as a bearer token (Home Assistant, reading), or not at all.
+   */
+  via: 'session' | 'refresh' | 'token' | 'link' | 'none';
 }
 
 export const SESSION_COOKIE = 'sl_session';

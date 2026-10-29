@@ -279,6 +279,12 @@
       '/api/weather': { now, days: 2, from: now - 2 * 86400, hours: weatherHours },
       // Invented prices, so the money figures have something to show.
       '/api/settings/tariff': { tariff: { currency: 'EUR', importPrice: 0.28, exportPrice: 0.08, netMetering: false, co2KgPerKwh: 0.35 } },
+      // One place alerts go, as Settings lists it: a hint of where, never the topic itself.
+      '/api/settings/channels': {
+        channels: [{ id: 'demo-ntfy', kind: 'ntfy', name: 'Phone', label: 'ntfy.sh · topic …ab', alerts: true, weekly: true,
+          created_at: now - 20 * 86400, last_ok_at: now - 3 * 3600, last_error: null, last_error_at: null, failures: 0 }],
+        max: 5, ready: true,
+      },
       // Two of the invented systems are on the house, one on an outbuilding.
       '/api/settings/groups': { groups: { s1: 'House', s2: 'House', s3: 'Outbuildings' } },
       '/api/locations': { now, locations: SYSTEMS.map((s) => ({ id: s.id, lat: PLACES[s.id][0], lng: PLACES[s.id][1] })) },
@@ -321,6 +327,7 @@
     if (method !== 'GET') {
       // The tariff and groups forms expect what was kept back; they get the demo's own, unchanged.
       if (path === '/api/settings/tariff' || path === '/api/settings/groups') return json(sample(Math.floor(Date.now() / 1000))[path]);
+      if (path === '/api/settings/summary') return json({ sent: 1, of: 1 });
       return json({ ok: true, required: false, signedOut: 1, id: 'demo', url: `${location.origin}${location.pathname}#/`, password: true });
     }
     const answers = sample(Math.floor(Date.now() / 1000));

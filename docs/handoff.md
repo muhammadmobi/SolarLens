@@ -145,6 +145,9 @@ stays open for monitoring.
 | `src/expected.ts` | What each system should make of its sun: its performance ratio learned from its recent sunny days, and today's expected output. |
 | `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, and sends the raw payload only as its alert fields and a cleaned `telemetry` copy. |
 | `src/relays.ts` | Validates a relay's report on itself into a narrow shape. |
+| `src/channels.ts` | Alerts elsewhere: ntfy, Telegram, Discord and webhooks. What the owner types, checked; the secret sealed with a key derived from `API_TOKEN`; the request each service expects; delivery and its record. A channel taking alerts is one more listener to `announce()` in `src/push.ts`. |
+| `src/summary.ts` | The weekly summary: the last seven days from the daily rows, the tariff and the alarms, in words, and `sendWeekly` - Monday 08:00 on the first system's clock, claimed in one conditional write so it goes once. |
+| `src/sensors.ts` | `/api/sensors`, what Home Assistant reads: flat, fixed units, the page's own offline rule. |
 | `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. |
 | `src/providers/types.ts` | The `Provider` interface every adapter implements, plus shared shapes. |
 | `src/providers/soliscloud.ts` | SolisCloud's official API adapter (dormant until an API key exists) and the relay payload normaliser. |
@@ -181,6 +184,7 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC. A logger's `logger` (link, signal bars, uptime, make date) is public |
 | `device_network` | datalogger | Its operator and cell, or MAC address. Owner only, never served - and a table of its own, because a Worker rolled back to 2.10 would serve any new column on `devices` |
 | `plant_location` | system | Its position. Owner-only; sent to Open-Meteo only rounded to about a kilometre |
+| `channels` | place alerts are posted to | ntfy, Telegram, Discord or a webhook. The token or address in `secret`, AES-GCM encrypted under a key derived from `API_TOKEN`; only a `label` is ever served, and only to the owner. At most five |
 | `app_settings` | setting | The owner's tariff and groups, as JSON; read by anyone who may read the dashboard, written by the owner |
 | `weather_hourly` | system and hour | Sunlight, temperature and cloud from Open-Meteo; kept 400 days |
 | `device_samples` | change in a device's status or signal | The link history on the Devices tab. Written on a change, or hourly while nothing changes; kept 90 days |
@@ -189,7 +193,7 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `poll_log` | poll attempt | The health endpoint and the footer read this; pruned after a week |
 | `tokens` | provider | A vendor's cached bearer and refresh tokens, so a token outlives one cron run |
 | `relays` | relay computer | Random id, state, login expiry, last seen |
-| `kv` | scheduled job | "Is this hourly job due yet", and which notification events have been told |
+| `kv` | scheduled job | "Is this hourly job due yet", the week the last summary was sent for (`summary:week`), and which notification events have been told |
 | `push_subscriptions` | device signed up for notifications | The push endpoint is the secret and is never served; at most ten |
 | `push_messages` | notification text | What a woken device shows, for every device or one; kept a week |
 
@@ -317,7 +321,7 @@ decides it:
 |---|---|---|
 | Cloudflare account login | The owner's password manager | Only the owner can recover it |
 | Cloudflare API token, for deploying | GitHub → environment `production` → `CLOUDFLARE_API_TOKEN` | Roll it in Cloudflare and update the secret; it is shown once |
-| `API_TOKEN` (the owner's key: sign-in setup code, session signing, password pepper, write gate) | Cloudflare secret + local `.dev.vars` | `scripts/rotate-tokens.ps1 -Api`. Devices and passkeys keep working; **the password must be set again** (Settings → Forgot your password?, with the new token as the setup code) |
+| `API_TOKEN` (the owner's key: sign-in setup code, session signing, password pepper, write gate) | Cloudflare secret + local `.dev.vars` | `scripts/rotate-tokens.ps1 -Api`. Devices and passkeys keep working; **the password must be set again** (Settings → Forgot your password?, with the new token as the setup code), and **each place under Alerts elsewhere added again**, since its token was encrypted with a key derived from this one |
 | The owner's password and passkeys | The owner; the database holds a keyed hash and public keys only | *Forgot your password?* with the setup code; a passkey needs only its own device |
 | `INGEST_TOKEN` (lets a relay push) | Cloudflare secret + `.dev.vars` on each relay laptop | `scripts/rotate-tokens.ps1 -Ingest`, then re-run the installer on each laptop |
 | SolarMan session tokens | `.dev.vars`, refreshed automatically | Re-capture from the portal; `README.md` has the steps |

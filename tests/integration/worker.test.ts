@@ -140,6 +140,26 @@ describe('signing in, in workerd', () => {
     expect((await fetch(url('/api/latest'), { headers: { cookie: b.header() } })).status).toBe(200);
     expect((await fetch(url('/api/status'))).status).toBe(200);
   });
+
+  it('lets Home Assistant read the private dashboard with a share link as a bearer token', async () => {
+    const made = await fetch(url('/auth/settings/shares'), {
+      method: 'POST', headers: { 'content-type': 'application/json', cookie: b.header() },
+      body: JSON.stringify({ name: 'Home Assistant', days: null }),
+    });
+    const link = ((await made.json()) as { url: string }).url;
+    const ha = { authorization: `Bearer ${link.slice(link.lastIndexOf('/s/') + 3)}` };
+    const sensors = await fetch(url('/api/sensors'), { headers: ha });
+    expect(sensors.status).toBe(200);
+    const body = (await sensors.json()) as { systems_count: number; systems: Record<string, unknown> };
+    expect(body.systems_count).toBe(2);
+    expect(Object.keys(body.systems).sort()).toEqual(['s1', 's2']);
+    expect((await fetch(url('/api/sensors'))).status).toBe(401);
+    expect((await fetch(url('/api/summary'), { headers: ha })).status).toBe(200);
+    // Migration 0018 is applied, and the places alerts go are the owner's alone.
+    expect(await (await fetch(url('/api/settings/channels'), { headers: { cookie: b.header() } })).json())
+      .toEqual({ channels: [], max: 5, ready: true });
+    expect((await fetch(url('/api/settings/channels'), { headers: ha })).status).toBe(401);
+  });
 });
 
 describe("the deploy's own smoke test", () => {
