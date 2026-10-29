@@ -16,6 +16,7 @@ import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
 import { linkOf, loggerDetail, loggerNetwork } from './logger';
+import { locationOf } from '../weather';
 
 export interface SolisCredentials {
   keyId: string;
@@ -466,6 +467,7 @@ export class SolisCloudProvider implements Provider {
         capacityW: toWatts(pick(r, 'capacity'), pick(r, 'capacityStr')),
         tzOffsetSec: tzOffsetSec(r),
         tzName: tzNameOf(r),
+        location: locationOf(r),
       };
       this.zones.set(plant.id, { tzOffsetSec: plant.tzOffsetSec, tzName: plant.tzName });
       return plant;

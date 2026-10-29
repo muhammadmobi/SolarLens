@@ -23,6 +23,9 @@ data, with no server behind it.
 - **Reads well in either theme.** A three-state toggle in the top-right corner follows your system, or forces light or dark; the choice is remembered and applied before first paint.
 - **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's live output is set against its rated size.
 - **Open it and it is there - or make it yours alone.** Out of the box, no login and no token to copy onto each device, with vendor identifiers stripped from every response before it leaves the Worker. Turn on *Require sign-in to view* and it is private: a passkey or a password, once per device, and never again; share a view-only link with anyone you choose.
+- **Measured against the weather.** Each system's position comes from its vendor, and every hour SolarLens asks Open-Meteo how much sun fell there. Each system learns its own performance ratio from its recent sunny days; the day curve then carries a dashed line of what the sun allowed, the system's page sets made against expected, and an alert says when a system makes far less than its sunlight allowed - shading, dirt, a tripped string.
+- **A battery's capacity, over time.** From each day's charge and how far the charge rose, the History tab estimates how much the battery holds now, against its nameplate and against the oldest days in view.
+- **A site map, for the owner.** Where each system is, on OpenStreetMap - served to the signed-in owner and nobody else.
 - **Each system's day ends where its own sun sets.** Every plant's timezone is stored, and every figure, curve and daily row is cut at that plant's midnight rather than at the reader's — so two systems in different countries are each shown their own day, on the same screen.
 - **Fault history, with what the vendor advises.** Every alarm each vendor has on record, back to installation: when, how severe, the fault code, how long it lasted, and the vendor's own advice where it gives any. SolarMan's alert list says only when a fault was raised; its timeline, read for the newest alerts each hour, supplies when each one cleared, and the occurrences the list folds into one entry per day.
 - **Tells your phone, even with the dashboard closed.** Turn it on once per device on the Alerts tab, and that device is notified when a system stops reporting while it was producing, when a fault is recorded, when a SolisCloud login is about to run out, or when a vendor stops answering. A system going quiet at dusk is not news, so it is not announced. While a tab is open, a second switch announces every change the Alerts tab shows.
@@ -587,6 +590,7 @@ Five intervals, easily confused:
 | Alarm history is re-read (both vendors) | 1 hour | `EXTRAS` in `agent/solis-relay.mjs`; `HOUR` in `src/poll.ts` |
 | Vendor period totals are re-read (both vendors) | 1 day | `EXTRAS` in `agent/solis-relay.mjs`; `DAY` in `src/poll.ts` |
 | Open dashboard re-fetches | 10 min, and never in a hidden tab | `REFRESH_MS` in `public/index.html` |
+| Weather is fetched from Open-Meteo | 1 hour per system with a position (three months back the first time) | `refreshWeather` in `src/weather.ts` |
 
 A system is drawn as offline once its newest sample is older than
 `STALE_AFTER_S` (25 min). That figure has to stay comfortably above the poll
@@ -623,7 +627,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**553 unit tests**, **462 end-to-end tests** (231 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **10 integration tests** against the real Worker (`npm run test:integration`) and **10 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**574 unit tests**, **486 end-to-end tests** (243 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **10 integration tests** against the real Worker (`npm run test:integration`) and **10 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -660,7 +664,7 @@ exact lines no test reaches.
 
 ### Unit tests — `tests/unit/`
 
-Thirty files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; eleven drive the Worker or its database layer against a real database, through the helpers in `tests/helpers/`:
+Thirty-one files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; eleven drive the Worker or its database layer against a real database, through the helpers in `tests/helpers/`:
 
 - **`helpers/d1.ts`** — SQLite behind the D1 interface, with the project's own migrations applied. D1 *is* SQLite and Node ships one, so the SQL a test exercises is the SQL that runs in production. It also refuses a bound value D1 would refuse, which is how a `undefined` reaches a test rather than a deploy.
 - **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about.
@@ -676,6 +680,7 @@ Thirty files, one concern each. Most are pure-function tests against fixtures sh
 - **`datalogger.test.ts`** — everything a datalogger reports: its link read from the model name (and left unknown rather than guessed), SolisCloud's signal bars, restart and working time and make date, the operator, cell and MAC address kept apart and never published; and the link history - a row the first time, on each change of status, on a signal move beyond its jitter (3 dBm, 5 points), and hourly otherwise, the window opened by the row before it, and 90 days kept.
 - **`auth.test.ts`** — the owner login through the Worker, with a cookie jar and a moving clock: setup with the setup code, the password and its lockout (per caller and for everyone), the session renewed silently when its hour is up and a device kept in across a year of occasional use, two tabs renewing at once without signing either out, a copied refresh token signing the device out, sign-out at once for one device or all others, the *require sign-in* switch and what stays open with it on (the relays, `/api/status`, the notification reader), share links that read and never write and are taken back with their viewers, passkeys through the routes, a logger's network handles for the owner only, and `private` caching.
 - **`webauthn.test.ts`** — passkey verification against real signatures: CBOR, DER and COSE, both ES256 and RS256, and each refusal an attacker would try - another challenge, another origin, another site, no touch, a replayed registration, a key that is not the passkey's, a counter that went backwards.
+- **`weather.test.ts`** — each system's position: read from both vendors' field names and range-checked, kept when a record carries none, served to the owner and nobody else, and absent from every public answer; the weather: asked for at the position rounded to about a kilometre, stamped at the end of each hour, only hours that have happened, three months the first time and an hour after, one failing position not stopping the rest; and the expected output: the ratio as the median of full sunny days, a typical one until three exist, today's curve and total.
 - **`ci-scripts.test.ts`** — the two CI scripts that decide on the owner's behalf: when the production watcher opens an issue (a feed quiet while another delivers is not one; no feed for 90 minutes, a failing poll or no answer is), and when the owner's own pull request is approved (every check done and green, Copilot's review of the newest commit, no open thread, not a draft, not "do not merge", never anyone else's).
 - **`fixture-contract.test.ts`** — the end-to-end fixtures held to the real Worker. It runs the Worker on the vendor fixtures and fails if a row in `tests/fixtures/dashboard-api.ts` carries a field `/api/latest` or `/api/devices` does not send, or lacks one they do, and if any spec serves a raw payload. This is the test that would have caught gap 5.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
@@ -699,7 +704,7 @@ Thirty files, one concern each. Most are pure-function tests against fixtures sh
 
 ### End-to-end tests — `tests/e2e/`
 
-Thirteen spec files, **231 tests**, each run twice: **chrome** (Desktop Chrome) and
+Fourteen spec files, **243 tests**, each run twice: **chrome** (Desktop Chrome) and
 **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/`, and every
 `/api/*` route is answered from fixtures in the spec, so the suite needs no
 Worker, database or vendor. They assert what a person sees and what the page
@@ -709,6 +714,7 @@ sends:
 |---|---|
 | `dashboard.spec.ts` | The bulk, 141 tests: the overview and its layout at both widths, the theme, the header figures, each system's page, charts, alerts, history, devices, each datalogger's card and week, relays, TV mode, freshness and the auth gate |
 | `accessibility.spec.ts` | axe-core's WCAG 2 A and AA rules on every view, a keyboard walk-through, and a full keyboard lap of each view showing focus |
+| `weather.spec.ts` | Against the weather and the site map: the expected line dashed behind the real curve, the *Against the weather* card, the alert when output falls far below what the sun allowed (and not for an offline system), the battery's estimated capacity on History, and the owner's map - hidden from anyone else, drawn by a stand-in for Leaflet, and a list of positions that survives the map failing to load |
 | `demo.spec.ts` | The GitHub Pages demo, built and served under a sub-path as Pages serves it: the banner says the data is made up, every view draws from the sample data, no request leaves for an `/api` or `/auth`, nothing reaches for the site's root, the day's curve is there at any hour, and axe finds nothing serious. (`screenshots.spec.ts` beside it takes the README's pictures, and is skipped unless `npm run screenshots` asks for it.) |
 | `many-systems.spec.ts` | More than two systems: a colour per system (two on the same vendor differ; the palette comes round after eight), the Overview's strip and when it stops fitting one screen, Compare on a per-kWp scale and with an offline system, TV mode taking turns, and a plant with two inverters |
 | `signin.spec.ts` | Signing in and Settings: a private dashboard asks for a sign-in instead of showing an error and comes back without a reload; setup with the setup code; the switch, devices, share links and password in Settings; a visitor's and a stranger's Settings; and a real passkey - made and used by Chrome's virtual authenticator, checked with the Worker's own verifier |
@@ -1036,11 +1042,13 @@ node scripts/ci/check-privacy.mjs     # the guard, over the working tree
 
 ## Data model
 
-Nineteen tables in D1, made by the files in `migrations/`, applied in order:
+Twenty-one tables in D1, made by the files in `migrations/`, applied in order:
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
 - **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
 - **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. A datalogger also has `logger` - how it connects, signal bars, seconds since restart and in total, when it was made - Its network handles - mobile operator and cell, or MAC address - are **not** on this row: see `device_network`. Filled by the relay agent and the cron; the vendor payload is stripped of address, coordinates and account identifiers before storage.
+- **`plant_location`** — each system's position, from its vendor's plant record. **The owner's alone**: served only to a signed-in owner, for the site map, and sent nowhere but to Open-Meteo, rounded to about a kilometre. A table of its own, for the same reason as `device_network`.
+- **`weather_hourly`** — each system's weather from Open-Meteo, hour by hour: sunlight on the ground (`ghi_wm2`, the average over the hour ending at `ts`), temperature and cloud. Kept 400 days.
 - **`device_network`** — a datalogger's network handles: its mobile operator and cell, or its MAC address, as JSON. **Kept for the owner and never part of a public answer**, since either can place a logger. A table of its own rather than a column on `devices` on purpose: a Worker rolled back to 2.10 serves `SELECT * FROM devices` minus the columns it knew about, so a new column there would reach anyone; a table it has never heard of cannot.
 - **`device_samples`** — each device's status and signal over time, for its link history: a row when either changes, or at least hourly while nothing does, so a steady logger writes 24 rows a day rather than 288. Kept 90 days; pruned by the cron.
 - **`auth_owner`** — the one owner: the password's stored form (PBKDF2, then keyed with a value derived from `API_TOKEN`), or null for passkeys only, and `require_sign_in`, the switch in Settings.
@@ -1082,6 +1090,9 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `GET /api/devices/history?days=7` | open | each device's status and signal over the last 1-30 days, oldest first, with the row before the window so the week opens in a known state |
 | `GET /api/alarms?days=` | open | fault history, newest first (default 730 days). An alarm's internal id is never returned, since it contains the vendor's plant id |
 | `GET /api/periods` | open | each vendor's own month and year totals, back to installation |
+| `GET /api/weather?days=2` | open | each system's weather, hour by hour, for the last 1-14 days; no position in it |
+| `GET /api/expected` | open | each system's performance ratio (learned from its last fortnight's sunny days, or a typical one until three exist) and what it should have made today, in total and hour by hour |
+| `GET /api/locations` | owner only | each system's position, for the site map - whatever the switch says, nobody else gets it |
 | `GET /api/status` | always open | how fresh each feed is: `{now, feeds: [{provider, ok, ts}]}` and nothing else, for a monitor and the deploy's smoke test |
 | `POST /api/poll` | owner | poll all providers now — makes live vendor calls, so it spends quota |
 | `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
@@ -1139,7 +1150,8 @@ solar-lens/
 │                             (0012 zone names, and the offset each reading was taken under
 │                              0013 push subscriptions and the messages they are woken for
 │                              0014 datalogger detail, network handles and link history
-│                              0015 the owner login: owner, passkeys, devices, shares)
+│                              0015 the owner login: owner, passkeys, devices, shares
+│                              0016 each system's position, and its weather)
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log
@@ -1152,6 +1164,8 @@ solar-lens/
 │   │                         hourly alarms and daily period totals
 │   ├── db.ts                 D1 queries and the Env type
 │   ├── public-view.ts        strips vendor identifiers from public responses
+│   ├── weather.ts            positions, and the hourly weather from Open-Meteo
+│   ├── expected.ts           what each system should make of its sun
 │   ├── auth/                 the owner login
 │   │   ├── sessions.ts       sessions, silent refresh and rotation, devices, share links, lockout
 │   │   ├── routes.ts         /auth/* and /s/<link>
@@ -1230,6 +1244,7 @@ solar-lens/
 │   ├── unit/webauthn.test.ts    passkey verification against real signatures
 │   ├── helpers/passkey.ts       a pretend authenticator with real keys
 │   ├── unit/ci-scripts.test.ts  when the watcher opens an issue, and when a PR is approved
+│   ├── unit/weather.test.ts     positions kept private, the weather, the expected output
 │   ├── integration/             the real Worker, in workerd, over HTTP
 │   ├── visual/                  each view of the demo, compared with its picture
 │   ├── unit/fallbacks.test.ts   the fallback branches nothing else reached
@@ -1252,6 +1267,7 @@ solar-lens/
 │   ├── e2e/signin.spec.ts       signing in, Settings, and a real passkey
 │   ├── e2e/many-systems.spec.ts  more than two systems: colours, Compare, TV turns
 │   ├── e2e/demo.spec.ts         the GitHub Pages demo, built and served under a sub-path
+│   ├── e2e/weather.spec.ts      the expected line, its alert, battery capacity, the site map
 │   ├── e2e/screenshots.spec.ts  the README's pictures; skipped unless asked for
 │   ├── e2e/guide.spec.ts        the guide page and its button
 │   ├── e2e/history-systems.spec.ts  Historical Data, one system or all
@@ -1420,7 +1436,7 @@ escaped before it reaches the page.
 > system with, so they are the one identifying string deliberately left in. If
 > yours name a person or a business, rename the plant in the vendor portal.
 
-One third-party request remains: the page loads its web font from Google, which sees the viewer's IP. Self-hosting it (Manrope is OFL-licensed) or dropping to the system font stack removes that.
+Third parties the dashboard talks to: the page loads its web font from Google, which sees the viewer's IP (self-hosting Manrope, which is OFL-licensed, or dropping to the system font stack removes that). The Worker asks **Open-Meteo** for each system's weather, at its position rounded to about a kilometre. The owner's site map loads **Leaflet** from cdnjs, checked against an integrity hash, and map tiles from **OpenStreetMap**, which see the viewer's IP and this site's origin (their usage policy wants a referrer; only the origin is sent). Nobody but the owner ever loads the map.
 
 - Nothing identifying belongs in the repo: credentials, tokens and plant ids live only in `wrangler secret`, the Cloudflare dashboard, or the gitignored `.dev.vars`. `captures/`, `.capture-profile/` and `.relay-profile/` (browser sessions) are gitignored too.
 - The `workers.dev` URL serves readings to anyone who opens it until the owner turns on *Require sign-in to view*; vendor identifiers are stripped either way. `INGEST_TOKEN` and the owner's sign-in (or `API_TOKEN`) gate the routes that write or spend quota.
@@ -1449,6 +1465,7 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] Everything each datalogger reports, and its link over the week (3.0)
 - [x] Any number of systems: a colour each, Compare per kWp, TV mode taking turns, polling spread across runs (3.0)
 - [x] A demo on GitHub Pages, on made-up data, and screenshots taken of it (3.0)
+- [x] Weather from Open-Meteo, expected output and an underperformance alert, battery capacity over time, and an owner-only site map (3.0)
 - [x] Integration tests against a real local Worker, screenshot comparison, Lighthouse, a production watcher, a restore point before migrations, and the owner's own pull requests approved once ready (3.0)
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware

@@ -49,6 +49,16 @@ live database after 2.10.0.
 | Everything else the datalogger reports: link type, signal bars, time since restart and in total, make date | ● | ◐ | ● a card per logger on the Devices tab — SolarMan's list says less, and nothing is invented for it |
 | A datalogger's link over time: online, offline, signal | ○ | ○ | ● the last seven days as a strip, a summary and a signal line — neither app keeps this |
 
+### Weather and performance
+
+| Feature | SolisCloud | SolarMan | SolarLens |
+|---|:--:|:--:|---|
+| Today's weather | ● | ◐ | ● the vendor's, and hour-by-hour sunlight from Open-Meteo |
+| Expected output for the weather | ○ | ◐ theoretical yield, where irradiance is metered | ● learned per system from its own sunny days, drawn on the day curve |
+| An alert for output well below what the sun allowed | ○ | ○ | ● |
+| Battery state of health | ◐ where the battery reports it | ○ | ◐ usable capacity estimated from each day's charge and swing |
+| A map of your plants | ● | ● | ● owner only |
+
 ### More than one system
 
 | Feature | SolisCloud | SolarMan | SolarLens |

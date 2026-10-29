@@ -77,6 +77,19 @@
   }
 
   const kwhOf = (pts) => pts.reduce((a, p) => a + (p.w * 300) / 3600 / 1000, 0);
+
+  /**
+   * The sunlight on a clear day, W/m2, at an instant: the same bell the curves
+   * are drawn on, before the clouds. What the demo's "weather" is made of.
+   */
+  function clearSun(day, t) {
+    const rise = day + 6 * 3600 + 600, set = day + 18 * 3600 + 2400;
+    if (t <= rise || t >= set) return 0;
+    return 1000 * Math.pow(Math.sin((Math.PI * (t - rise)) / (set - rise)), 1.4);
+  }
+
+  /** Where the made-up systems stand: one made-up town, to two decimal places. */
+  const PLACES = { s1: [52.09, 5.12], s2: [52.1, 5.11], s3: [52.08, 5.13] };
   const r1 = (v) => Math.round(v * 10) / 10;
 
   /** Every answer the dashboard asks for, made for this moment. */
@@ -197,7 +210,7 @@
           inverter_id: s.id, day: key, yield_kwh: r1(y), peak_w: Math.round(s.kwp * 1000 * 0.8 * sky),
           load_kwh: s.battery ? r1(y * 0.7 + 3) : null, import_kwh: s.battery ? r1(2.5 - sky) : null,
           export_kwh: s.battery ? r1(y * 0.45) : null, batt_charge_kwh: s.battery ? r1(3 * sky + 1) : null,
-          batt_discharge_kwh: s.battery ? r1(3 * sky + 0.6) : null, samples: 150, first_ts: day - n * 86400 + 6 * 3600, last_ts: day - n * 86400 + 19 * 3600,
+          batt_discharge_kwh: s.battery ? r1(3 * sky + 0.6) : null, soc_min: s.battery ? Math.round(30 + 20 * sky) : null, soc_max: s.battery ? 100 : null, samples: 150, first_ts: day - n * 86400 + 6 * 3600, last_ts: day - n * 86400 + 19 * 3600,
         });
       });
     }
@@ -214,6 +227,22 @@
         }
       }
     });
+
+    // Each system's performance ratio is what it makes of the sun: 0.8 for a
+    // well-sited roof, less for the shaded garage.
+    const hourEnds = [];
+    for (let t = day + 3600; t <= now; t += 3600) hourEnds.push(t);
+    const expected = SYSTEMS.map((s) => {
+      const ratio = Math.round(0.8 * s.eff * 1000) / 1000;
+      const hours = hourEnds.map((t) => ({ ts: t, expected_w: Math.round(clearSun(day, t - 1800) * s.kwp * ratio) }));
+      const sun = hourEnds.reduce((a, t) => a + clearSun(day, t - 1800) / 1000, 0);
+      return { inverter_id: s.id, ratio, learned: true, days: 11, sun_kwh_m2: Math.round(sun * 100) / 100, expected_kwh: Math.round(sun * s.kwp * ratio * 10) / 10, hours };
+    });
+    const weatherHours = [];
+    for (let t = day - 86400 + 3600; t <= now; t += 3600) {
+      const d = t > day ? day : day - 86400;
+      SYSTEMS.forEach((s) => weatherHours.push({ inverter_id: s.id, ts: t, ghi_wm2: Math.round(clearSun(d, t - 1800) * 0.9), temp_c: 21, cloud_pct: 25 }));
+    }
 
     const alarms = [
       { inverter_id: 's1', provider: 'soliscloud', code: '1015', message: 'Grid voltage out of range', severity: 'warning', vendor_level: 1, advice: 'No action needed if it clears within minutes.', begin_ts: now - 9 * 86400, end_ts: now - 9 * 86400 + 480, state: 'recovered' },
@@ -235,6 +264,9 @@
       '/api/alarms': { now, days: 3650, alarms },
       '/api/health': { now, polls: feeds, feeds, relays: [{ name: 'Study laptop', state: 'ok', login_expires_at: now + 5 * 86400, last_seen: now - 70, first_seen: now - 60 * 86400, last_ok_at: now - 70 }] },
       '/api/status': { now, feeds: feeds.map((f) => ({ provider: f.provider, ok: f.ok, ts: f.ts })) },
+      '/api/expected': { now, systems: expected },
+      '/api/weather': { now, days: 2, from: now - 2 * 86400, hours: weatherHours },
+      '/api/locations': { now, locations: SYSTEMS.map((s) => ({ id: s.id, lat: PLACES[s.id][0], lng: PLACES[s.id][1] })) },
       '/auth/status': { configured: true, password: true, passkeys: 1, required: false, role: 'owner', device: 'demo-this' },
       '/auth/settings': {
         password: true, required: false,

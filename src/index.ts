@@ -34,6 +34,8 @@ import type { Env } from './db';
 import { auth, applyCookies, openShareLink, type AuthVars } from './auth/routes';
 import { REFRESH_COOKIE, SESSION_COOKIE, type Caller, deviceLabel, identify, owner, startDevice } from './auth/sessions';
 import { timingSafeEqual } from './auth/crypto';
+import { locationOf, locations, refreshWeather, upsertLocation, weatherSince } from './weather';
+import { expectedToday } from './expected';
 import { daily, deviceNetworks, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
 import { tzNameOf, tzOffsetSec } from './providers/units';
@@ -65,8 +67,9 @@ const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
 /**
  * Security headers on every response.
  *
- * The page loads one web font from Google and nothing else, so the policy is
- * strict about everything but that - and, more usefully, about where anything
+ * The page loads one web font from Google, and - on the owner's site map only -
+ * Leaflet from cdnjs (integrity-checked) and tiles from OpenStreetMap; the policy is
+ * strict about everything but those - and, more usefully, about where anything
  * may be *sent*. `connect-src 'self'` means injected script could not
  * exfiltrate a reading even if it ran, and `frame-ancestors 'none'` keeps the
  * page out of somebody else's iframe.
@@ -93,10 +96,10 @@ app.use('*', async (c, next) => {
   const h = res.headers;
   h.set('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
     "font-src 'self' https://fonts.gstatic.com",
-    "img-src 'self' data:",
+    "img-src 'self' data: https://tile.openstreetmap.org",
     "connect-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'none'",
@@ -308,6 +311,46 @@ app.get('/api/push/recent', async (c) => {
   const found = await recentMessages(c.env.DB, audience);
   if (!found) return c.json({ error: 'not a device signed up for notifications' }, 404);
   return c.json({ now: nowSec(), ...found });
+});
+
+/**
+ * Each system's weather, hour by hour: sunlight on the ground, temperature and
+ * cloud, for the expected-output line and the underperformance alert. The
+ * systems are named by alias, and no position is in it. `days` is 1 to 14.
+ */
+app.get('/api/weather', async (c) => {
+  const asked = Number(c.req.query('days') ?? 2);
+  const days = Number.isFinite(asked) ? Math.min(14, Math.max(1, Math.round(asked))) : 2;
+  const from = nowSec() - days * 86400;
+  const [hours, ids] = await Promise.all([weatherSince(c.env.DB, from), inverterIds(c.env.DB)]);
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: nowSec(), days, from, hours: publicRows(hours, aliasFor(ids)) });
+});
+
+/**
+ * What each system should have made today, from the sunlight it has had and
+ * the ratio learned from its last fortnight (./expected). A system with no
+ * position, no size or no weather yet is simply not in the list.
+ */
+app.get('/api/expected', async (c) => {
+  const rows = await latest(c.env.DB);
+  const alias = aliasFor(rows.map((r) => r.id));
+  const systems = await expectedToday(c.env.DB, rows);
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: nowSec(), systems: systems.map((e) => ({ ...e, inverter_id: alias(e.inverter_id) })) });
+});
+
+/**
+ * Where each system is, for the owner's site map. The one read that is the
+ * owner's alone whatever the switch says: a share link does not get it, and
+ * nor does anyone while the dashboard is open to all.
+ */
+app.get('/api/locations', async (c) => {
+  if (c.get('caller').role !== 'owner') return c.json({ error: 'owner only' }, 401);
+  const [rows, ids] = await Promise.all([locations(c.env.DB), inverterIds(c.env.DB)]);
+  const alias = aliasFor(ids);
+  c.header('Cache-Control', CACHE);
+  return c.json({ now: nowSec(), locations: rows.map((r) => ({ id: alias(r.inverter_id), lat: r.lat, lng: r.lng })) });
 });
 
 /**
@@ -523,6 +566,9 @@ app.post('/api/ingest/station', async (c) => {
       : solarmanStationReading(inv, body.raw, source);
   if (!inv.name) inv.name = inv.plantName = plantId;
   await upsertInverter(c.env.DB, inv);
+  // The snapshot's position, read before anything strips it from the stored
+  // copy: kept apart, for the weather and the owner's map.
+  await upsertLocation(c.env.DB, inv.id, locationOf(body.raw));
   const stored = await insertReading(c.env.DB, reading);
   // The relay is how SolisCloud data arrives, so it belongs in the poll log
   // beside the cloud poller. Without this the footer only ever mentioned
@@ -718,6 +764,12 @@ export default {
         await forgetOldDeviceSamples(env.DB);
       } catch (e) {
         console.error('housekeeping:', String(e));
+      }
+      // The weather, hourly per system; see ./weather.
+      try {
+        await refreshWeather(env.DB);
+      } catch (e) {
+        console.error('weather:', String(e));
       }
     }));
   },

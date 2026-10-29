@@ -553,6 +553,13 @@
   .cmpbar .n { font-weight: 700; color: var(--accent-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cmpbar .v { font-variant-numeric: tabular-nums; min-width: 7ch; text-align: right; }
 
+  /* The owner's site map. */
+  .sitemap { height: min(62vh, 560px); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
+  .maplist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .maplist li { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+  .maplist .sysname { font-weight: 700; color: var(--accent-ink); }
+  .maplist .mono { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+
   /* TV mode with more systems than fit: which screenful is showing. */
   .tvpages { display: flex; gap: 8px; justify-content: center; margin-top: 1.5vh; }
   .tvpages i { width: 12px; height: 12px; border-radius: 50%; background: var(--line); }
@@ -794,6 +801,7 @@
       <a href="#/">Overview</a>
       <a href="#/power">Power</a>
       <a href="#/compare" id="comparetab" hidden>Compare</a>
+      <a href="#/map" id="maptab" hidden>Map</a>
       <a href="#/history">Historical Data</a>
       <a href="#/alerts">Alerts<span class="navbadge" id="alertbadge" hidden></span></a>
       <a href="#/devices">Devices</a>
@@ -828,6 +836,7 @@
     power            the Power tab
     overview         the Overview tab, and its strip when there are three systems or more
     compare          the Compare tab: every system side by side, per kWp
+    the site map     the owner's Map tab: where each system is
     alerts           the Alerts tab: what is wrong now, and fault history
     historical data  the Historical Data tab
     devices          the Devices tab: each datalogger and its week, hardware, SolisCloud relays
@@ -1336,6 +1345,14 @@
     return '—';
   };
 
+  /**
+   * What the sun allowed a system today, from /api/expected (src/expected.ts):
+   * the ratio learned from its fortnight, today's expected kWh so far, and the
+   * expected power hour by hour. Undefined until the system has a position and
+   * some weather.
+   */
+  const expectedFor = (inv) => (state.expected?.systems ?? []).find((e) => e.inverter_id === inv.id);
+
   // The hardware records that belong to one system.
   const plantIdOf = (inv) => inv.plant_id || String(inv.id || '').split(':').pop();
   const devicesFor = (inv) => state.devices.filter(
@@ -1592,7 +1609,11 @@
     const c = colorOf(inv);
     if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
       pts.length === 1 ? 'One sample so far today - a curve needs two' : 'No samples yet today'}</text></svg>`;
-    const max = Math.max(200, ...pts.map((p) => p.ac_power_w || 0));
+    // What the sunlight allowed, hour by hour, drawn dashed behind the real
+    // curve - and counted in the scale, so a poor day shows as a gap between
+    // the two rather than as a curve that fills the box anyway.
+    const exp = (expectedFor(inv)?.hours ?? []).map((h) => ({ ts: h.ts - 1800, w: h.expected_w }));
+    const max = Math.max(200, ...pts.map((p) => p.ac_power_w || 0), ...exp.map((e) => e.w));
     const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R);
     const y = (v) => T + (1 - (v || 0) / max) * (H - T - B);
     const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.ts).toFixed(1)},${y(p.ac_power_w).toFixed(1)}`).join(' ');
@@ -1610,6 +1631,10 @@
       const end = t + 3 * 3600 > t1;
       const label = end ? '24' : String(plantHour(t, offsetNear(pts, t, inv.tz_offset_sec))).padStart(2, '0');
       out += `<text class="axis" x="${x(end ? t1 : t)}" y="${H - 8}" text-anchor="${t === t0 ? 'start' : end ? 'end' : 'middle'}">${label}</text>`;
+    }
+    if (exp.length >= 2) {
+      const ed = exp.map((e, i) => `${i ? 'L' : 'M'}${x(e.ts).toFixed(1)},${y(e.w).toFixed(1)}`).join(' ');
+      out += `<path class="expline" d="${ed}" fill="none" stroke="${c}" stroke-width="1.6" stroke-dasharray="6 5" opacity=".6" vector-effect="non-scaling-stroke"><title>Expected from the sunlight</title></path>`;
     }
     out += `<path d="${d} L${x(last.ts).toFixed(1)},${y(0)} L${x(pts[0].ts).toFixed(1)},${y(0)} Z" fill="url(#${id})"/>`;
     out += `<path d="${d}" fill="none" stroke="${c}" stroke-width="2.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
@@ -2017,6 +2042,74 @@
     }).join('')}</nav>`;
   }
 
+  // ---------- the site map ----------
+  /**
+   * Where the systems are, for the owner - the one person /api/locations
+   * answers. Leaflet draws the map, loaded only when this view opens, from
+   * cdnjs with an integrity hash so a copy that differs by a byte is refused;
+   * the tiles are OpenStreetMap's, asked for with only this site's origin as
+   * the referrer, which their usage policy wants and which says nothing more.
+   * Each system is also listed with a link, so the positions are there even if
+   * the map cannot load.
+   */
+  const LEAFLET = {
+    js: ['https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js', 'sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g=='],
+    css: ['https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css', 'sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw=='],
+  };
+  let leafletLoading = null;
+  function loadLeaflet() {
+    if (window.L) return Promise.resolve(window.L);
+    return (leafletLoading ||= new Promise((resolve, reject) => {
+      const css = document.createElement('link');
+      Object.assign(css, { rel: 'stylesheet', href: LEAFLET.css[0], integrity: LEAFLET.css[1], crossOrigin: 'anonymous' });
+      document.head.appendChild(css);
+      const js = document.createElement('script');
+      Object.assign(js, { src: LEAFLET.js[0], integrity: LEAFLET.js[1], crossOrigin: 'anonymous' });
+      js.onload = () => resolve(window.L);
+      js.onerror = () => { leafletLoading = null; reject(new Error('map library did not load')); };
+      document.head.appendChild(js);
+    }));
+  }
+
+  function renderMap() {
+    const invs = state.latest?.inverters ?? [];
+    const locs = (state.locations ?? []).map((l) => ({ ...l, inv: invs.find((i) => i.id === l.id) })).filter((l) => l.inv);
+    if (!locs.length) {
+      $('view').innerHTML = '<div class="card"><div class="empty">The map is for the signed-in owner, and needs a system whose vendor reports where it is.</div></div>';
+      return;
+    }
+    const osm = (l) => `https://www.openstreetmap.org/?mlat=${l.lat}&mlon=${l.lng}#map=17/${l.lat}/${l.lng}`;
+    $('view').innerHTML = `<section class="card"><h2>Where the systems are</h2>
+      <div id="sitemap" class="sitemap" role="region" aria-label="Map of the systems"></div>
+      <div class="body"><ul class="maplist">${locs.map((l) => `<li style="--accent:${colorOf(l.inv)};--accent-ink:${inkOf(l.inv)}">
+        <span class="sysname">${esc(l.inv.name)}</span><span class="mono">${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}</span>
+        <a href="${esc(osm(l))}" rel="noopener noreferrer" target="_blank">Open in OpenStreetMap</a></li>`).join('')}</ul>
+        <p class="cardnote">Only you can see this page: positions are served to the signed-in owner and nobody else. The weather is looked up at each position rounded to about a kilometre.</p>
+        <p class="autherr" id="map-err" role="status"></p></div></section>`;
+    loadLeaflet().then((L) => {
+      const box = $('sitemap');
+      if (!box || box.dataset.drawn) return;
+      box.dataset.drawn = '1';
+      const map = L.map(box, { scrollWheelZoom: false });
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19, referrerPolicy: 'strict-origin-when-cross-origin',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(map);
+      // Circles, not the default pin: a pin is an image from yet another host.
+      const style = getComputedStyle(document.documentElement);
+      for (const l of locs) {
+        const colour = style.getPropertyValue(`--sys${((sysNo(l.inv) - 1) % SYSTEM_COLOURS) + 1}`).trim() || '#2f6fde';
+        L.circleMarker([l.lat, l.lng], { radius: 9, color: colour, fillColor: colour, fillOpacity: 0.85, weight: 2 })
+          .bindTooltip(l.inv.name, { permanent: locs.length <= 4, direction: 'top' }).addTo(map);
+      }
+      if (locs.length === 1) map.setView([locs[0].lat, locs[0].lng], 16);
+      else map.fitBounds(locs.map((l) => [l.lat, l.lng]), { padding: [40, 40], maxZoom: 17 });
+    }).catch(() => {
+      const err = $('map-err');
+      if (err) err.textContent = 'The map could not load. Each position is in the list above, with a link.';
+    });
+  }
+
   // ---------- compare ----------
   /**
    * Systems side by side, on one scale.
@@ -2243,6 +2336,17 @@
     const net = inv.network_status;
     if (net && String(net).toUpperCase() !== 'NORMAL') {
       add('warn', 'Datalogger link', `Reported as "${String(net).toLowerCase()}".`, 'SolarMan');
+    }
+
+    // --- against the weather: far less than the sunlight allowed ------------
+    // Only once there is enough sun to judge by, and never for a system that is
+    // offline - that is already its own alert, and the cause.
+    const exp = expectedFor(inv);
+    if (exp && !st.offline && exp.expected_kwh >= 2 && inv.today_kwh != null && inv.today_kwh < 0.6 * exp.expected_kwh) {
+      add('warn', 'Making far less than the sunlight allows',
+        `${fmtKwh(inv.today_kwh)} so far today, against ${fmtKwh(exp.expected_kwh)} expected from the sunlight at this system${
+          exp.learned ? `, going by the last ${exp.days} sunny days` : ', going by a typical system until it has learned this one'}. `
+        + 'Shading, dirty panels, a string that has tripped or an inverter fault can each do this.', 'SolarLens');
     }
 
     // --- the hardware behind the readings ----------------------------------
@@ -2697,6 +2801,7 @@
         <div class="secbody">
           <section class="card"><div class="body">${dailyBars(mine, colorOf(inv), 'hb' + i, group)}</div></section>
           ${shortfall}
+          ${group === 'day' ? batteryHealth(inv, mine) : ''}
           ${usesVendor ? `<p class="cardnote" style="margin:0 20px 4px">Figures are ${esc(providerName(inv.provider))}'s own
             ${group} totals, which cover the whole ${group} including any part before SolarLens began collecting.
             "Days recorded" is how much of it SolarLens saw itself, and the peak comes from those days.</p>` : ''}
@@ -3026,6 +3131,37 @@
     </section>`;
   }
 
+  /**
+   * How much the battery holds now, estimated from ordinary days, and whether
+   * that is falling.
+   *
+   * Neither vendor reports a hybrid's state of health, but a day says it: the
+   * energy that went in, over how far the charge rose. A day that took the
+   * battery from 40% to 100% on 6 kWh says it holds about 10 kWh. Only days
+   * with a swing of 30 points or more are read - a small swing divides by too
+   * little to trust - and the median of the newest week of them is the
+   * estimate, set against the pack's nameplate and against the oldest week in
+   * view. It is rough: energy that went in and straight back out on the same
+   * day inflates it, which is why only the trend is worth reading.
+   */
+  function batteryHealth(inv, rows) {
+    const est = rows
+      .filter((r) => r.batt_charge_kwh != null && r.soc_min != null && r.soc_max != null && r.soc_max - r.soc_min >= 30)
+      .map((r) => ({ day: r.day, kwh: r.batt_charge_kwh / ((r.soc_max - r.soc_min) / 100) }));
+    if (est.length < 3) return '';
+    const median = (xs) => { const v = [...xs].sort((a, b) => a - b); const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
+    const now = median(est.slice(0, 7).map((e) => e.kwh));
+    const then = est.length >= 14 ? median(est.slice(-7).map((e) => e.kwh)) : null;
+    const pack = parse(devicesFor(inv).find((d) => d.battery)?.battery);
+    const rated = pack?.ratedCapacityAh && pack?.nominalVoltageV ? (pack.ratedCapacityAh * pack.nominalVoltageV) / 1000 : null;
+    return kvCard('Battery, usable capacity', [
+      ['Estimated now', `${now.toFixed(1)} kWh`],
+      rated ? ['Against the nameplate', `${Math.round((now / rated) * 100)}% of ${rated.toFixed(1)} kWh`] : null,
+      then != null ? [`The oldest days in view (${esc(est[est.length - 1].day)})`, `${then.toFixed(1)} kWh`] : null,
+      ['Read from', `${est.length} day${est.length === 1 ? '' : 's'} with a swing of 30 points or more`],
+    ], 'Energy charged over how far the charge rose, day by day. Rough: a day that charged and discharged at once reads high. The trend is the part to watch.');
+  }
+
   // ---------- system detail ----------
   function kvCard(title, rows, note) {
     const body = rows.filter(Boolean).map(([k, v, mono]) => `<dt>${esc(k)}</dt><dd class="${mono ? 'mono' : ''}">${v}</dd>`).join('');
@@ -3079,6 +3215,24 @@
         <span class="p">low ${Math.round(lo.battery_soc)}% at ${esc(hhmm(lo.ts, lo.tz_offset_sec ?? inv.tz_offset_sec))} · high ${Math.round(hi.battery_soc)}%</span></div>
       <svg class="soc-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Battery charge through today">${out}</svg>
     </div>`;
+  }
+
+  /**
+   * Today against the weather: how much sun has fallen, what the system should
+   * have made of it, and what it did. The ratio is what it makes of a unit of
+   * sun per kWp, learned from its own recent sunny days.
+   */
+  function weatherCard(inv) {
+    const e = expectedFor(inv);
+    if (!e) return '';
+    const share = e.expected_kwh > 0 && inv.today_kwh != null ? Math.round((inv.today_kwh / e.expected_kwh) * 100) : null;
+    return kvCard('Against the weather', [
+      ['Sunlight so far today', `${e.sun_kwh_m2.toFixed(2)} kWh/m²`],
+      ['Expected from it', fmtKwh(e.expected_kwh)],
+      ['Made', fmtKwh(inv.today_kwh)],
+      share != null ? ['Share of expected', `${share}%`] : null,
+      ['Performance ratio', `${e.ratio.toFixed(2)} · ${e.learned ? `learned from ${e.days} sunny days` : 'a typical one, until it has learned this system'}`],
+    ], 'Sunlight measured by Open-Meteo at the system\'s position. On the Overview and the Power tab, the dashed line on its day curve is the expected output, hour by hour.');
   }
 
   /**
@@ -3347,7 +3501,7 @@
         </div>
       </div>`,
       flow: `<section class="card" style="margin-bottom:16px"><div class="body">${flowSvg(inv, m)}</div></section>`,
-      blocks: `<div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent, st.offline)}${acCard(invDev)}${battery}${diagnostics}</div>${moreInverters(devs, accent, st.offline)}`,
+      blocks: `<div class="blocks">${identity}${link}${live}${counters}${weatherCard(inv)}${stringsCard(invDev, accent, st.offline)}${acCard(invDev)}${battery}${diagnostics}</div>${moreInverters(devs, accent, st.offline)}`,
       raw: rawCard(inv),
     };
   }
@@ -3670,6 +3824,8 @@
     const tab = (href, name) => `<a href="${href}">${name}</a>`;
     const rows = [
       ['See what each system is producing right now', tab('#/', 'Overview')],
+      ['Where each system is, on a map (the owner only)', `${tab('#/map', 'Map')}, once you are signed in`],
+      ['Whether a system is making what the weather allowed', `the system's page - Against the weather; and the dashed line on its day curve, on ${tab('#/', 'Overview')} and ${tab('#/power', 'Power')}`],
       ['Which system is doing best, for its size', `${tab('#/compare', 'Compare')} - kWh per kWp, today and this month (with two systems or more)`],
       ['See every system on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
       ['See one system on its own, in full', `${tab('#/', 'Overview')} - tap the system`],
@@ -3797,6 +3953,8 @@
     if (!state.latest) return; // first paint waits for data
     // Compare means nothing with one system, so its tab appears with the second.
     $('comparetab').hidden = (state.latest.inverters?.length ?? 0) < 2;
+    // The map is the owner's, and needs a position to show.
+    $('maptab').hidden = !(state.locations?.length);
     const sys = hash.match(/^#\/system\/(.+)$/);
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
     if (tv) return renderTv();
@@ -3808,6 +3966,7 @@
     if (hash === '#/flow') { location.replace('#/'); return overviewRoute(); }
     if (hash === '#/power') return renderPower();
     if (hash === '#/compare') return renderCompare();
+    if (hash === '#/map') return renderMap();
     overviewRoute();
   }
 
@@ -3928,11 +4087,15 @@
     if (document.hidden && !force) return;
     try {
       const now = Math.floor(Date.now() / 1000);
-      const [lat, ser, devs, health] = await Promise.all([
+      const [lat, ser, devs, health, expected, locs] = await Promise.all([
         api('/api/latest'),
         api(`/api/series?to=${now}&tz=${new Date().getTimezoneOffset()}`),
         api('/api/devices').catch(() => ({ devices: [] })),
         api('/api/health').catch(() => null),
+        // What the sun allowed today; missing until a system has a position and weather.
+        api('/api/expected').catch(() => null),
+        // Where each system is: the owner's alone, refused to anyone else.
+        api('/api/locations').catch(() => null),
       ]);
       // An offline inverter is not still producing whatever it managed just
       // before it dropped - nothing is flowing that anyone can see - so its
@@ -3946,7 +4109,7 @@
         i.grid_power_w = i.load_power_w = 0;
         if (i.battery_power_w != null) i.battery_power_w = 0;
       }
-      state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.error = null;
+      state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.expected = expected; state.locations = locs?.locations ?? []; state.error = null;
 
       const withData = lat.inverters.filter((i) => i.ts);
       // Offline systems now contribute a real zero rather than a last-known

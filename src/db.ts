@@ -483,6 +483,9 @@ export interface DayRow {
   export_kwh: number | null;
   batt_charge_kwh: number | null;
   batt_discharge_kwh: number | null;
+  /** The battery's lowest and highest charge that day, %; null without a battery. */
+  soc_min: number | null;
+  soc_max: number | null;
   samples: number;
   first_ts: number;
   last_ts: number;
@@ -555,6 +558,8 @@ export async function daily(
               MAX(json_extract(r.metrics, '$.gridExportTodayKwh')) AS export_kwh,
               MAX(json_extract(r.metrics, '$.battChargeTodayKwh')) AS batt_charge_kwh,
               MAX(json_extract(r.metrics, '$.battDischargeTodayKwh')) AS batt_discharge_kwh,
+              MIN(r.battery_soc) AS soc_min,
+              MAX(r.battery_soc) AS soc_max,
               COUNT(*) AS samples,
               MIN(r.ts)  AS first_ts,
               MAX(r.ts)  AS last_ts

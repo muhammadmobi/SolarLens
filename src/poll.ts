@@ -11,6 +11,7 @@
 import type { Env } from './db';
 import { insertReading, isDue, logPoll, markDone, tokenStore, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods } from './db';
 import type { Period } from './providers/events';
+import { upsertLocation } from './weather';
 import { SolisCloudProvider } from './providers/soliscloud';
 import { SolarmanProvider } from './providers/solarman';
 import { SolarmanWebProvider } from './providers/solarman-web';
@@ -117,6 +118,8 @@ async function pollProvider(env: Env, p: Provider, run: number): Promise<PollSum
         } catch { /* devices are supplementary */ }
       }
       for (const inv of invs) {
+        // Where it is, for the weather and the owner's map; never published.
+        await upsertLocation(env.DB, inv.id, plant.location ?? null);
         if (!inv.plantName) inv.plantName = plant.name;
         if (inv.capacityW === null) inv.capacityW = plant.capacityW ?? null;
         // getReading may fill in name/serial for plant-level units, so read first, then upsert.

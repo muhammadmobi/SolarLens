@@ -16,6 +16,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bearer, createHarness, testReading, type Harness } from '../helpers/worker';
 import { insertReading } from '../../src/db';
+import { storeWeather, upsertLocation } from '../../src/weather';
 import { deviceHistory, devices, inverters } from '../fixtures/dashboard-api';
 
 const post = (body: unknown) => ({
@@ -142,15 +143,21 @@ describe('the demo matches what the Worker sends', () => {
     // The vendor fixtures are dated; a sample from a minute ago gives the day
     // curve and the daily history something to answer with.
     const [{ id }] = h.d1.raw.prepare('SELECT id FROM inverters LIMIT 1').all() as { id: string }[];
-    await insertReading(h.env.DB, testReading({ inverterId: id, ts: Math.floor(Date.now() / 1000) - 60 }) as never);
+    const now = Math.floor(Date.now() / 1000);
+    await insertReading(h.env.DB, testReading({ inverterId: id, ts: now - 60 }) as never);
+    // A position and an hour of sunlight, so the weather and the expected
+    // output have something to answer with.
+    await upsertLocation(h.env.DB, id, { lat: 10.5, lng: 20.5 });
+    await storeWeather(h.env.DB, id, [{ ts: now - 60, ghi_wm2: 500, temp_c: 20, cloud_pct: 10 }], now);
     worker = {};
-    for (const path of ['/api/series', '/api/history', '/api/status', '/api/health']) {
+    for (const path of ['/api/series', '/api/history', '/api/status', '/api/health', '/api/expected', '/api/weather']) {
       worker[path] = (await (await h.fetch(path)).json()) as Record<string, unknown>;
     }
+    worker['/api/locations'] = (await (await h.fetch('/api/locations', { headers: bearer('api-token-for-tests') })).json()) as Record<string, unknown>;
   });
 
   it('answers every read the dashboard makes', () => {
-    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/auth/status', '/auth/settings']) {
+    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/auth/status', '/auth/settings']) {
       expect(demo, path).toHaveProperty([path]);
     }
   });
@@ -169,6 +176,18 @@ describe('the demo matches what the Worker sends', () => {
     for (const row of rowsOf(demo['/api/series'], 'points').slice(0, 5)) expect(fields(row)).toEqual(point);
     const day = fields(rowsOf(worker['/api/history'], 'rows')[0]);
     for (const row of rowsOf(demo['/api/history'], 'rows').slice(0, 5)) expect(fields(row)).toEqual(day);
+  });
+
+  it('its expected output, weather and positions have the Worker\'s fields', () => {
+    const pairs: [string, string][] = [['/api/expected', 'systems'], ['/api/weather', 'hours'], ['/api/locations', 'locations']];
+    for (const [path, key] of pairs) {
+      expect(fields(demo[path]), path).toEqual(fields(worker[path]));
+      const real = rowsOf(worker[path], key);
+      expect(real.length, path).toBeGreaterThan(0);
+      for (const row of rowsOf(demo[path], key)) expect(fields(row), path).toEqual(fields(real[0]));
+    }
+    const hour = fields((rowsOf(worker['/api/expected'], 'systems')[0].hours as Record<string, unknown>[])[0]);
+    for (const sys of rowsOf(demo['/api/expected'], 'systems')) expect(fields((sys.hours as Record<string, unknown>[])[0])).toEqual(hour);
   });
 
   it('its status and health answers have the Worker\'s shape', () => {

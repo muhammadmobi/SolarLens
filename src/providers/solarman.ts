@@ -15,6 +15,7 @@ import { emptyMetrics } from './types';
 import { CallQueue } from './queue';
 import { num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
 import { linkOf, loggerDetail, loggerNetwork } from './logger';
+import { locationOf } from '../weather';
 
 export interface SolarmanCredentials {
   appId: string;
@@ -390,6 +391,7 @@ export class SolarmanProvider implements Provider {
       capacityW: toWatts(pick(s, 'installedCapacity'), 'kW'),
       tzOffsetSec: tzOffsetSec(s),
       tzName: tzNameOf(s),
+      location: locationOf(s),
     }));
     for (const p of plants) this.plants.set(p.id, p);
     return plants;

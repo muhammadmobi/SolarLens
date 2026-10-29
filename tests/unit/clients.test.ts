@@ -172,8 +172,8 @@ describe('SolisCloudProvider', () => {
       // SolisCloud reports whole hours, and sometimes the zone's name beside
       // them - the name is what survives a daylight saving switch. A plant that
       // says neither keeps null, and the caller's own offset is used for it.
-      { id: '1000000000000000001', name: 'Demo Plant', capacityW: 12_000, tzOffsetSec: 9 * 3600, tzName: 'Asia/Tokyo' },
-      { id: '2', name: 'Second', capacityW: 500, tzOffsetSec: null, tzName: null },
+      { id: '1000000000000000001', name: 'Demo Plant', capacityW: 12_000, tzOffsetSec: 9 * 3600, tzName: 'Asia/Tokyo', location: null },
+      { id: '2', name: 'Second', capacityW: 500, tzOffsetSec: null, tzName: null, location: null },
     ]);
   });
 
