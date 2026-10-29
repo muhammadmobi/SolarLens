@@ -14,7 +14,55 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
-## [Unreleased]
+## [3.0.0] — 2026-10-29
+
+SolarLens can now be yours alone: an owner login with passkeys, and a dashboard
+that is private when the owner says so. Around it: any number of systems, the
+weather and what it should have made, money and carbon, an Analysis tab, alerts
+on ntfy, Telegram, Discord or a webhook, Home Assistant, an assistant that
+answers from your own figures, and an MCP server for AI apps. A major version
+because of the login - though nothing locks until the owner turns it on.
+
+### Upgrading from 2.x
+
+- **Deploy as usual.** The deploy takes a restore point, applies the nine new
+  migrations (0014 to 0022) and deploys the Worker; by hand, `npm run
+  db:remote` and then `npm run deploy`. The migrations add, 0021 turns round
+  the SolarMan battery readings 2.x stored with charging as discharging, and
+  0022 swaps an index the readings did not need for one the alerts do; no
+  table or column is dropped, so a Worker rolled back to 2.x still runs
+  against the 3.0 database. What 2.x stores meanwhile has charging the wrong
+  way round again, and 0021 does not run twice: after a rollback, run it once
+  more by hand when 3.0 is back (the README's upgrading guide has the command).
+
+- **Set `SECRET_KEY`** (recommended): `npm run cf -- secret put SECRET_KEY`,
+  with a long random value. Every key is then derived from it rather than from
+  `API_TOKEN`, so replacing `API_TOKEN` resets nothing. Without it, replacing
+  `API_TOKEN` means setting the password again and adding each place under
+  *Alerts elsewhere* again; signed-in devices, passkeys and connected apps
+  carry on either way.
+
+- **Nothing locks by itself.** The dashboard stays open until the owner turns on
+  *Require sign-in to view*. The relays, phone notifications and `/api/status`
+  need no change either way. On Cloudflare's free plan, turning it on also
+  keeps strangers from spending the database's daily allowance; a dashboard
+  left open can have the optional rate limit instead (`RATE_LIMIT`).
+
+- **Before turning it on,** sign in once on each device that shows the
+  dashboard - the TV included - or give it a share link, and give Home
+  Assistant or any other reader of `/api` a share link's token.
+
+- **The `/auth?t=…` link no longer signs a browser in.** Sign in on the page -
+  the same token is the setup code - or with a passkey or the password. A
+  browser that used the link in 2.x signs in once: the cookie it left held the
+  token itself, and is no longer accepted.
+
+- **A second cron**, once an hour at seven minutes past, is registered by the
+  deploy from `wrangler.jsonc`, and readings keep their vendor payload for 30
+  days from now on: nothing to do for either.
+
+- **If the deploy fails on the `ai` binding** with an authentication error,
+  give the deploy's Cloudflare API token the *Workers AI* permission.
 
 ### Added
 
@@ -1744,6 +1792,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[3.0.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.11.0...v3.0.0
 [2.11.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.10.0...v2.11.0
 [2.10.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.8.0...v2.9.0

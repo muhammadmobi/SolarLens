@@ -4910,7 +4910,7 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
   // sits behind an icon rather than taking a tab from the pages used every day.
   // RELEASE is kept equal to package.json's version by a unit test, so the
   // guide never describes a release other than the one it ships with.
-  const RELEASE = '2.11.0';
+  const RELEASE = '3.0.0';
 
   function renderGuide() {
     const systems = (state.latest?.inverters ?? []).map((inv) => {
@@ -4963,26 +4963,32 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
         <p class="lead">SolarLens puts your solar systems on one page. Each system is watched by a different vendor's cloud,
           SolisCloud or SolarMan; SolarLens reads both every five minutes, keeps every reading in its own database,
           and shows them side by side - in the same units, on the same clock, in each system's own time.</p>
-        <p>Nothing here can change an inverter: SolarLens only reads. Anyone with the link can view it, and the vendors'
-          account and serial numbers are removed before anything leaves the server.</p>
+        <p>Nothing here can change an inverter: SolarLens only reads. Anyone with the link can view it unless the owner has
+          made it private, and the vendors' account and serial numbers are removed before anything leaves the server.</p>
         ${systems ? `<div class="systems" aria-label="Your systems">${systems}</div>` : ''}
       </div></section>
 
       <section class="card"><h2>What is new in ${RELEASE}</h2><div class="body"><ul>
-        <li><strong>SolisCloud readings arrive again.</strong> SolisCloud moved its plant page in October, and the relay
-          now finds the new one. A relay that stops is started again within ten minutes, and the monthly and yearly
-          totals come through again.</li>
-        <li><strong>The relay logs in to SolisCloud by itself</strong> when its seven-day login runs out, out of sight.
-          A window opens only if SolisCloud asks for a puzzle or a code.</li>
-        <li><strong>A proper Guide button</strong> - an open book at the top of every page.</li>
-        <li><strong>Historical Data, one system at a time.</strong> Pick a system at the top, or All systems; the CSV
-          follows your choice.</li>
-        <li><strong>"A new version of SolarLens is available."</strong> A tab left open is told when there is a newer
-          release, with a Reload button; TV mode reloads by itself.</li>
-        <li><strong>No wider than a phone.</strong> Every page now fits a phone's screen; the tabs scroll sideways.</li>
+        <li><strong>Yours alone, if you like.</strong> ${tab('#/settings', 'Settings')} (the gear): sign in once per
+          device, with a passkey or a password, then <em>Require sign-in to view</em>. <em>Share to view</em> makes a
+          link that lets someone see it and change nothing.</li>
+        <li><strong>Ask SolarLens anything.</strong> ${tab('#/ask', 'Ask')}: questions in words, with follow-ups -
+          an analysis of what stands out and what to do, a graph of any measure, statistics, comparisons, why a day was
+          low, what the inverter shows, a report to download or print, or how to do something here. Every figure is
+          worked out by SolarLens and shown with the answer.</li>
+        <li><strong>Against the weather.</strong> A dashed line on each day curve shows what the sun allowed, and you are
+          told when a system makes far less. The ${tab('#/map', 'Map')} shows where each system is, to the owner only.</li>
+        <li><strong>What the sun has saved.</strong> Set the tariff in Settings, and each system's page and Historical Data
+          show the money saved and the CO₂ avoided.</li>
+        <li><strong>New views.</strong> ${tab('#/analysis', 'Analysis')}, a day hour by hour; ${tab('#/compare', 'Compare')},
+          every system per kWp; and stars and groups to put the systems you watch first.</li>
+        <li><strong>Told where you already look.</strong> Alerts and a Monday summary on ntfy, Telegram, Discord or a
+          webhook; every figure in Home Assistant; SolarLens in Claude or another AI app. All under Settings.</li>
+        <li><strong>A health check every Monday</strong> flags a system slowly making less for its sunlight - dirt, shade,
+          a string down - and the weekly report says what the week's analysis found needs a look, and what to do.</li>
       </ul>
-      <p class="cardnote">In 2.10: notifications on your phone even with the dashboard closed, SolarMan faults that
-        say when they cleared, and this guide.</p>
+      <p class="cardnote">In 2.11: SolisCloud readings again after SolisCloud moved its plant page, a relay that logs
+        in by itself and starts again if it stops, a Guide button, and Historical Data one system at a time.</p>
       </div></section>
 
       <section class="card"><h2>The tabs</h2><div class="body"><dl class="tabs">
@@ -4992,6 +4998,14 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
         <dt>${tab('#/power', 'Power')}</dt>
         <dd>Every system on one chart, plus each system in full, one below the other: energy today, this month, this
           year and in total; grid in and out; the battery; each PV string and AC phase; and the raw telemetry.</dd>
+        <dt>${tab('#/analysis', 'Analysis')}</dt>
+        <dd>Any of the last seven days, hour by hour: what the panels made against what the house used, the peaks, and
+          how much of the sun's output the house used itself.</dd>
+        <dt>${tab('#/compare', 'Compare')}</dt>
+        <dd>With two systems or more: each one per kWp of panels, today and this month, so different sizes compare
+          fairly.</dd>
+        <dt>${tab('#/map', 'Map')}</dt>
+        <dd>Where each system is, on OpenStreetMap - for the signed-in owner, and nobody else.</dd>
         <dt>${tab('#/history', 'Historical Data')}</dt>
         <dd>The record, by day, month or year - back to installation for months and years, from each vendor's own totals.
           Every system at once, or one on its own. Each row says whose figure it is. Download CSV takes the rows on screen.</dd>
@@ -5001,6 +5015,9 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
         <dt>${tab('#/devices', 'Devices')}</dt>
         <dd>The hardware: inverters and dataloggers with model, firmware and signal strength - and the
           SolisCloud relay laptops, with when each one's login runs out.</dd>
+        <dt>${tab('#/ask', 'Ask')}</dt>
+        <dd>The assistant: ask in words and follow up - statistics, a report, why a day was low, how to do something.
+          Below it, the week's report and each system's health.</dd>
       </dl></div></section>
 
       <section class="card"><h2>Where to find it</h2><div class="tablewrap" tabindex="0" role="region" aria-label="Where to find it, scrolls sideways">
@@ -5012,7 +5029,9 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
         <li><strong>Producing now, Produced today, Consumed today</strong> - every system added together. A system that
           has gone quiet counts as zero and is named underneath.</li>
         <li><strong>The green dot</strong> says when the page last heard from the server. Amber means it has not for a while.</li>
-        <li><strong>Guide</strong> (the open book) this page · <strong>📺</strong> TV mode · <strong>🖥️</strong> light or dark.</li>
+        <li><strong>Guide</strong> (the open book) this page · <strong>the gear</strong> Settings - signing in, sharing, the
+          tariff, groups, alerts elsewhere, Home Assistant and connected apps · <strong>📺</strong> TV mode ·
+          <strong>🖥️</strong> light or dark.</li>
       </ul></div></section>
 
       <section class="card"><h2>Good to know</h2><div class="body"><ul>

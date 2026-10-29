@@ -73,53 +73,13 @@ mistakes already made here:
 
 ### Where things stand
 
-- **Live:** 2.11.0, deployed from `main`.
-- **Ready, not yet released:** 3.0 - every phase of `docs/roadmap.md`, 1 to 14,
-  the review before release included - on the `roadmap` branch, pull request
-  #34. Every test that runs outside GitHub passes: the type check, 898 unit
-  tests with coverage above every threshold, 13 integration tests against the
-  real Worker, about 600 end-to-end tests, and the guards. Lighthouse, CodeQL,
-  dependency review, the secret scan, workflow lint and the screenshot
-  comparison run only on GitHub, on the push. What the Worker ships with has
-  no known advisory; the development tools have one, moderate, in `undici`
-  under wrangler's local simulator, for the next dependency update.
+- **Live:** 3.0.0, released on 29 October 2026 and deployed from `main` -
+  every phase of `docs/roadmap.md`, 1 to 14, the review before release
+  included. What changed, and how to bring a copy of 2.x up to it:
+  `CHANGELOG.md` and the README's *Upgrading from 2.x*.
 
-**To release 3.0, in this order:**
-
-1. **Push, and answer the review.** Every review thread must be resolved before
-   the merge - the ruleset refuses it otherwise. Two from 25 September, on the
-   service worker's offline cache and the passkey counter, are fixed by the
-   commit "Phase 3 review: the installed app keeps no API answers, and a
-   passkey's counter moves atomically": reply naming it, and resolve them.
-   Copilot then reviews the new commits: fix, reply, resolve, until none is open.
-2. **Three GitHub settings, once, before the merge:**
-   Settings → Actions → General → *Allow GitHub Actions to create and approve
-   pull requests*, for the owner's own pull requests to be approved once ready;
-   Settings → Pages → source *GitHub Actions*, for the demo, whose address
-   answers 404 until then; and a **repository** secret `SOLARLENS_URL` for the
-   production watcher, which does not see the `production` environment's own
-   copy. `PRIVACY_VALUES`, also a repository secret, is optional: the real
-   values, for the privacy guard to refuse by name.
-3. **Set `SECRET_KEY` before the deploy:** `npm run cf -- secret put SECRET_KEY`,
-   a long random value, kept with the other secrets. Set before the first 3.0
-   deploy, every key is made with it from the start, and nothing has to move
-   over later.
-4. **Record the screenshot pictures, in the pull request:** once its last
-   commit has been through Checks, add the files of that run's
-   *visual-baselines* artifact to `tests/visual/__screenshots__/linux/`, and
-   make the README's *Screenshot comparison* row and section 14 say they are
-   there. `main` then starts with them, and nothing is left for after the
-   release.
-5. **Merge** with *Rebase and merge*, so each phase stays a commit of its own.
-6. **Approve the deploy** - the `production` environment asks. It takes a
-   restore point, applies migrations 0014 to 0022, deploys, and asks the live
-   site whether it works. If it fails on the `ai` binding, give the deploy's
-   Cloudflare API token the *Workers AI* permission (Cloudflare dashboard → My
-   Profile → API Tokens) and run it again.
-7. **Release:** Actions → Release → Run workflow, version 3.0.0. The changelog
-   dates it 29 October 2026; if the tag comes later, change that date first.
-8. **Then, on the live site:** sign in with the setup code, set a password, add
-   a passkey on each phone and computer, and decide on *Require sign-in to view*.
+**Once, on the live site:** sign in with the setup code, set a password, add a
+passkey on each phone and computer, and decide on *Require sign-in to view*.
 
 **Decisions left to the owner:** which Cloudflare plan this runs on (everything
 is held to the free plan's limits); *Require sign-in to view*, which also keeps
@@ -130,11 +90,11 @@ website; and the local branches already merged, which can go.
 
 **Every week:** renew a SolisCloud login when the dashboard says (section 7).
 
-**After 3.0:** a dependency update in one pull request (wrangler, for
-`undici`), and the items left on purpose in section 14.
+**Next:** a dependency update in one pull request (wrangler, for `undici`), and
+the items left on purpose in section 14.
 
-The release rewrites this part: it is the one place in this file that
-describes a moment rather than the system.
+Rewrite this part whenever it stops being true: it is the one place in this
+file that describes a moment rather than the system.
 
 ## 2. What SolarLens is
 
