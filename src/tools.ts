@@ -24,7 +24,7 @@
  * every public answer. Days are the plants' own - a date means that date where
  * the panels are.
  */
-import { daily, inverterIds, latest, listAlarms, listPeriods, nowSec, series, type DayRow } from './db';
+import { daily, inverterIds, latest, listAlarms, listPeriods, listRelays, nowSec, series, type DayRow } from './db';
 import { LEARN_DAYS, MIN_SAMPLES, MIN_SUN_KWH_M2, TYPICAL_RATIO } from './expected';
 import { aliasFor } from './public-view';
 import { STALE_AFTER_S } from './sensors';
@@ -156,6 +156,7 @@ export const DEFAULT_RANGE: Record<string, Range> = {
   stats: 'last_30_days',
   report: 'last_month',
   outages: 'last_7_days',
+  battery: 'last_7_days',
 };
 
 /**
@@ -348,13 +349,21 @@ export function jsonSchemaOf(tool: Tool): Record<string, unknown> {
 
 const statusNow: Tool = {
   name: 'status_now',
-  description: 'What each system is doing right now: its power, what it has made today, its battery, and whether it is reporting.',
+  description: "What each system is doing right now: its power, what it has made today, its battery, whether it is reporting, and its inverter's temperature.",
   params: { system: systemParam },
   async run({ db, now }, args) {
     const all = await loadSystems(db);
     const chosen = pickSystems(all, args.system);
     const off = zoneOf(all);
-    const live = (await latest(db)).filter((r) => chosen.some((s) => s.id === r.id));
+    const [lat, { results: heat }] = await Promise.all([
+      latest(db),
+      // Each inverter's temperature: its device record keeps the latest one only.
+      db.prepare(
+        `SELECT i.id AS inverter_id, d.temp_c, d.last_seen FROM devices d
+         JOIN inverters i ON i.plant_id = d.plant_id AND i.provider = d.provider WHERE d.kind = 'inverter' AND d.temp_c IS NOT NULL`,
+      ).all<{ inverter_id: string; temp_c: number; last_seen: number | null }>(),
+    ]);
+    const live = lat.filter((r) => chosen.some((s) => s.id === r.id));
     const rows = chosen.map((s) => {
       const r = live.find((x) => x.id === s.id);
       const on = !!r?.ts && now - r.ts <= STALE_AFTER_S && r.status !== 'offline';
@@ -369,16 +378,34 @@ const statusNow: Tool = {
     const online = rows.filter((x) => x[1] === 'reporting').length;
     const freshness = await freshnessOf(db, chosen, now);
     const who = chosen.length === 1 ? chosen[0].name : `Your ${chosen.length} systems`;
+    // A moment today by its time; one from an earlier day with its day as well.
+    const stamp = (ts: number, o: number) => (dayNo(ts, o) === dayNo(now, o) ? clock(ts, o) : at(ts, o));
+    const temps = chosen.map((s) => ({ s, t: heat.find((x) => x.inverter_id === s.id) })).filter((x) => x.t);
+    const tempFacts: ToolResult['facts'] = Object.fromEntries(temps.map(({ s, t }) => [`${chosen.length === 1 ? '' : `${s.alias}_`}inverter_temp_c`, r1(t!.temp_c)]));
+    const tempWords = temps.length
+      ? ` Inverter temperature, as last read: ${temps.map(({ s, t }) => `${s.name} ${r1(t!.temp_c)} °C${t!.last_seen ? ` (${stamp(t!.last_seen, s.off ?? off)})` : ''}`).join(', ')}.`
+      : '';
+    const batteries = chosen.map((s) => {
+      const r = live.find((x) => x.id === s.id);
+      if (r?.battery_soc == null || !r.ts) return '';
+      const on = now - r.ts <= STALE_AFTER_S && r.status !== 'offline';
+      return ` ${s.name}'s battery ${on ? `is at ${Math.round(r.battery_soc)}%` : `was at ${Math.round(r.battery_soc)}% at its last reading, ${stamp(r.ts, s.off ?? off)}`}.`;
+    }).join('');
     return {
       tool: 'status_now',
       title: 'Right now',
       period: { from: isoDay(dayNo(now, off)), to: isoDay(dayNo(now, off)), label: `today (${dayWords(isoDay(dayNo(now, off)), true)})` },
       columns: ['System', 'Status', 'Power now (W)', 'Made today (kWh)', 'Battery (%)', 'Last reading'],
       rows,
-      facts: { power_now_w: power, made_today_kwh: today, reporting: online, systems: chosen.length },
-      notes: freshness.offline.length ? [`Not reporting now: ${freshness.offline.join(', ')}. An offline system counts as making nothing.`] : [],
+      facts: { power_now_w: power, made_today_kwh: today, reporting: online, systems: chosen.length, ...tempFacts },
+      notes: [
+        ...(freshness.offline.length ? [`Not reporting now: ${freshness.offline.join(', ')}. An offline system counts as making nothing.`] : []),
+        ...(temps.length ? ["An inverter's temperature is kept as last read, not through the day."] : []),
+      ],
       summary: `${who} ${chosen.length === 1 ? 'is' : 'are'} making ${power >= 1000 ? `${r2(power / 1000)} kW` : `${power} W`} now, and ${kwh(today)} so far today`
-        + `${chosen.length > 1 ? `; ${online} of ${chosen.length} reporting` : online ? '' : '; it is not reporting'}.`,
+        + `${chosen.length > 1 ? `; ${online} of ${chosen.length} reporting` : online ? '' : '; it is not reporting'}.`
+        // Each battery's charge - the last one read, said as such when the system is not reporting now - and each inverter's temperature.
+        + batteries + tempWords,
       freshness,
     };
   },
@@ -444,11 +471,12 @@ async function firstRecord(db: D1Database, systems: Sys[], off: number): Promise
 const energy: Tool = {
   name: 'energy',
   description: 'Energy over a period - made, used by the house, bought from the grid and sold to it - in total or per day, week, month or year, '
-    + 'for one system or all together. For "how much", "which month was best", "how much did I export". With the tariff set, also the money saved and the CO2 avoided.',
+    + 'for one system or all together. For "how much", "which month was best", "how much did I export". With the tariff set, also the money saved and the CO2 avoided '
+    + '(measure "saved"); and how much of what was made was used at home, and how much of what the house used the sun covered (measure "self").',
   params: {
     ...periodParams,
     group_by: { type: 'string', enum: ['day', 'week', 'month', 'year', 'total'], description: 'How to split the period; by default days for a month or less, months for up to a year, else years.', optional: true },
-    measure: { type: 'string', enum: ['made', 'used', 'imported', 'exported', 'all'], description: 'Which energy the question is about; all by default.', optional: true },
+    measure: { type: 'string', enum: ['made', 'used', 'imported', 'exported', 'saved', 'self', 'all'], description: 'Which energy the question is about; all by default. saved: the money and CO2; self: the share used at home.', optional: true },
     system: systemParam,
   },
   async run({ db, now }, args) {
@@ -490,8 +518,10 @@ const energy: Tool = {
 
     const facts: ToolResult['facts'] = {};
     for (const m of present) facts[`total_${m}_kwh`] = r1(sums.reduce((a, s) => a + ((s[m] as number | null) ?? 0), 0));
-    const measure = (args.measure as Measure | 'all' | undefined) ?? 'all';
-    const focus: Measure = measure === 'all' ? 'made' : measure;
+    const measure = (args.measure as Measure | 'saved' | 'self' | 'all' | undefined) ?? 'all';
+    // The money and the share used at home are about what was made, with every figure beside it.
+    const wide = measure === 'all' || measure === 'saved' || measure === 'self';
+    const focus: Measure = wide ? 'made' : measure;
     // Day by day, a day not wholly recorded for every system - a system's first
     // evening, a relay off for most of it - is nobody's best or lowest day: its
     // figure is only what was recorded. It stays in the table and the totals.
@@ -531,7 +561,7 @@ const energy: Tool = {
         : `SolarLens's own record begins on ${dayWords(first)}; nothing before it is counted.`);
     } else if (usedVendor) notes.push("Whole months use the vendor's own month totals where they are larger than SolarLens's record.");
     for (const m of ['used', 'imported', 'exported'] as Measure[]) {
-      if (measure !== m && measure !== 'all') continue;
+      if (measure !== m && !wide) continue;
       const blind = chosen.filter((s) => !days.some((d) => d.inverter_id === s.id && d[fieldOf[m]] != null));
       if (blind.length && blind.length < chosen.length) notes.push(`${blind.map((s) => s.name).join(', ')} ${blind.length === 1 ? 'does' : 'do'} not report what ${m === 'used' ? 'the house used' : `was ${m === 'imported' ? 'bought' : 'sold'}`}.`);
     }
@@ -545,11 +575,37 @@ const energy: Tool = {
     const total = facts[`total_${focus}_kwh`];
     let summary = total == null
       ? `There is no record of energy ${verb[focus]} ${p.label}.`
-      : `${who} ${verb[focus]} ${kwh(total as number)} ${focus === 'used' && chosen.length > 1 ? 'in the houses ' : ''}${focus === 'imported' ? 'from the grid ' : focus === 'exported' ? 'to the grid ' : ''}${p.label}.`;
+      : focus === 'used'
+        ? `${chosen.length > 1 ? 'The houses' : 'The house'} used ${kwh(total as number)} ${p.label}${chosen.length === 1 ? `, as ${who} measured it` : ''}.`
+        : `${who} ${verb[focus]} ${kwh(total as number)} ${focus === 'imported' ? 'from the grid ' : focus === 'exported' ? 'to the grid ' : ''}${p.label}.`;
     if (facts[`highest_${focus}_period`]) {
-      summary += ` The ${group === 'total' ? 'best' : `best ${group}`} was ${facts[`highest_${focus}_period`]} with ${kwh(facts[`highest_${focus}_kwh`] as number)}; the lowest was ${facts[`lowest_${focus}_period`]} with ${kwh(facts[`lowest_${focus}_kwh`] as number)}.`;
+      // Made has a best day; what was used, bought or sold has only a highest.
+      const top = focus === 'made' ? 'best' : 'highest';
+      summary += ` The ${group === 'total' ? top : `${top} ${group}`} was ${facts[`highest_${focus}_period`]} with ${kwh(facts[`highest_${focus}_kwh`] as number)}; the lowest was ${facts[`lowest_${focus}_period`]} with ${kwh(facts[`lowest_${focus}_kwh`] as number)}.`;
     }
-    if (facts.saved != null && focus === 'made') summary += ` That saved about ${facts.saved} ${facts.currency} and avoided ${facts.co2_avoided_kg} kg of CO2.`;
+
+    // How much of what was made was used at home, over the systems that say what they sold; and how
+    // much of what the houses used the sun covered, over those that say what they bought.
+    const per = (sys: Sys, m: Measure) => sumOrNull(keys.map((k) => table.get(k)!.get(sys.id)![m]));
+    const selling = chosen.filter((sys) => per(sys, 'made') != null && per(sys, 'exported') != null);
+    const buying = chosen.filter((sys) => per(sys, 'used') != null && per(sys, 'imported') != null);
+    const madeS = selling.reduce((x, sys) => x + (per(sys, 'made') ?? 0), 0);
+    const soldS = selling.reduce((x, sys) => x + (per(sys, 'exported') ?? 0), 0);
+    const usedB = buying.reduce((x, sys) => x + (per(sys, 'used') ?? 0), 0);
+    const boughtB = buying.reduce((x, sys) => x + (per(sys, 'imported') ?? 0), 0);
+    if (madeS > 0) Object.assign(facts, { made_by_systems_reporting_sales_kwh: r1(madeS), used_at_home_pct: Math.round(Math.max(0, madeS - soldS) / madeS * 100), sold_pct: Math.round(Math.min(soldS, madeS) / madeS * 100) });
+    if (usedB > 0) facts.covered_by_the_sun_pct = Math.round(Math.max(0, usedB - boughtB) / usedB * 100);
+
+    if (measure === 'saved') {
+      summary = facts.saved != null
+        ? `${who} saved about ${facts.saved} ${facts.currency} ${p.label}, and avoided ${facts.co2_avoided_kg} kg of CO2, from ${kwh(total as number ?? 0)} made.`
+        : `No tariff is set yet, so SolarLens cannot work out the money saved: the owner sets the prices under Settings → Tariff. ${summary}`;
+    } else if (measure === 'self') {
+      summary = madeS > 0
+        ? `Of the ${kwh(madeS)} made ${p.label}${selling.length < chosen.length ? ` by ${selling.map((sys) => sys.name).join(', ')}, which ${selling.length === 1 ? 'reports what it' : 'report what they'} sold,` : ','} ${facts.used_at_home_pct}% was used at home and ${facts.sold_pct}% sold to the grid.`
+          + `${facts.covered_by_the_sun_pct != null ? ` The sun covered ${facts.covered_by_the_sun_pct}% of what the house${buying.length > 1 ? 's' : ''} used.` : ''}`
+        : `SolarLens cannot tell how much was used at home ${p.label}: no system here reports what it sold. ${summary}`;
+    } else if (facts.saved != null && focus === 'made') summary += ` That saved about ${facts.saved} ${facts.currency} and avoided ${facts.co2_avoided_kg} kg of CO2.`;
     return {
       tool: 'energy',
       title: `Energy${group === 'total' ? '' : ` per ${group}`}${chosen.length === 1 ? `, ${chosen[0].name}` : ''}`,
@@ -743,7 +799,13 @@ const dayReport: Tool = {
         causes.push(`a fault: ${a.message ?? `fault ${a.code}`}, ${a.begin_ts >= start ? `from ${clock(a.begin_ts, o)}` : 'from the day before'}${a.end_ts ? ` to ${clock(a.end_ts, o)}` : ', not cleared that day'}`);
       }
       if (share != null && share >= 0.9 && !faultsThatDay.length && offline < GAP_S) causes.splice(0, causes.length, `not a low day: ${Math.round(share * 100)}% of a usual day`);
-      else if (!causes.length) causes.push(share != null ? `a little below usual (${Math.round(share * 100)}%), with no one cause` : 'too little record before it to say what is usual');
+      else if (!causes.length) {
+        causes.push(share == null ? 'too little record before it to say what is usual'
+          : share < DULL
+            // Well below with no cause found: say whether the sunlight could have been checked at all.
+            ? `well below usual (${Math.round(share * 100)}%)${sunDay == null ? ', and there is no sunlight on record for that day to tell whether it was the weather' : ', with no cause in the figures'}`
+            : `a little below usual (${Math.round(share * 100)}%), with no one cause`);
+      }
 
       const k = chosen.length === 1 ? '' : `${s.alias}_`;
       Object.assign(facts, {
@@ -898,8 +960,8 @@ const performanceTrend: Tool = {
 /** Minutes past midnight, and back: "14:05" is 845. */
 const minutesOf = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 const hhmmOf = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-/** Watts as kW for a sentence: "2.35 kW". */
-const kw = (w: number) => `${r2(w / 1000)} kW`;
+/** Power for a sentence: "2.35 kW", or "310 W" under a kilowatt. */
+const kw = (w: number) => (Math.abs(w) < 1000 ? `${Math.round(w)} W` : `${r2(w / 1000)} kW`);
 /** A reading under this share of the day's highest is not making power: a trickle at dawn. */
 const MAKING_SHARE = 0.02;
 /** A fall of this share of the day's highest power, from one reading to the next, is a sharp drop. */
@@ -1097,6 +1159,75 @@ const powerDay: Tool = {
   },
 };
 
+// ---------------------------------------------------------------- the battery
+
+const batteryTool: Tool = {
+  name: 'battery',
+  description: "A battery's charge now, and over a period each day's lowest and highest charge and what the battery took in and gave out - "
+    + 'the last 7 days unless one is named. For "battery percentage", "how much did the battery charge", "did the battery run low".',
+  params: { ...periodParams, system: systemParam },
+  async run({ db, now }, args) {
+    const all = await loadSystems(db);
+    const chosen = pickSystems(all, args.system);
+    const off = zoneOf(all);
+    const p = resolvePeriod(args, now, off, DEFAULT_RANGE.battery);
+    const [live, days] = await Promise.all([latest(db), dayRows(db, chosen, p, off)]);
+    // A system has a battery when it reports a charge, now or on any day of the period.
+    const withBattery = chosen.filter((s) => live.find((r) => r.id === s.id)?.battery_soc != null
+      || days.some((d) => d.inverter_id === s.id && (d.soc_max != null || d.batt_charge_kwh != null)));
+
+    const facts: ToolResult['facts'] = {};
+    const lines: string[] = [];
+    const rows: (string | number | null)[][] = [];
+    for (const s of withBattery) {
+      const o = s.off ?? off;
+      const k = withBattery.length === 1 ? '' : `${s.alias}_`;
+      const r = live.find((x) => x.id === s.id);
+      const on = !!r?.ts && now - r.ts <= STALE_AFTER_S && r.status !== 'offline';
+      const mine = days.filter((d) => d.inverter_id === s.id).sort((x, y) => x.day.localeCompare(y.day));
+      for (const d of mine) {
+        rows.push([s.name, dayWords(d.day, true), d.batt_charge_kwh != null ? r1(d.batt_charge_kwh) : null, d.batt_discharge_kwh != null ? r1(d.batt_discharge_kwh) : null,
+          d.soc_min != null ? Math.round(d.soc_min) : null, d.soc_max != null ? Math.round(d.soc_max) : null]);
+      }
+      const charged = sumOrNull(mine.map((d) => d.batt_charge_kwh));
+      const discharged = sumOrNull(mine.map((d) => d.batt_discharge_kwh));
+      const lowest = mine.filter((d) => d.soc_min != null).reduce<DayRow | null>((x, d) => (!x || (d.soc_min as number) < (x.soc_min as number) ? d : x), null);
+      const highs = mine.filter((d) => d.soc_max != null).map((d) => d.soc_max as number);
+      const highest = highs.length ? Math.round(Math.max(...highs)) : null;
+      const nowPct = r?.battery_soc != null ? Math.round(r.battery_soc) : null;
+      Object.assign(facts, {
+        [`${k}charge_now_pct`]: nowPct,
+        [`${k}charged_kwh`]: charged != null ? r1(charged) : null,
+        [`${k}discharged_kwh`]: discharged != null ? r1(discharged) : null,
+        [`${k}lowest_pct`]: lowest ? Math.round(lowest.soc_min as number) : null,
+        [`${k}lowest_day`]: lowest ? dayWords(lowest.day, true) : null,
+        [`${k}highest_pct`]: highest,
+      });
+      let said = nowPct == null ? `${s.name}'s battery has no charge reading.`
+        : on ? `${s.name}'s battery is at ${nowPct}% now.` : `${s.name}'s battery was at ${nowPct}% at its last reading, ${at(r!.ts!, o)}.`;
+      const parts: string[] = [];
+      if (charged != null || discharged != null) parts.push(`it took in ${kwh(charged ?? 0)} and gave out ${kwh(discharged ?? 0)}`);
+      const oneDay = p.from === p.to;
+      if (lowest && highest != null) parts.push(`its charge went from ${Math.round(lowest.soc_min as number)}% at its lowest${oneDay ? '' : `, on ${dayWords(lowest.day, true)},`} to ${highest}% at its highest`);
+      // "Yesterday (Sun 27 Sep 2026), it took in...", "Over the last 7 days (...), it took in...".
+      const over = oneDay ? p.label[0].toUpperCase() + p.label.slice(1) : `Over ${p.label}`;
+      said += parts.length ? ` ${over}, ${parts.join(', and ')}.` : ` There is no record of it ${oneDay ? 'on' : 'over'} ${p.label}.`;
+      lines.push(said);
+    }
+    return {
+      tool: 'battery',
+      title: 'The battery',
+      period: p,
+      columns: ['System', 'Day', 'Charged (kWh)', 'Discharged (kWh)', 'Lowest charge (%)', 'Highest charge (%)'],
+      rows,
+      facts,
+      notes: ["What the battery took in and gave out is the inverter's own day counter for it, where it reports one; its charge is the state of charge the inverter reports."],
+      summary: withBattery.length ? lines.join(' ') : `${chosen.length === 1 ? `${chosen[0].name} reports no battery` : 'None of your systems reports a battery'}.`,
+      freshness: await freshnessOf(db, chosen, now),
+    };
+  },
+};
+
 // ---------------------------------------------------------------- outages
 
 /** Sunlight above this, W/m2, is day: a system silent then has stopped, not gone to sleep. */
@@ -1108,7 +1239,8 @@ const outages: Tool = {
   name: 'outages',
   description: 'When each system stopped reporting and when it came back: whether it is reporting now and since when not, the last time it made power, '
     + 'and each stretch of daylight with no readings over a period - the last 7 days unless one is named, a month at most. Silence at night is not counted. '
-    + 'For "since when is it offline", "when did it stop working", "when did it last generate", "how often does it drop out".',
+    + "Says why, where something else reports it: the plant's datalogger offline, or for SolisCloud the relay silent or its login run out - and when the relay's login runs out. "
+    + 'For "since when is it offline", "is it online", "when did it stop working", "when did it last generate", "when does the Solis login expire".',
   params: { ...periodParams, system: systemParam },
   async run({ db, now }, args) {
     const all = await loadSystems(db);
@@ -1119,7 +1251,15 @@ const outages: Tool = {
     // The period, and a day either side for plants on other clocks than the first.
     const from = noOf(p.from) * DAY - off - DAY;
     const until = Math.min((noOf(p.to) + 1) * DAY - off + DAY, now);
-    const [live, points, weather] = await Promise.all([latest(db), series(db, from, until), weatherSince(db, from)]);
+    const [live, points, weather, relays, loggers] = await Promise.all([
+      latest(db), series(db, from, until), weatherSince(db, from),
+      // What can tell why a system went quiet: the relays' own reports, and each plant's datalogger.
+      listRelays(db, now - 30 * DAY),
+      db.prepare(
+        `SELECT i.id AS inverter_id, d.status, d.last_seen FROM devices d
+         JOIN inverters i ON i.plant_id = d.plant_id AND i.provider = d.provider WHERE d.kind = 'datalogger'`,
+      ).all<{ inverter_id: string; status: string | null; last_seen: number | null }>().then((x) => x.results),
+    ]);
 
     const facts: ToolResult['facts'] = {};
     const lines: string[] = [];
@@ -1173,7 +1313,12 @@ const outages: Tool = {
 
       let said: string;
       if (lastSeen == null) said = `${s.name} has not reported at all.`;
-      else if (on) said = `${s.name} is reporting now (last reading ${clock(lastSeen, o)}).`;
+      else if (on) {
+        said = `${s.name} is reporting now (last reading ${clock(lastSeen, o)}).`;
+        // A relay-fed system's figures last only as long as the relay's login: say how long that is.
+        const login = s.provider === 'soliscloud' ? relays.filter((x) => x.provider === 'soliscloud' && x.login_expires_at).sort((x, y) => y.last_seen - x.last_seen)[0]?.login_expires_at : null;
+        if (login) said += login > now ? ` Its relay's SolisCloud login is good until ${at(login, o)}.` : ` Its relay's SolisCloud login ran out on ${at(login, o)}: renew it with renew-solis-login.cmd.`;
+      }
       else {
         const darkThen = !light(lastSeen);
         const darkNow = !light(now);
@@ -1182,9 +1327,28 @@ const outages: Tool = {
         if (darkThen && darkNow && !battery) said += ': it went quiet after dark, when an inverter without a battery switches off, so this is expected until sunrise.';
         else {
           said += darkThen ? ', after dark, and it has not come back' : ', in daylight';
-          said += s.provider === 'soliscloud'
-            ? '. Its figures come through the relay: check the relay laptop is on and its SolisCloud login is current (Devices tab).'
-            : '. The vendor may be down, or the logger may have lost its network.';
+          // Why, from what else reports: the plant's datalogger, and for SolisCloud the relay that fetches its figures.
+          const causes: string[] = [];
+          const logger = loggers.find((x) => x.inverter_id === s.id);
+          if (logger?.status === 'offline' && logger.last_seen) {
+            causes.push(`its datalogger has been offline since ${at(logger.last_seen, o)}, so the vendor has nothing new to send: check the datalogger's Wi-Fi and power at the site`);
+          }
+          if (s.provider === 'soliscloud') {
+            const relay = relays.filter((x) => x.provider === 'soliscloud').sort((x, y) => y.last_seen - x.last_seen)[0];
+            if (relay && now - relay.last_seen <= STALE_AFTER_S) {
+              causes.push(`the relay is running - it last reported at ${clock(relay.last_seen, o)}${relay.login_expires_at && relay.login_expires_at > now ? `, and its SolisCloud login is good until ${at(relay.login_expires_at, o)}` : ''} - so the relay laptop is not the cause`);
+            } else if (relay?.login_expires_at && relay.login_expires_at <= now) {
+              causes.push(`the relay's SolisCloud login ran out on ${at(relay.login_expires_at, o)}: renew it with renew-solis-login.cmd on the relay laptop`);
+            } else {
+              causes.push(`no relay has reported${relay ? ` since ${at(relay.last_seen, o)}` : ''}: check the relay laptop is on`
+                + (relay?.login_expires_at ? ` - its SolisCloud login is good until ${at(relay.login_expires_at, o)}` : ' and its SolisCloud login is current (Devices tab)'));
+            }
+          } else if (!causes.length) causes.push('the vendor may be down, or the logger may have lost its network');
+          said += `. ${causes.map((c) => c[0].toUpperCase() + c.slice(1)).join('. ')}.`;
+          Object.assign(facts, {
+            [`${k}datalogger`]: logger?.status ?? null,
+            [`${k}datalogger_last_seen`]: logger?.last_seen ? at(logger.last_seen, o) : null,
+          });
         }
       }
       said += lastPower ? ` It last made power at ${at(lastPower.ts, o)} (${kw(lastPower.w)}).` : ` It made no power in ${p.label}.`;
@@ -1219,8 +1383,14 @@ const outages: Tool = {
 const statsTool: Tool = {
   name: 'stats',
   description: "Statistics of each system's daily energy over a period, from whole days: days recorded, their total, the average and median day, the best and worst day, "
-    + 'how much days vary, kWh per kWp, capacity factor, low days, and the average day against the same length of time just before. For "statistics", "average day", "how consistent".',
-  params: { ...periodParams, system: systemParam },
+    + 'how much days vary, kWh per kWp, capacity factor, low days, and the average day against the same length of time just before - and, when asked, how many days '
+    + 'made more (above) or less (below) than an amount. For "statistics", "average day", "how consistent", "how many days above 50 kWh".',
+  params: {
+    ...periodParams,
+    system: systemParam,
+    above: { type: 'integer', min: 0, max: 100000, description: 'Count the whole days that made more than this many kWh.', optional: true },
+    below: { type: 'integer', min: 0, max: 100000, description: 'Count the whole days that made less than this many kWh.', optional: true },
+  },
   async run({ db, now }, args) {
     const all = await loadSystems(db);
     const chosen = pickSystems(all, args.system);
@@ -1271,7 +1441,17 @@ const statsTool: Tool = {
         [`${k}spread_kwh`]: r1(spread), [`${k}kwh_per_kwp`]: perKwp != null ? r1(perKwp) : null,
         [`${k}capacity_factor_pct`]: cf != null ? r1(cf) : null, [`${k}low_days`]: low, [`${k}change_pct`]: change,
       });
+      // Days over or under an amount, when the question names one: "how many days above 50 kWh".
+      const counted: string[] = [];
+      for (const [side, limit] of [['above', args.above], ['below', args.below]] as const) {
+        if (limit === undefined) continue;
+        const hits = days.filter((d) => (side === 'above' ? d.kwh > Number(limit) : d.kwh < Number(limit)));
+        facts[`${k}days_${side}_${limit}_kwh`] = hits.length;
+        counted.push(`${side === 'above' ? 'more' : 'less'} than ${limit} kWh on ${hits.length} of its ${n} whole day${n === 1 ? '' : 's'}`
+          + `${hits.length && hits.length <= 5 ? ` (${hits.map((d) => dayWords(d.day, true)).join(', ')})` : ''}`);
+      }
       lines.push(`${s.name}: ${n} day${n === 1 ? '' : 's'}, ${kwh(total)} - ${kwh(mean)} on an average day (median ${r1(mid)}); `
+        + `${counted.length ? `${counted.join('; ')}; ` : ''}`
         + `best ${dayWords(best.day, true)} with ${kwh(best.kwh)}, worst ${dayWords(worst.day, true)} with ${kwh(worst.kwh)}`
         + `${perKwp != null ? `; ${r1(perKwp)} kWh per kWp, capacity factor ${r1(cf!)}%` : ''}`
         + `${low ? `; ${low} low day${low === 1 ? '' : 's'}` : ''}`
@@ -1386,7 +1566,7 @@ const appHelp: Tool = {
 // ---------------------------------------------------------------- the list
 
 /** Every tool, in the order a person would reach for them. */
-export const TOOLS: readonly Tool[] = [statusNow, outages, energy, powerDay, compareSystems, statsTool, faults, dayReport, performanceTrend, reportTool, appHelp];
+export const TOOLS: readonly Tool[] = [statusNow, outages, energy, powerDay, batteryTool, compareSystems, statsTool, faults, dayReport, performanceTrend, reportTool, appHelp];
 
 export const toolByName = (name: unknown): Tool | undefined => TOOLS.find((t) => t.name === name);
 

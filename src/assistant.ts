@@ -237,23 +237,32 @@ function systemIn(text: string, systems: Sys[]): Sys | null {
 }
 
 /** What a question is about, from its words. */
+/** A question about what is still to come, which no figure here can answer. */
+const FUTURE = /\b(tomorrow|next (week|month|year)|forecast\w*|predict\w*|will (i|it|we|my|the|they|\w+) (make|produce|generate|get|earn|save))\b/;
+
 function kindOf(t: string): string | null {
   if (/\b(how (do|can|to|should)|where (is|do|can|are|should)|set ?up|turn (on|off)|enable|disable|install|connect)\b/.test(t)) return 'help';
+  if (FUTURE.test(t)) return 'future';
   if (/\b(report|summar(y|ise|ize))\b/.test(t)) return 'report';
-  // Offline, not working, since when, when it last made power - before "why", since "why is it offline?" is this.
-  if (/\b(of+\s?-?line|not (working|reporting|running|generating|producing|online)|stop(ped|s)?|stop working|outages?|downtime|no (data|readings)|since when|from when|went (off|down|quiet|dark)|c[ao]me back|last (reading|report\w*|seen|gen[a-z]*r[a-z]*t\w*|produc\w*|made|power|worked))\b/.test(t)) return 'outage';
+  // Offline, not working, since when, when it last made power, the relay and its login - before "why", since "why is it offline?" is this.
+  if (/\b(of+\s?-?line|online|not (working|reporting|running|generating|producing|online)|is \w+ (working|running|reporting)|stop(ped|s)?|stop working|outages?|downtime|no (data|readings)|since when|from when|went (off|down|quiet|dark)|c[ao]me back|last (reading|report\w*|seen|gen[a-z]*r[a-z]*t\w*|produc\w*|made|power|worked)|relays?|log ?in|expir\w*|data ?logger|connected|connection|wi-?fi)\b/.test(t)) return 'outage';
   if (/\bwhy\b/.test(t)) return 'why';
   if (/\b(degrad\w*|declin\w*|dirty|trend|health|getting worse|losing|slowly)\b/.test(t)) return 'trend';
   if (/\b(faults?|alarms?|errors?|warnings?)\b/.test(t)) return 'faults';
   if (/\b(compare|comparison|per kwp|which system|best system|worst system)\b/.test(t)) return 'compare';
+  if (/\b(batter(y|ies)|soc|state of charge|discharg\w*)\b/.test(t)) return 'battery';
+  if (/\b(temp\w*|heat\w*|hot|hottest|overheat\w*|degrees?)\b/.test(t)) return 'temp';
   // How the power went through a day: its swings, dips and peak. Over many days, that is the statistics.
   if (/\b(fluc\w*|swing\w*|spikes?|dips?|dipped|choppy|stable|steady|unstable|stability|curve|profile|variab\w*|variation|vary|varies|varied|peak(ed|s)?|highest power|max(imum)? power|min(imum)? power)\b/.test(t)) return 'power';
-  if (/\b(stats?|statistic\w*|average|mean|median|capacity factor|specific yield|consistent)\b/.test(t)) return 'stats';
+  // How much of the sun's energy was used at home, and how much of the house's use the sun covered.
+  if (/\bself[- ]?(consum\w*|us\w*|suffic\w*)|\b(use[ds]?|consumed) (it )?(myself|ourselves)\b|\bhow much of (my|our|the) (solar|power|energy|generation|production)\b|\bpercent\w*\b.*\b(myself|at home|ourselves)\b/.test(t)) return 'self';
+  if (/\b(sav\w*|money|earn\w*|bill|cost|worth|rupees?|dollars?|pounds?|euros?|pkr|inr|usd|currency|co2|carbon|tariff)\b/.test(t)) return 'saved';
+  if (/\b(stats?|statistic\w*|average|mean|median|capacity factor|specific yield|consistent|how many days)\b/.test(t)) return 'stats';
   if (/\b(export\w*|sold|sell\w*|feed[- ]?in)\b/.test(t)) return 'exported';
   if (/\b(import\w*|bought|buy|from the grid)\b/.test(t)) return 'imported';
   // "How do I use..." is help, caught above; any other "use" is the house's.
   if (/\b(use|used|usage|consum\w*|load)\b/.test(t)) return 'used';
-  if (/\b(right now|currently|at the moment|now|live|producing)\b/.test(t)) return 'now';
+  if (/\b(right now|currently|at the moment|now|live|producing|status)\b/.test(t)) return 'now';
   if (/\b(kwh|mwh|energy|made|make|produc\w*|generat\w*|yield|how much|best|worst|most|least|month|day|week|year|sav\w*|money|co2|carbon)\b/.test(t)) return 'energy';
   return null;
 }
@@ -340,7 +349,19 @@ export function guessCalls(question: string, systems: Sys[], now: number, off: n
     case 'trend': return [{ tool: 'performance_trend', args: system ? { system: system.name } : {} }];
     case 'faults': return [{ tool: 'faults', args: named() }];
     case 'compare': return [{ tool: 'compare_systems', args: period ?? {} }];
-    case 'stats': return [{ tool: 'stats', args: named() }];
+    // What is still to come has no figures: no call, and the answer says so.
+    case 'future': return [];
+    case 'battery': return [{ tool: 'battery', args: named() }];
+    // An inverter's temperature is kept as last read: "right now" says it.
+    case 'temp': return [{ tool: 'status_now', args: system ? { system: system.name } : {} }];
+    case 'self': return [{ tool: 'energy', args: named({ measure: 'self' }) }];
+    case 'saved': return [{ tool: 'energy', args: named({ measure: 'saved' }) }];
+    case 'stats': {
+      // "How many days above 50 kWh": the days over, or under, an amount.
+      const above = /\b(?:more than|over|above|at least|greater than|exceed\w*)\s+(\d{1,6})(?:\.\d+)?\s*kwh\b/.exec(t);
+      const below = /\b(?:less than|under|below|fewer than)\s+(\d{1,6})(?:\.\d+)?\s*kwh\b/.exec(t);
+      return [{ tool: 'stats', args: named({ ...(above ? { above: Number(above[1]) } : {}), ...(below ? { below: Number(below[1]) } : {}) }) }];
+    }
     case 'now': return [{ tool: 'status_now', args: system ? { system: system.name } : {} }];
     case 'exported': case 'imported': case 'used': return [{ tool: 'energy', args: named({ measure: kind }) }];
     case 'energy': {
@@ -367,7 +388,9 @@ async function understandingPrompt(systems: Sys[], today: string): Promise<strin
     `For a period, use "range" when one of ${RANGES.join(', ')} fits; otherwise "from" and "to" as YYYY-MM-DD.`,
     'Name a system exactly as listed, or leave "system" out for all of them.',
     'For part of a day - "between 2pm and 4pm", "this afternoon" - or how the power moved through a day - fluctuation, dips, the peak - use power_day, with start and end as HH:MM on the 24-hour clock.',
-    'For whether a system is working or offline, since when, and when it last made power, use outages.',
+    'For whether a system is working or offline, since when, when it last made power, and the relay and its login, use outages.',
+    'For money saved use energy with measure "saved"; for how much was used at home, measure "self"; for the battery, battery; for "how many days above 50 kWh", stats with above.',
+    'SolarLens has no forecast: for tomorrow or the future, make no call and reply that it reports what has been made.',
     'Answer with JSON only: {"calls": [{"tool": "<name>", "args": {...}}], "reply": "<text>"}.',
     'Leave "calls" empty only for a greeting or when you must ask back; then "reply" is one or two sentences, and never states a figure.',
   ].join('\n');
@@ -483,8 +506,14 @@ export async function converse(env: Env, input: { messages: unknown; calls?: Cal
     // A reply of the model's own states no figure: one that does is set aside.
     const safe = reply && !numbersIn(reply).some((n) => n > 31 || !Number.isInteger(n));
     return done({
-      answer: safe ? reply : 'I can answer questions about the energy your systems made, used, bought and sold; how they compare; their faults; why a day was low; '
-        + 'whether one is slowly making less; statistics and reports for any period; and how to use SolarLens. Try "a report on last month" or "how do I get alerts on Telegram?".',
+      answer: safe ? reply : FUTURE.test(mend(question))
+        // What is still to come: no forecast is made here, and saying so beats a figure about something else.
+        ? "SolarLens has no forecast: it reports what your systems have made, and - on each system's page - what today's sunlight so far allowed. "
+          + 'Ask what they made yesterday or last week, or how a day compared with a usual one.'
+        : 'I can answer questions about the energy your systems made, used, bought and sold; how they compare; their faults; why a day was low; '
+          + 'whether one is slowly making less; statistics and reports for any period; any part of a day and how steady the power was; '
+          + 'the battery; whether a system is offline and since when; the money saved; and how to use SolarLens. '
+          + 'Try "a report on last month", "since when has a system been offline?" or "how do I get alerts on Telegram?".',
       worded: safe ? 'model' : 'solarlens', understood, kind: 'chat', calls: [], results: [], errors: [],
     });
   }

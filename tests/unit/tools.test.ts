@@ -98,7 +98,7 @@ describe('arguments', () => {
     expect(s.properties.from.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
     expect((jsonSchemaOf(toolByName('performance_trend')!) as { properties: Record<string, unknown> }).properties.weeks)
       .toMatchObject({ type: 'integer', minimum: 8, maximum: 26 });
-    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'energy', 'power_day', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
+    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'energy', 'power_day', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
   });
 });
 
@@ -242,7 +242,7 @@ describe('status_now', () => {
     const r = await run('status_now', {});
     expect(r.rows).toEqual([['Roof', 'reporting', 2400, 3.2, 81, '08:58'], ['Garage', 'offline', 0, null, null, '19:39']]);
     expect(r.facts).toEqual({ power_now_w: 2400, made_today_kwh: 3.2, reporting: 1, systems: 2 });
-    expect(r.summary).toBe('Your 2 systems are making 2.4 kW now, and 3.2 kWh so far today; 1 of 2 reporting.');
+    expect(r.summary).toBe("Your 2 systems are making 2.4 kW now, and 3.2 kWh so far today; 1 of 2 reporting. Roof's battery is at 81%.");
     expect(r.freshness).toEqual({ newest: NOW - 120, offline: ['Garage'] });
     expect(r.notes).toEqual(['Not reporting now: Garage. An offline system counts as making nothing.']);
   });
@@ -292,6 +292,13 @@ describe('day_report', () => {
     const r = await run('day_report', { date: '2026-09-27', system: 'Roof' });
     expect(r.facts).toMatchObject({ made_kwh: 10, expected_kwh: 20, of_expected_pct: 50, not_reporting_min: 0 });
     expect(r.summary).toBe('Roof made 10 kWh, 50% of a usual day (20 kWh): it made 50% of what its sunlight allowed: shading, dirt, snow or a string down.');
+  });
+
+  it('calls a day well below usual so, and says when there was no sunlight to judge the weather by', async () => {
+    await fortnight();
+    await addDay(h.env.DB, ROOF, '2026-09-27', 8);
+    const r = await run('day_report', { date: '2026-09-27', system: 'Roof' });
+    expect(r.summary).toBe('Roof made 8 kWh, 40% of a usual day (20 kWh): well below usual (40%), and there is no sunlight on record for that day to tell whether it was the weather.');
   });
 
   it('says when there were no readings at all, and refuses a day not yet come or too long ago', async () => {
@@ -523,7 +530,7 @@ describe('outages', () => {
     expect(r.facts).toMatchObject({ reporting_now: 'no', quiet_since: 'Mon 28 Sep 2026 08:00', last_power_at: 'Mon 28 Sep 2026 08:00', last_power_kw: 0.5, outages: 2 });
     // The night between them, 19:00 to 06:30, is not an outage.
     expect(r.summary).toBe('Roof has not reported since Mon 28 Sep 2026 08:00, 1 h ago, in daylight. The vendor may be down, or the logger may have lost its network. '
-      + 'It last made power at Mon 28 Sep 2026 08:00 (0.5 kW). In the last 7 days (22 – 28 Sep 2026) it went quiet in daylight 2 times, 3 h of daylight in all; '
+      + 'It last made power at Mon 28 Sep 2026 08:00 (500 W). In the last 7 days (22 – 28 Sep 2026) it went quiet in daylight 2 times, 3 h of daylight in all; '
       + 'the longest from Sun 27 Sep 2026 11:00 to Sun 27 Sep 2026 13:00.');
     noIds(r);
   });
@@ -562,13 +569,178 @@ describe('outages', () => {
     expect(night.result.summary).toContain('It last made power at Sun 27 Sep 2026 16:40 (3 kW).');
     const morning = await runTool(h.env.DB, 'outages', {}, Date.UTC(2026, 8, 28, 10) / 1000);
     if ('error' in morning) throw new Error(morning.error);
-    expect(morning.result.summary).toContain('after dark, and it has not come back. Its figures come through the relay: check the relay laptop is on and its SolisCloud login is current (Devices tab).');
+    expect(morning.result.summary).toContain('after dark, and it has not come back. No relay has reported: check the relay laptop is on and its SolisCloud login is current (Devices tab).');
     // Days later, the silence is said in days, and its daylight in hours.
     const later = await runTool(h.env.DB, 'outages', {}, Date.UTC(2026, 8, 30, 12) / 1000);
     if ('error' in later) throw new Error(later.error);
     expect(later.result.summary).toContain('has not reported since Sun 27 Sep 2026 19:40, 2 days 16 h ago');
     expect(later.result.facts.daylight_without_readings).toBe('25 h');
     await expect(run('outages', { from: '2026-07-01', to: '2026-09-27' })).rejects.toThrow('a month at most');
+  });
+});
+
+describe('battery', () => {
+  /** Garage keeps a battery: Saturday it ran from 30% to full, Sunday from 60% to 95%, and it reads 81% now. */
+  async function charged() {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    const put = (ts: number, soc: number, m: Record<string, number> = {}) => h.env.DB
+      .prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, today_kwh, battery_soc, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', 500, 1, ?3, ?4, 0)")
+      .bind(GARAGE, ts, soc, JSON.stringify(m)).run();
+    const at = (iso: string, h: number) => dayNumber(iso) * DAY + h * 3600;
+    await put(at('2026-09-26', 7), 30, { battChargeTodayKwh: 0, battDischargeTodayKwh: 0 });
+    await put(at('2026-09-26', 15), 100, { battChargeTodayKwh: 4, battDischargeTodayKwh: 3.1 });
+    await put(at('2026-09-27', 7), 60, { battChargeTodayKwh: 0, battDischargeTodayKwh: 0 });
+    await put(at('2026-09-27', 15), 95, { battChargeTodayKwh: 2.5, battDischargeTodayKwh: 1.2 });
+    await put(NOW - 120, 81);
+  }
+
+  it("gives the battery's charge now, what it took in and gave out, and its lowest and highest", async () => {
+    await charged();
+    const r = await run('battery', {});
+    expect(r.facts).toMatchObject({ charge_now_pct: 81, charged_kwh: 6.5, discharged_kwh: 4.3, lowest_pct: 30, lowest_day: 'Sat 26 Sep 2026', highest_pct: 100 });
+    expect(r.summary).toBe("Garage's battery is at 81% now. Over the last 7 days (22 – 28 Sep 2026), it took in 6.5 kWh and gave out 4.3 kWh, "
+      + 'and its charge went from 30% at its lowest, on Sat 26 Sep 2026, to 100% at its highest.');
+    expect(r.rows).toContainEqual(['Garage', 'Sun 27 Sep 2026', 2.5, 1.2, 60, 95]);
+    noIds(r);
+  });
+
+  it('says a single day in its own words, and when a system has no battery', async () => {
+    await charged();
+    expect((await run('battery', { range: 'yesterday' })).summary).toBe("Garage's battery is at 81% now. "
+      + 'Yesterday (Sun 27 Sep 2026), it took in 2.5 kWh and gave out 1.2 kWh, and its charge went from 60% at its lowest to 95% at its highest.');
+    expect((await run('battery', { system: 'Roof' })).summary).toBe('Roof reports no battery.');
+  });
+});
+
+describe('energy: the money, and the share used at home', () => {
+  it('says what was used at home over the systems that report their sales, and that no tariff means no money', async () => {
+    await months();
+    const self = await run('energy', { range: 'last_month', measure: 'self' });
+    // Roof made 620 and sold 155 in August: 465 used at home. Garage reports no sales, so it is left out.
+    expect(self.facts).toMatchObject({ made_by_systems_reporting_sales_kwh: 620, used_at_home_pct: 75, sold_pct: 25 });
+    expect(self.summary).toBe('Of the 620 kWh made last month (1 – 31 Aug 2026) by Roof, which reports what it sold, 75% was used at home and 25% sold to the grid.');
+    const unset = await run('energy', { range: 'last_month', measure: 'saved' });
+    expect(unset.summary.startsWith('No tariff is set yet, so SolarLens cannot work out the money saved: the owner sets the prices under Settings → Tariff. Your systems made 1085 kWh')).toBe(true);
+    await setTariff(h.env.DB, { currency: 'EUR', importPrice: 0.3, exportPrice: 0.1, netMetering: false, co2KgPerKwh: 0.4 });
+    const saved = await run('energy', { range: 'last_month', measure: 'saved' });
+    expect(saved.summary).toBe(`Your systems saved about ${saved.facts.saved} EUR last month (1 – 31 Aug 2026), and avoided ${saved.facts.co2_avoided_kg} kg of CO2, from 1085 kWh made.`);
+  });
+
+  it('calls a day of the most bought or used its highest, not its best, and names the house', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    for (const [iso, used] of [['2026-09-25', 9], ['2026-09-26', 12]] as const) await addDay(h.env.DB, ROOF, iso, 20, { used });
+    const r = await run('energy', { from: '2026-09-25', to: '2026-09-26', measure: 'used' });
+    expect(r.summary).toBe('The house used 21 kWh 25 – 26 Sep 2026, as Roof measured it. The highest day was Sat 26 Sep 2026 with 12 kWh; the lowest was Fri 25 Sep 2026 with 9 kWh.');
+  });
+});
+
+describe('outages: why a system went quiet', () => {
+  /** Roof, fed by the relay, read until Sunday 10:00 and not since; its datalogger went offline at 09:55. */
+  async function quiet(relay: { lastSeen: number; loginUntil: number } | null) {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5, provider: 'soliscloud' });
+    await h.env.DB.prepare("UPDATE inverters SET plant_id = 'plant-a' WHERE id = ?1").bind(ROOF).run();
+    await addReadings(ROOF, [['2026-09-27', '09:50', 3000, null], ['2026-09-27', '10:00', 3000, null]]);
+    await h.env.DB.prepare("INSERT INTO devices (id, provider, plant_id, kind, status, last_seen, temp_c, updated_at) VALUES ('d-logger', 'soliscloud', 'plant-a', 'datalogger', 'offline', ?1, NULL, ?1)")
+      .bind(dayNumber('2026-09-27') * DAY + 9 * 3600 + 55 * 60).run();
+    if (relay) {
+      await h.env.DB.prepare("INSERT INTO relays (id, provider, name, state, login_expires_at, first_seen, last_seen, last_ok_at) VALUES ('r1', 'soliscloud', NULL, 'ok', ?1, ?2, ?2, ?2)")
+        .bind(relay.loginUntil, relay.lastSeen).run();
+    }
+  }
+
+  it("names the datalogger, and clears the relay when it is still reporting with its login good", async () => {
+    await quiet({ lastSeen: NOW - 300, loginUntil: NOW + 3 * DAY });
+    const r = await run('outages', {});
+    expect(r.summary).toContain('Roof has not reported since Sun 27 Sep 2026 10:00, 23 h ago, in daylight. '
+      + "Its datalogger has been offline since Sun 27 Sep 2026 09:55, so the vendor has nothing new to send: check the datalogger's Wi-Fi and power at the site. "
+      + 'The relay is running - it last reported at 08:55, and its SolisCloud login is good until Thu 1 Oct 2026 09:00 - so the relay laptop is not the cause.');
+    expect(r.facts).toMatchObject({ datalogger: 'offline', datalogger_last_seen: 'Sun 27 Sep 2026 09:55' });
+  });
+
+  it("says the relay's login ran out, or that no relay has reported", async () => {
+    await quiet({ lastSeen: NOW - 2 * DAY, loginUntil: NOW - DAY });
+    expect((await run('outages', {})).summary).toContain("The relay's SolisCloud login ran out on Sun 27 Sep 2026 09:00: renew it with renew-solis-login.cmd on the relay laptop.");
+    await h.env.DB.prepare('UPDATE relays SET login_expires_at = ?1').bind(NOW + 3 * DAY).run();
+    expect((await run('outages', {})).summary).toContain('No relay has reported since Sat 26 Sep 2026 09:00: check the relay laptop is on - its SolisCloud login is good until Thu 1 Oct 2026 09:00.');
+  });
+
+  it("says how long the relay's login is good for while a system reports", async () => {
+    await quiet({ lastSeen: NOW - 300, loginUntil: NOW + 3 * DAY });
+    await addReadings(ROOF, [['2026-09-28', '08:59', 1200, null]]);
+    expect((await run('outages', {})).summary).toContain("Roof is reporting now (last reading 08:59). Its relay's SolisCloud login is good until Thu 1 Oct 2026 09:00.");
+  });
+});
+
+describe('status_now: the inverter temperature', () => {
+  it("gives each inverter's temperature as last read, with its day when that was not today", async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await h.env.DB.prepare("UPDATE inverters SET plant_id = 'plant-a' WHERE id = ?1").bind(ROOF).run();
+    await h.env.DB.prepare("INSERT INTO devices (id, provider, plant_id, kind, status, last_seen, temp_c, updated_at) VALUES ('d-inv', 'solarman', 'plant-a', 'inverter', 'online', ?1, 41.24, ?1)")
+      .bind(dayNumber('2026-09-27') * DAY + 18 * 3600 + 27 * 60).run();
+    const r = await run('status_now', {});
+    expect(r.facts).toMatchObject({ inverter_temp_c: 41.2 });
+    expect(r.summary).toContain('Inverter temperature, as last read: Roof 41.2 °C (Sun 27 Sep 2026 18:27).');
+    expect(r.notes).toContain("An inverter's temperature is kept as last read, not through the day.");
+  });
+});
+
+describe('stats: days over or under an amount', () => {
+  it('counts the whole days above and below it', async () => {
+    await months();
+    const r = await run('stats', { range: 'last_month', above: 18, below: 16 });
+    expect(r.facts).toMatchObject({ s1_days_above_18_kwh: 31, s2_days_above_18_kwh: 0, s1_days_below_16_kwh: 0, s2_days_below_16_kwh: 31 });
+    expect(r.summary).toContain('Roof: 31 days, 620 kWh - 20 kWh on an average day (median 20); more than 18 kWh on 31 of its 31 whole days; less than 16 kWh on 0 of its 31 whole days; best');
+  });
+});
+
+describe('the new answers at their edges', () => {
+  it('counts every house when each system reports its sales and its purchases, and says so when none reports sales', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    for (const id of [ROOF, GARAGE]) await addDay(h.env.DB, id, '2026-09-26', 20, { exported: 5, used: 10 });
+    // Purchases ride in the same metrics as the rest of the day's counters.
+    await h.env.DB.prepare("UPDATE readings SET metrics = json_set(metrics, '$.gridImportTodayKwh', 4) WHERE ts = (SELECT MAX(ts) FROM readings r2 WHERE r2.inverter_id = readings.inverter_id)").run();
+    const both = await run('energy', { from: '2026-09-26', to: '2026-09-26', measure: 'self' });
+    expect(both.summary).toBe('Of the 40 kWh made Sat 26 Sep 2026, 75% was used at home and 25% sold to the grid. The sun covered 60% of what the houses used.');
+    const garage = await run('energy', { from: '2026-09-25', to: '2026-09-25', measure: 'self', system: 'Garage' });
+    expect(garage.summary.startsWith('SolarLens cannot tell how much was used at home Fri 25 Sep 2026: no system here reports what it sold.')).toBe(true);
+  });
+
+  it('gives two batteries apart: one silent since its last reading, one that reports only its charge', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    const put = (id: string, ts: number, soc: number, m = '{}') => h.env.DB
+      .prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, today_kwh, battery_soc, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', 0, 0, ?3, ?4, 0)")
+      .bind(id, ts, soc, m).run();
+    await put(ROOF, dayNumber('2026-09-27') * DAY + 20 * 3600, 55, '{"battChargeTodayKwh":3,"battDischargeTodayKwh":2}');
+    await put(GARAGE, NOW - 60, 64);
+    await put(GARAGE, NOW - 3600, 40);
+    const r = await run('battery', {});
+    expect(r.facts).toMatchObject({ s1_charge_now_pct: 55, s2_charge_now_pct: 64, s2_lowest_pct: 40, s2_charged_kwh: null });
+    expect(r.summary).toContain("Roof's battery was at 55% at its last reading, Sun 27 Sep 2026 20:00.");
+    expect(r.summary).toContain("Garage's battery is at 64% now. Over the last 7 days (22 – 28 Sep 2026), its charge went from 40% at its lowest, on Mon 28 Sep 2026, to 64% at its highest.");
+    // Long before these readings, there is nothing to say of either battery but its charge now.
+    expect((await run('battery', { from: '2026-08-01', to: '2026-08-02' })).summary).toContain("Garage's battery is at 64% now. There is no record of it over 1 – 2 Aug 2026.");
+    // Right now names both batteries, the silent one with its day.
+    const now = await run('status_now', {});
+    expect(now.summary).toContain("Roof's battery was at 55% at its last reading, Sun 27 Sep 2026 20:00. Garage's battery is at 64%.");
+  });
+
+  it("names a SolarMan system's offline datalogger, and a relay with no login date on record", async () => {
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    await h.env.DB.prepare("UPDATE inverters SET plant_id = 'plant-b' WHERE id = ?1").bind(GARAGE).run();
+    await addReadings(GARAGE, [['2026-09-28', '07:00', 900, null]]);
+    await h.env.DB.prepare("INSERT INTO devices (id, provider, plant_id, kind, status, last_seen, updated_at) VALUES ('d-l2', 'solarman', 'plant-b', 'datalogger', 'offline', ?1, ?1)")
+      .bind(NOW - 2 * 3600).run();
+    const r = await run('outages', { system: 'Garage' });
+    expect(r.summary).toContain("Garage has not reported since Mon 28 Sep 2026 07:00, 2 h ago, in daylight. Its datalogger has been offline since Mon 28 Sep 2026 07:00, so the vendor has nothing new to send: check the datalogger's Wi-Fi and power at the site. It last made power");
+    expect(r.summary).not.toContain('The vendor may be down');
+
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5, provider: 'soliscloud' });
+    await addReadings(ROOF, [['2026-09-28', '07:00', 900, null]]);
+    await h.env.DB.prepare("INSERT INTO relays (id, provider, name, state, login_expires_at, first_seen, last_seen, last_ok_at) VALUES ('r2', 'soliscloud', NULL, 'ok', NULL, ?1, ?1, ?1)").bind(NOW - 120).run();
+    expect((await run('outages', { system: 'Roof' })).summary).toContain('The relay is running - it last reported at 08:58 - so the relay laptop is not the cause.');
   });
 });
 

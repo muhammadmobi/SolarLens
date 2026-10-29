@@ -59,8 +59,11 @@ SolarLens reads the question itself. It works out:
 
 - the kind of question from its words: a report, statistics, a comparison,
   faults, why a day was low, a slow decline, right now, energy made, sold,
-  bought or used, how steady the power was, whether a system is offline and
-  since when, or how to use the app;
+  bought or used, the money saved, how much was used at home, how steady the
+  power was, the battery, an inverter's temperature, how many days made more
+  or less than an amount, whether a system is offline and since when, the
+  relay's login, or how to use the app. A question about tomorrow is told
+  plainly that SolarLens makes no forecast;
 - the period: *last week*, *this year*, *in May*, *21 September*, *2025*, a
   date;
 - a time of day: *between 2pm and 4pm*, *2-4pm*, *from 14:00 to 16:30*,
@@ -82,12 +85,13 @@ period and changes the system. The answer is the figures' own sentences.
 
 | Tool | Answers |
 |---|---|
-| `status_now` | what each system is doing right now: power, today so far, battery, whether it is reporting |
-| `outages` | whether each system is reporting now and, if not, since when; the last time it made power; and each stretch of daylight with no readings over a period - silence at night, when an inverter without a battery switches off, is not counted. A relay-fed system that went quiet is pointed at its relay |
-| `energy` | energy over any period - made, used by the house, bought and sold - in total or per day, week, month or year, for one system or all; the best and lowest period - day by day, from days wholly recorded for every system; with a tariff set, the money saved and CO₂ avoided |
+| `status_now` | what each system is doing right now: power, today so far, battery, whether it is reporting, and its inverter's temperature as last read - SolarLens keeps the latest temperature, not the day's |
+| `outages` | whether each system is reporting now and, if not, since when; the last time it made power; and each stretch of daylight with no readings over a period - silence at night, when an inverter without a battery switches off, is not counted. It says why where something else reports it: the plant's datalogger offline since a time, or for SolisCloud the relay silent, or its login run out - and clears the relay when it is still reporting. It gives the relay's SolisCloud login date |
+| `energy` | energy over any period - made, used by the house, bought and sold - in total or per day, week, month or year, for one system or all; the best and lowest period - day by day, from days wholly recorded for every system; with a tariff set, the money saved and CO₂ avoided (measure `saved`, which says so when no tariff is set); and how much of what was made was used at home and how much of what the houses used the sun covered (measure `self`, over the systems that report their sales and purchases) |
+| `battery` | a battery's charge now, and over a period - the last 7 days unless named - what it took in and gave out, and its lowest and highest charge each day |
 | `power_day` | a day's power, from every reading: what each system made between two times of that day (from its own day counter), its average and highest power and when, when it was making power, and how steady it was - sharp drops (a fall of a quarter of the day's highest or more from one reading to the next), the biggest fall, and how much it went up and down against one smooth rise and fall - with the day hour by hour |
 | `compare_systems` | every system side by side per kWp of panels over a period, best first |
-| `stats` | each system's days over a period: how many were recorded, the total, the average and median day, the best and worst, the spread (standard deviation), kWh per kWp, capacity factor, low days (under half the median), and the average day against as many days just before. Whole days only: today is left out, and so is a day with too few readings to be whole (under 60) - a system's first evening, or a relay off for most of the day - which the answer names |
+| `stats` | each system's days over a period: how many were recorded, the total, the average and median day, the best and worst, the spread (standard deviation), kWh per kWp, capacity factor, low days (under half the median), and the average day against as many days just before - and, when asked, how many days made more (`above`) or less (`below`) than an amount. Whole days only: today is left out, and so is a day with too few readings to be whole (under 60) - a system's first evening, or a relay off for most of the day - which the answer names |
 | `faults` | the faults the vendors recorded over a period, which are still active, and the most common |
 | `day_report` | why a day was low: each system's energy against a usual day, the sunlight against usual, what that sunlight should have made, stretches with no readings, faults - and the likely cause |
 | `performance_trend` | whether a system is slowly losing output: energy made against the sunlight on its panels, week by week |
