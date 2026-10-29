@@ -71,9 +71,9 @@ period and changes the system. The answer is the figures' own sentences.
 | Tool | Answers |
 |---|---|
 | `status_now` | what each system is doing right now: power, today so far, battery, whether it is reporting |
-| `energy` | energy over any period - made, used by the house, bought and sold - in total or per day, week, month or year, for one system or all; the best and lowest period; with a tariff set, the money saved and CO₂ avoided |
+| `energy` | energy over any period - made, used by the house, bought and sold - in total or per day, week, month or year, for one system or all; the best and lowest period - day by day, from days wholly recorded for every system; with a tariff set, the money saved and CO₂ avoided |
 | `compare_systems` | every system side by side per kWp of panels over a period, best first |
-| `stats` | each system's days over a period: how many were recorded, the total, the average and median day, the best and worst, the spread (standard deviation), kWh per kWp, capacity factor, low days (under half the median), and the total against as many days just before. Whole days only: today is left out |
+| `stats` | each system's days over a period: how many were recorded, the total, the average and median day, the best and worst, the spread (standard deviation), kWh per kWp, capacity factor, low days (under half the median), and the average day against as many days just before. Whole days only: today is left out, and so is a day with too few readings to be whole (under 60) - a system's first evening, or a relay off for most of the day - which the answer names |
 | `faults` | the faults the vendors recorded over a period, which are still active, and the most common |
 | `day_report` | why a day was low: each system's energy against a usual day, the sunlight against usual, what that sunlight should have made, stretches with no readings, faults - and the likely cause |
 | `performance_trend` | whether a system is slowly losing output: energy made against the sunlight on its panels, week by week |
