@@ -36,6 +36,15 @@
   //   npx wrangler secret put INCLUDE_PLANTS
   // or as a variable in the Cloudflare dashboard; unset = every visible plant.
 
+  // Workers AI, for Ask SolarLens and the weekly report (src/ai.ts). It only
+  // ever runs on Cloudflare - "wrangler dev" reaches it remotely, and needs you
+  // signed in to wrangler - and its free allowance is 10,000 neurons a day,
+  // which AI_DAILY_CALLS keeps well inside. Remove this and those features
+  // answer from the figures alone.
+  "ai": {
+    "binding": "AI"
+  },
+
   "observability": {
     "enabled": true
   }

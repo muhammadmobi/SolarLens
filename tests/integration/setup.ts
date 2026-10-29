@@ -8,8 +8,9 @@
  * through the security-header rebuild, the migrations as wrangler applies them.
  * This starts the Worker the way `wrangler dev` does, once for the whole suite:
  *
- * 1. writes wrangler.jsonc with a made-up database id to .wrangler.it.jsonc,
- *    so nothing about the real deployment is needed or touched;
+ * 1. writes wrangler.jsonc with a made-up database id, and without the AI
+ *    binding, to .wrangler.it.jsonc, so nothing about the real deployment -
+ *    or a Cloudflare account - is needed or touched;
  * 2. applies every migration to a fresh local database under .wrangler/;
  * 3. starts the Worker with test tokens, on a free port, and hands its address
  *    to the tests.
@@ -34,7 +35,12 @@ export default async function setup(project: TestProject) {
   // An id of the right shape that no database has - built rather than written
   // out, since the privacy check rightly reads a written-out one as real.
   const madeUpId = ['0'.repeat(8), '0'.repeat(4), '4' + '0'.repeat(3), '8' + '0'.repeat(3), '0'.repeat(12)].join('-');
-  const config = readFileSync('wrangler.jsonc', 'utf8').replace('${CF_D1_DATABASE_ID}', madeUpId);
+  // Without the AI binding: Workers AI only runs on Cloudflare, and this suite
+  // has no account - so Ask SolarLens is tested here without a model, as it
+  // answers when there is none.
+  const config = readFileSync('wrangler.jsonc', 'utf8')
+    .replace('${CF_D1_DATABASE_ID}', madeUpId)
+    .replace(/\n\s*"ai":\s*\{[^}]*\},?/, '');
   writeFileSync(CONFIG, config);
   rmSync(STATE, { recursive: true, force: true });
 

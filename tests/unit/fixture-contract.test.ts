@@ -19,6 +19,7 @@ import { insertReading } from '../../src/db';
 import { storeWeather, upsertLocation } from '../../src/weather';
 import { parseTariff } from '../../src/settings';
 import { MAX_CHANNELS, publicChannel } from '../../src/channels';
+import { runWeeklyAgents } from '../../src/agents';
 import { deviceHistory, devices, inverters } from '../fixtures/dashboard-api';
 
 const post = (body: unknown) => ({
@@ -159,7 +160,7 @@ describe('the demo matches what the Worker sends', () => {
   });
 
   it('answers every read the dashboard makes', () => {
-    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/api/settings/groups', '/api/settings/channels', '/auth/status', '/auth/settings']) {
+    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/api/settings/groups', '/api/settings/channels', '/api/ask/status', '/api/agents', '/auth/status', '/auth/settings']) {
       expect(demo, path).toHaveProperty([path]);
     }
   });
@@ -204,6 +205,19 @@ describe('the demo matches what the Worker sends', () => {
     expect(listed.channels.length).toBeGreaterThan(0);
     for (const ch of listed.channels) expect(fields(ch)).toEqual(fields(worker));
     expect(listed.max).toBe(MAX_CHANNELS);
+  });
+
+  it("its Ask status, report and health checks have the Worker's fields", async () => {
+    const status = (await (await h.fetch('/api/ask/status')).json()) as Record<string, unknown>;
+    expect(fields(demo['/api/ask/status'])).toEqual(fields(status));
+    await runWeeklyAgents(h.env, Math.floor(Date.now() / 1000));
+    const real = (await (await h.fetch('/api/agents')).json()) as { weekly: Record<string, unknown>; health: Record<string, unknown>[] };
+    const mine = demo['/api/agents'] as { weekly: Record<string, unknown>; health: Record<string, unknown>[] };
+    expect(fields(mine.weekly)).toEqual(fields(real.weekly));
+    expect(real.health.length).toBeGreaterThan(0);
+    for (const hc of mine.health) expect(fields(hc)).toEqual(fields(real.health[0]));
+    const ids = new Set(rowsOf(demo['/api/latest'], 'inverters').map((i) => i.id));
+    for (const hc of mine.health) expect(ids.has(hc.system)).toBe(true);
   });
 
   it('its groups name systems it has', () => {

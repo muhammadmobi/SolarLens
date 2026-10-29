@@ -97,6 +97,18 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     ] }
     : { ok: true, channel: { id: 'c3' }, test: { ok: false, error: 'HTTP 404' } })));
   await page.route('**/api/settings/summary', (r) => r.fulfill(json({ sent: 1, of: 1 })));
+  // Ask SolarLens: a model on hand, a report, a health check each way, and an answer with its figures.
+  await page.route('**/api/ask/status', (r) => r.fulfill(json({ available: true, model: 'm', used: 1, limit: 100, can_ask: true })));
+  await page.route('**/api/agents', (r) => r.fulfill(json({
+    weekly: { kind: 'weekly', week_of: '2026-09-07', title: 'Week of 31 Aug 2026', body: 'A steady week.', worded: 'model', flagged: false, created_at: NOW - 3600 },
+    health: [
+      { kind: 'health', system: 's1', name: 'On-grid Array', week_of: '2026-09-07', title: 't', body: 'steady', worded: 'solarlens', flagged: false, created_at: NOW - 3600, data: { verdict: 'steady', weekly: [0.8, 0.81, 0.8, 0.79] } },
+      { kind: 'health', system: 's2', name: 'Hybrid', week_of: '2026-09-07', title: 't', body: 'less', worded: 'solarlens', flagged: true, created_at: NOW - 3600, data: { verdict: 'declining', weekly: [0.8, 0.7, null, 0.64] } },
+    ],
+  })));
+  await page.route('**/api/ask', (r) => r.fulfill(json({ question: 'q', tool: 'energy', args: {}, answer: 'Made 40 kWh.', worded: 'model', used: 3, limit: 100, model: 'm',
+    result: { tool: 'energy', title: 'Energy', period: { from: '2026-09-01', to: '2026-09-07', label: 'last week' }, columns: ['Day', 'Made (kWh)'], rows: [['Mon', 40], ['Tue', null]],
+      facts: { total_made_kwh: 40 }, notes: ['A note.'], summary: 'Made 40 kWh.', freshness: { newest: NOW - 60, offline: ['Hybrid'] } } })));
   await page.route('**/api/devices', (r) => r.fulfill(json({
     now: NOW,
     devices: [
@@ -173,7 +185,7 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
 
   // Walk the dashboard the way a person would: every view, both systems, the
   // ranges, a system's own page, its raw telemetry, and the theme switch.
-  for (const hash of ['#/power', '#/analysis', '#/compare', '#/history', '#/alerts', '#/devices', '#/system/s1', '#/system/s2', '#/tv', '#/guide', '#/']) {
+  for (const hash of ['#/power', '#/analysis', '#/compare', '#/history', '#/alerts', '#/devices', '#/ask', '#/system/s1', '#/system/s2', '#/tv', '#/guide', '#/']) {
     await page.goto(`/${hash}`);
     await expect(page.locator('#view')).not.toBeEmpty();
     await page.waitForTimeout(120);
@@ -209,6 +221,17 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     await page.locator(sel).click({ timeout: 2000 }).catch(() => {});
     await page.waitForTimeout(150);
   }
+
+  // Ask: a question typed, an example tapped, and a Why? from Historical Data.
+  await page.goto('/#/ask');
+  await page.locator('#askq').fill('How much last week?').catch(() => {});
+  await page.locator('#askform button').click({ timeout: 2000 }).catch(() => {});
+  await page.waitForTimeout(150);
+  await page.locator('[data-ask]').first().click({ timeout: 2000 }).catch(() => {});
+  await page.waitForTimeout(150);
+  await page.goto('/#/history');
+  await page.locator('[data-why-day]').first().click({ timeout: 2000 }).catch(() => {});
+  await page.waitForTimeout(150);
 
   await page.goto('/#/system/s2');
   await expect(page.locator('#view')).not.toBeEmpty();

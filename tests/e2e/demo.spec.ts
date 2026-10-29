@@ -39,7 +39,7 @@ test('draws every view from the sample data, and asks no server for any of it', 
   for (const [hash, ready] of [
     ['#/power', '#legend .legitem'], ['#/analysis', '#anchart rect.daybar'], ['#/compare', 'table.cmp tbody tr'], ['#/history', '#view table'],
     ['#/alerts', 'details.syssec'], ['#/devices', '.loggers section.logger'], ['#/settings', '.settings'],
-    ['#/guide', '.guide'], ['#/system/s2', '.blocks'],
+    ['#/guide', '.guide'], ['#/system/s2', '.blocks'], ['#/ask', '.healthrow'],
   ] as const) {
     await page.evaluate((h) => { location.hash = h; }, hash);
     await expect(page.locator(ready).first(), hash).toBeVisible();
