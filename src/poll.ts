@@ -15,7 +15,7 @@ import { upsertLocation } from './weather';
 import { SolisCloudProvider } from './providers/soliscloud';
 import { SolarmanProvider } from './providers/solarman';
 import { SolarmanWebProvider } from './providers/solarman-web';
-import type { Provider } from './providers/types';
+import type { Device, Inverter, Plant, Provider } from './providers/types';
 
 /**
  * A provider is "configured" purely by which secrets are present, so the same
@@ -83,14 +83,34 @@ export function plantFilter(env: Env): (plantId: string) => boolean {
  * consecutive groups and every group gets its turn.
  */
 export const PLANTS_PER_RUN = 4;
+/** How many groups `n` plants are dealt into: one up to four, and one more for each four after. */
+export const groupsOf = (n: number) => Math.max(1, Math.ceil(n / PLANTS_PER_RUN));
 export function plantsThisRun<T extends { id: string }>(plants: T[], run: number): T[] {
   if (plants.length <= PLANTS_PER_RUN) return plants;
-  const groups = Math.ceil(plants.length / PLANTS_PER_RUN);
+  const groups = groupsOf(plants.length);
   // Sorted, so a plant stays in its group from one run to the next even if
   // the vendor lists them in a different order.
   const sorted = [...plants].sort((a, b) => a.id.localeCompare(b.id));
   const turn = ((run % groups) + groups) % groups;
   return sorted.filter((_, i) => i % groups === turn);
+}
+
+/**
+ * The most inverters, and the most hardware records, one run stores for a
+ * vendor. Each is a database write or two, and four plants can have any number
+ * of either, so the plants a run reads are not enough of a bound on their own.
+ * Past these, they take turns: each time a group comes round, the run takes
+ * the next of its inverters and records, so none waits for ever - though a
+ * plant with many waits longer for each of them.
+ */
+export const INVERTERS_PER_RUN = 4;
+export const DEVICES_PER_RUN = 3;
+
+/** At most `max` of `items`: the `round`-th share of them, wrapping round, so every item has its turn. */
+export function inTurn<T>(items: T[], max: number, round: number): T[] {
+  if (items.length <= max) return items;
+  const start = (((round * max) % items.length) + items.length) % items.length;
+  return Array.from({ length: max }, (_, i) => items[(start + i) % items.length]);
 }
 
 export interface PollSummary {
@@ -106,45 +126,63 @@ export interface PollSummary {
  * written to the poll log rather than thrown, so one vendor being down never
  * stops the other being read.
  */
-async function pollProvider(env: Env, p: Provider, run: number): Promise<PollSummary> {
+async function pollProvider(env: Env, p: Provider, run: number, vendors = 1): Promise<PollSummary> {
   const wanted = plantFilter(env);
   let inverters = 0;
   let newReadings = 0;
   try {
     const all = (await p.listPlants()).filter((plant) => wanted(plant.id));
     const plants = plantsThisRun(all, run);
+    // How many times this group has had its turn: which of its inverters and
+    // records this run takes, when there are more than one run stores.
+    const round = Math.floor(run / groupsOf(all.length));
+    const units: { plant: Plant; inv: Inverter }[] = [];
+    const devices: Device[] = [];
     for (const plant of plants) {
       const invs = await p.listInverters(plant.id);
+      // Where it is, for the weather and the owner's map; never published. One
+      // write for all the plant's inverters.
+      await upsertLocation(env.DB, invs.map((inv) => inv.id), plant.location ?? null);
+      for (const inv of invs) units.push({ plant, inv });
       // Hardware inventory, where the provider exposes it. A failure here must
       // not lose the readings, which are the point of the poll.
       if (p.listDevices) {
         try {
-          for (const d of await p.listDevices(plant.id)) await upsertDevice(env.DB, d);
+          devices.push(...(await p.listDevices(plant.id)));
         } catch { /* devices are supplementary */ }
       }
-      for (const inv of invs) {
-        // Where it is, for the weather and the owner's map; never published.
-        await upsertLocation(env.DB, inv.id, plant.location ?? null);
-        if (!inv.plantName) inv.plantName = plant.name;
-        if (inv.capacityW === null) inv.capacityW = plant.capacityW ?? null;
-        // getReading may fill in name/serial for plant-level units, so read first, then upsert.
-        const reading = await p.getReading(inv);
-        if (!inv.name) inv.name = plant.name;
-        await upsertInverter(env.DB, inv);
-        inverters++;
-        if (reading && (await insertReading(env.DB, reading))) newReadings++;
-      }
+    }
+    // Two vendors polled in one run share its queries.
+    const share = (n: number) => Math.max(1, Math.floor(n / vendors));
+    try {
+      for (const d of inTurn(devices, share(DEVICES_PER_RUN), round)) await upsertDevice(env.DB, d);
+    } catch { /* devices are supplementary */ }
+    const these = inTurn(units, share(INVERTERS_PER_RUN), round);
+    for (const { plant, inv } of these) {
+      if (!inv.plantName) inv.plantName = plant.name;
+      if (inv.capacityW === null) inv.capacityW = plant.capacityW ?? null;
+      // getReading may fill in name/serial for plant-level units, so read first, then upsert.
+      const reading = await p.getReading(inv);
+      if (!inv.name) inv.name = plant.name;
+      await upsertInverter(env.DB, inv);
+      inverters++;
+      if (reading && (await insertReading(env.DB, reading))) newReadings++;
     }
     // Slow-moving extras, on their own schedules and never at the readings'
     // expense: a failure here is logged, not allowed to fail the poll. It used
     // to be dropped in silence, so fault history could stop with no trace.
-    for (const plant of plants) {
-      await pollExtras(env, p, plant.id).catch((e) => {
+    // One plant of the group a run, in turn: each plant's schedules cost reads
+    // and writes of their own every run, due or not. Up to four plants, each
+    // still has its turn every twenty minutes, often enough for an hourly job.
+    const extras = plants[round % plants.length];
+    if (extras) {
+      await pollExtras(env, p, extras.id).catch((e) => {
         console.warn(JSON.stringify({ poll: 'extras failed', provider: p.id, error: safeDetail(e instanceof Error ? e.message : String(e)).slice(0, 200) }));
       });
     }
     const of = plants.length < all.length ? ` of ${all.length}` : '';
-    await logPoll(env.DB, p.id, true, `plants=${plants.length}${of} inverters=${inverters} new=${newReadings}`);
+    const ofInvs = these.length < units.length ? ` of ${units.length}` : '';
+    await logPoll(env.DB, p.id, true, `plants=${plants.length}${of} inverters=${inverters}${ofInvs} new=${newReadings}`);
     return { provider: p.id, ok: true, inverters, newReadings };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -228,5 +266,5 @@ export async function pollAll(env: Env, at = Date.now()): Promise<PollSummary[]>
     return [];
   }
   const run = Math.floor(at / 300_000);
-  return Promise.all(providers.map((p) => pollProvider(env, p, run)));
+  return Promise.all(providers.map((p) => pollProvider(env, p, run, providers.length)));
 }

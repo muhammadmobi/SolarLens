@@ -29,15 +29,21 @@ export { locationOf } from './providers/units';
 
 type Rec = Record<string, unknown>;
 
-/** Keep a system's position. A record that carries none leaves the known one alone. */
-export async function upsertLocation(db: D1Database, inverterId: string, loc: { lat: number; lng: number } | null, at = nowSec()): Promise<void> {
-  if (!loc) return;
+/**
+ * Keep a system's position - or, in one statement, the position of every
+ * system of a plant, which is the plant's. A record that carries none leaves
+ * the known one alone.
+ */
+export async function upsertLocation(db: D1Database, inverterIds: string | string[], loc: { lat: number; lng: number } | null, at = nowSec()): Promise<void> {
+  const ids = typeof inverterIds === 'string' ? [inverterIds] : inverterIds;
+  if (!loc || !ids.length) return;
   await db
     .prepare(
-      `INSERT INTO plant_location (inverter_id, lat, lng, updated_at) VALUES (?1, ?2, ?3, ?4)
+      `INSERT INTO plant_location (inverter_id, lat, lng, updated_at)
+       SELECT value, ?2, ?3, ?4 FROM json_each(?1) WHERE true
        ON CONFLICT(inverter_id) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, updated_at = excluded.updated_at`,
     )
-    .bind(inverterId, loc.lat, loc.lng, at)
+    .bind(JSON.stringify(ids), loc.lat, loc.lng, at)
     .run();
 }
 

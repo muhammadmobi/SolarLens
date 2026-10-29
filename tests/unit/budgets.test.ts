@@ -18,19 +18,34 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+/** How large a fleet the SolarMan stub lists: the one plant of one inverter, unless a test asks for more. */
+const fleet = vi.hoisted(() => ({ plants: 1, inverters: 1 }));
+
 vi.mock('../../src/providers/solarman-web', async (orig) => {
   const real = await orig<Record<string, unknown>>();
+  const base = { provider: 'solarman', model: null, firmware: null, ratedPowerW: null, status: 'online', signalDbm: null, signalPct: 80, uploadCycleS: null, commissionedAt: null, warrantyUntil: null, lastSeen: null, strings: null, acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null, battery: null, logger: null, raw: null };
   class WebStub {
     id = 'solarman' as const;
-    async listPlants() { return [{ id: 'p1', name: 'Garage', capacityW: 4000, tzOffsetSec: 0, tzName: null, location: { lat: 10, lng: 20 } }]; }
-    async listInverters() { return [{ id: 'solarman:station:beta', provider: 'solarman', vendorId: 'p1', serial: null, name: 'Garage', plantId: 'p1', plantName: 'Garage', capacityW: 4000, tzOffsetSec: 0, tzName: null }]; }
-    async listDevices() {
-      const base = { provider: 'solarman', plantId: 'p1', model: null, firmware: null, ratedPowerW: null, status: 'online', signalDbm: null, signalPct: 80, uploadCycleS: null, commissionedAt: null, warrantyUntil: null, lastSeen: null, strings: null, acPhases: null, frequencyHz: null, powerFactor: null, tempC: null, dcBusV: null, battery: null, logger: null, raw: null };
-      return [
-        { ...base, id: 'solarman:inverter:SN1', kind: 'inverter', sn: 'SN1', name: 'Inverter' },
-        { ...base, id: 'solarman:datalogger:LG1', kind: 'datalogger', sn: 'LG1', name: 'Datalogger', network: { operator: null, cellArea: null, cellId: null, mac: 'AA' } },
-        { ...base, id: 'solarman:inverter:SN1', kind: 'inverter', sn: 'SN1', name: 'Inverter', strings: [{ index: 1, powerW: 900, voltageV: 300, currentA: 3 }] },
-      ];
+    async listPlants() {
+      return Array.from({ length: fleet.plants }, (_, n) => ({ id: `p${n + 1}`, name: n ? `Made-up plant ${n + 1}` : 'Garage', capacityW: 4000, tzOffsetSec: 0, tzName: null, location: { lat: 10, lng: 20 } }));
+    }
+    async listInverters(plantId: string) {
+      if (plantId === 'p1' && fleet.inverters === 1) return [{ id: 'solarman:station:beta', provider: 'solarman', vendorId: 'p1', serial: null, name: 'Garage', plantId: 'p1', plantName: 'Garage', capacityW: 4000, tzOffsetSec: 0, tzName: null }];
+      return Array.from({ length: fleet.inverters }, (_, k) => ({ id: `solarman:inverter:${plantId}-${k}`, provider: 'solarman', vendorId: `${plantId}-${k}`, serial: null, name: `Inverter ${k}`, plantId, plantName: plantId, capacityW: 4000, tzOffsetSec: 0, tzName: null }));
+    }
+    async listDevices(plantId: string) {
+      if (plantId === 'p1' && fleet.inverters === 1) {
+        return [
+          { ...base, plantId, id: 'solarman:inverter:SN1', kind: 'inverter', sn: 'SN1', name: 'Inverter' },
+          { ...base, plantId, id: 'solarman:datalogger:LG1', kind: 'datalogger', sn: 'LG1', name: 'Datalogger', network: { operator: null, cellArea: null, cellId: null, mac: 'AA' } },
+          { ...base, plantId, id: 'solarman:inverter:SN1', kind: 'inverter', sn: 'SN1', name: 'Inverter', strings: [{ index: 1, powerW: 900, voltageV: 300, currentA: 3 }] },
+        ];
+      }
+      // Each inverter, and a datalogger beside it.
+      return Array.from({ length: fleet.inverters }, (_, k) => [
+        { ...base, plantId, id: `solarman:inverter:${plantId}-${k}`, kind: 'inverter', sn: `${plantId}-${k}`, name: `Inverter ${k}` },
+        { ...base, plantId, id: `solarman:datalogger:${plantId}-${k}`, kind: 'datalogger', sn: `L${plantId}-${k}`, name: `Datalogger ${k}` },
+      ]).flat();
     }
     async listAlarms() {
       const now = Math.floor(Date.now() / 1000);
@@ -120,6 +135,24 @@ describe('D1 queries in one invocation', () => {
     const run = await counted(h, () => h.cron());
     expect(run.length).toBeGreaterThan(10);
     expect(run.length).toBeLessThanOrEqual(D1_PER_INVOCATION - 10);
+  });
+
+  it('keeps the five-minute run inside it however large the fleet: thirty plants of twelve inverters each', async () => {
+    await start();
+    Object.assign(fleet, { plants: 30, inverters: 12 });
+    try {
+      // Three runs in a row: three different groups, each of four plants and 96 inverters.
+      for (const minutes of [0, 5, 10]) {
+        await at(MONDAY_0807 + minutes * 60);
+        const run = await counted(h, () => h.cron());
+        expect(run.filter((s) => /INTO readings/.test(s)).length, `at +${minutes} min`).toBeGreaterThan(0);
+        // A plant's position is one write for all its inverters, not one each.
+        expect(run.filter((s) => /INTO plant_location/.test(s)).length, `at +${minutes} min`).toBeLessThanOrEqual(4);
+        expect(run.length, `at +${minutes} min`).toBeLessThanOrEqual(D1_PER_INVOCATION);
+      }
+    } finally {
+      Object.assign(fleet, { plants: 1, inverters: 1 });
+    }
   });
 
   it("keeps each of Monday morning's hourly runs inside it: the agents, then the summary with the rest", async () => {
