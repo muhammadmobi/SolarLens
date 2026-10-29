@@ -41,9 +41,15 @@ export const ACCESS_S = 3600;
 export const REFRESH_S = 365 * 86400;
 /** How long the refresh token just replaced still works, for a request already in flight. */
 export const GRACE_S = 120;
-/** Registrations kept at most, and how long one that was never approved is kept. */
+/** Registrations kept at most. */
 export const MAX_CLIENTS = 100;
-const STALE_CLIENT_S = 7 * 86400;
+/**
+ * How long a registration that was never approved is kept. An app registers and
+ * asks for approval in the same breath, so one left unapproved for an hour was
+ * abandoned - and registering is open to anyone, so a stranger who fills the
+ * list holds it for an hour rather than the week it once was.
+ */
+export const STALE_CLIENT_S = 3600;
 
 export const resourceOf = (origin: string) => `${origin}/mcp`;
 
@@ -110,7 +116,7 @@ const tidyName = (v: unknown) =>
 
 /**
  * Register an app, as RFC 7591 asks: its name, its redirect addresses, and no
- * secret. Registrations never approved are cleared after a week, and there are
+ * secret. Registrations never approved are cleared after an hour, and there are
  * at most MAX_CLIENTS, decided by the insert itself.
  */
 export async function register(db: D1Database, body: unknown, now = nowSec()): Promise<{ client: Client } | { error: string; description: string }> {

@@ -166,6 +166,24 @@ describe('pollAll', () => {
     }
   });
 
+  it('logs an extras read that fails, and keeps the reading and the poll', async () => {
+    const env = envWith({ SOLIS_KEY_ID: 'id', SOLIS_KEY_SECRET: 'secret' });
+    const originalAlarms = StubProvider.prototype.listAlarms;
+    StubProvider.prototype.listAlarms = async () => { throw new Error('alarm page moved'); };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const [summary] = await pollAll(env);
+      expect(summary).toMatchObject({ ok: true, newReadings: 1 });
+      // It used to be dropped without a word, so fault history could stop with nobody the wiser.
+      expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([
+        { poll: 'extras failed', provider: 'soliscloud', error: 'alarm page moved' },
+      ]);
+    } finally {
+      StubProvider.prototype.listAlarms = originalAlarms;
+      warn.mockRestore();
+    }
+  });
+
   it('counts an inverter even when the vendor has no reading for it', async () => {
     const env = envWith({ SOLIS_KEY_ID: 'id', SOLIS_KEY_SECRET: 'secret' });
     const originalReading = StubProvider.prototype.getReading;

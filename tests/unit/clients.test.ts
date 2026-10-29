@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { SolisCloudProvider, queue as solisQueue, signedHeaders } from '../../src/providers/soliscloud';
 import { SolarmanProvider, queue as solarmanQueue, type TokenStore } from '../../src/providers/solarman';
 import { SolarmanWebProvider, queue as webQueue } from '../../src/providers/solarman-web';
+import { CALL_TIMEOUT_MS } from '../../src/providers/queue';
 
 /**
  * The vendor HTTP clients, driven against a stubbed `fetch`.
@@ -257,6 +258,21 @@ describe('SolarmanProvider', () => {
       .toBe('bearer CACHED');
   });
 
+  it('reads every page of plants, fifty at a time, until one comes back short', async () => {
+    const station = (i: number) => ({ id: 62000000 + i, name: `Plant ${i}` });
+    const calls = stubFetch([
+      ['/station/v1.0/list', (_url, init) => {
+        const { page } = jsonBody(init) as { page: number };
+        return { success: true, stationList: Array.from({ length: page === 1 ? 50 : 7 }, (_, i) => station((page - 1) * 50 + i)) };
+      }],
+    ]);
+    const plants = await new SolarmanProvider(creds, memoryTokens({ accessToken: 'CACHED', expiresAt: future })).listPlants();
+    expect(plants).toHaveLength(57);
+    expect(calls.map((c) => (jsonBody(c.init) as { page: number }).page)).toEqual([1, 2]);
+    // Every call carries a timeout, so a vendor that never answers cannot hold up the queue behind it.
+    expect(calls.every((c) => c.init?.signal instanceof AbortSignal)).toBe(true);
+  });
+
   it('refreshes once and retries when the token has expired mid-poll', async () => {
     let listCalls = 0;
     const calls = stubFetch([
@@ -429,5 +445,26 @@ describe('SolarmanWebProvider', () => {
     const plants = await new SolarmanWebProvider({ refreshToken: 'R', accessToken: 'STALE' }, memoryTokens()).listPlants();
     expect(plants[0].id).toBe('3');
     expect(n).toBe(2);
+  });
+});
+
+// ===================== all three =====================
+
+describe('every vendor call', () => {
+  it(`carries a ${CALL_TIMEOUT_MS / 1000}-second timeout, so a vendor that never answers cannot hold up the calls queued behind it`, async () => {
+    installMd5Shim();
+    const calls = stubFetch([
+      ['userStationList', () => ({ success: true, data: { page: { records: [] } } })],
+      ['/account/v1.0/token', () => ({ success: true, access_token: 'TOK', expires_in: 5_184_000 })],
+      ['/station/v1.0/list', () => ({ success: true, stationList: [] })],
+      ['/oauth2-s/oauth/token', () => ({ access_token: 'WEBTOK', refresh_token: 'NEWREFRESH', expires_in: 86_400 })],
+      ['/operating/station/search', () => ({ data: [] })],
+    ]);
+    await new SolisCloudProvider({ keyId: 'KEYID', keySecret: 'secret' }).listPlants();
+    // No token cached, so each SolarMan client signs in first: both of its kinds of call are made.
+    await new SolarmanProvider({ appId: '1234567890', appSecret: 'sekrit', email: 'someone@example.com', passwordSha256: 'abc123' }, memoryTokens()).listPlants();
+    await new SolarmanWebProvider({ refreshToken: 'R' }, memoryTokens()).listPlants();
+    expect(calls).toHaveLength(5);
+    expect(calls.every((c) => c.init?.signal instanceof AbortSignal)).toBe(true);
   });
 });

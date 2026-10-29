@@ -21,28 +21,12 @@
  */
 import { isDue, markDone, nowSec } from './db';
 
+// Reading a position out of a vendor's record is the providers' business: they
+// read the rest of it. It lives with them, and is passed on from here for the
+// relay's ingest route, which reads one too.
+export { locationOf } from './providers/units';
+
 type Rec = Record<string, unknown>;
-
-/** A latitude or longitude, from a number or a numeric string, inside its range - or null. */
-function coord(v: unknown, limit: number): number | null {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
-}
-
-/**
- * A plant's position from a vendor record, or null. 0,0 - in the ocean off
- * West Africa - is what a record says when nobody filled the position in, and
- * is read as no position at all.
- */
-export function locationOf(rec: unknown): { lat: number; lng: number } | null {
-  if (!rec || typeof rec !== 'object') return null;
-  const r = rec as Rec;
-  const lat = coord(r.latitude ?? r.locationLat ?? r.lat, 90);
-  const lng = coord(r.longitude ?? r.locationLng ?? r.lng ?? r.lon, 180);
-  if (lat === null || lng === null || (lat === 0 && lng === 0)) return null;
-  return { lat, lng };
-}
 
 /** Keep a system's position. A record that carries none leaves the known one alone. */
 export async function upsertLocation(db: D1Database, inverterId: string, loc: { lat: number; lng: number } | null, at = nowSec()): Promise<void> {
@@ -138,7 +122,7 @@ export async function storeWeather(db: D1Database, inverterId: string, hours: We
 }
 
 /**
- * The cron's part: for each system with a position, fetch its weather when an
+ * The hourly cron's part (./cron hourly): for each system with a position, fetch its weather when an
  * hour has passed since the last time - the first time reaching three months
  * back. A failure for one position is logged and leaves the others alone.
  */

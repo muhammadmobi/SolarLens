@@ -16,8 +16,14 @@ import { createShare, revokeShare, setRequired } from '../../src/auth/sessions';
 import { insertReading, upsertInverter } from '../../src/db';
 import { setTariff } from '../../src/settings';
 import { STALE_AFTER_S } from '../../src/sensors';
-import { buildSummary, sendWeekly, summaryMessage, summaryWindow, weekSlot } from '../../src/summary';
-import { bearer, createHarness, testInverter, testReading, type Harness } from '../helpers/worker';
+import { REPORT_WAIT_S, buildSummary, currentSlot, sendWeekly, summaryMessage, summaryWindow, weekSlot } from '../../src/summary';
+import { HOURLY, bearer, createHarness, testInverter, testReading, type Harness } from '../helpers/worker';
+
+/** The week's report (../../src/agents), written as the agents write it: the summary carries it, and waits for it. */
+const report = async (h: Harness, ts: number) => h.env.DB
+  .prepare("INSERT OR REPLACE INTO agent_reports (id, kind, week, inverter_id, title, body, data, worded, flagged, created_at) VALUES (?1, 'weekly', ?2, NULL, 'Week', 'A steady week.', NULL, 'solarlens', 0, ?3)")
+  .bind(`weekly:${await currentSlot(h.env.DB, ts)}`, await currentSlot(h.env.DB, ts), ts)
+  .run();
 
 const API = 'api-token-for-tests';
 const DAY = 86400;
@@ -185,7 +191,10 @@ describe('sending the weekly summary', () => {
     expect(await sendWeekly(h.env, MONDAY_9 + 3 * DAY)).toBe(false);
     // The next Monday, before 08:00: not yet.
     expect(await sendWeekly(h.env, MONDAY_9 + 7 * DAY - 2 * 3600)).toBe(false);
-    // From 08:00: once, to the channel that takes it and not the alerts-only one.
+    // From 08:00 - once the week's report is written, which the summary carries.
+    expect(await sendWeekly(h.env, MONDAY_9 + 7 * DAY - 3600)).toBe(false);
+    await report(h, MONDAY_9 + 7 * DAY - 3600);
+    // Then once, to the channel that takes it and not the alerts-only one.
     expect(await sendWeekly(h.env, MONDAY_9 + 7 * DAY - 3600)).toBe(true);
     expect(sent.map((s) => s.url)).toEqual([HOOK]);
     expect(sent[0].body).toMatchObject({ kind: 'summary', url: 'https://dashboard.test/#/history' });
@@ -201,12 +210,25 @@ describe('sending the weekly summary', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('runs from the cron', async () => {
+  it('goes without the report once it has waited for it long enough', async () => {
     await hook();
-    // A week long past is the last one sent, so the cron's run is due to send.
+    const sent = stubServices();
+    await sendWeekly(h.env, MONDAY_9);
+    const eight = MONDAY_9 + 7 * DAY - 3600;
+    expect(await sendWeekly(h.env, eight + REPORT_WAIT_S - 60)).toBe(false);
+    expect(await sendWeekly(h.env, eight + REPORT_WAIT_S)).toBe(true);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('runs from the hourly cron, not the five-minute one', async () => {
+    await hook();
+    // A week long past is the last one sent, and this week's report is written, so the hourly run is due to send.
     await h.env.DB.prepare("INSERT INTO kv (k, v, expires_at) VALUES ('summary:week', '1', ?1)").bind(MONDAY_9 + 365 * DAY).run();
+    await report(h, Math.floor(Date.now() / 1000));
     const sent = stubServices();
     await h.cron();
+    expect(sent.filter((s) => s.body?.kind === 'summary')).toHaveLength(0);
+    await h.cron(HOURLY);
     expect(sent.filter((s) => s.body?.kind === 'summary')).toHaveLength(1);
   });
 

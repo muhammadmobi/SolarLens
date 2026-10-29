@@ -81,6 +81,8 @@ flowchart LR
   subgraph cf [Cloudflare free tier]
     CRON[Cron trigger every 5 min] --> POLL[Worker: poll]
     POLL -->|normalise| DB[(D1 SQLite)]
+    HOURLY[Cron trigger hourly] --> JOBS[Worker: weekly report, weather, housekeeping]
+    JOBS --> DB
     API[Worker: /api/*] --> DB
     UI[Static dashboard] --> API
   end
@@ -95,7 +97,7 @@ flowchart LR
 
 A single Cloudflare Worker does three jobs:
 
-1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1.
+1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1. A second cron, once an hour, does the slower work - the week's agents and summary when they are due, the weather, and the housekeeping - so the five-minute run keeps to the readings and the alerts (`src/cron.ts`).
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
 3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Five tabs - six with two systems or more - plus a per-system page they all link into, and Settings behind the gear. Any number of systems: each has a colour of its own, used wherever it appears (its line, its card, its name), assigned by its place so it keeps it between visits:
    - **Overview** (`#/`) — one column per system, sized to fit a laptop screen without scrolling: the energy-flow diagram, then that system's figures as tiles, then its day curve. Producing now, house load, grid direction and battery charge live in the diagram and are not repeated as figures. Model and datalogger signal are not here at all — they never change, so they sit on Devices. Anything above the curve opens that system's detail page; the curve opens Power. Below 1080px wide the columns stack, and below 660px tall the page scrolls, because two systems will not fit on a phone and a very short window cannot hold a diagram, twelve figures and a readable curve at once.
@@ -127,12 +129,12 @@ Why the difference between the two fallbacks: SolarMan's portal uses a plain bea
 
 ## Quick start (≈10 minutes)
 
-**Prerequisites:** Node.js 22 or newer, a free [Cloudflare account](https://dash.cloudflare.com/sign-up), and Git. `.nvmrc` pins 22, the version the automated checks use; newer versions are fine to develop on.
+**Prerequisites:** Node.js 22.13 or newer, a free [Cloudflare account](https://dash.cloudflare.com/sign-up), and Git. `.nvmrc` pins 22, the version the automated checks use; newer versions are fine to develop on.
 
 ```bash
 git clone https://github.com/<you>/SolarLens.git
 cd SolarLens
-npm install
+npm ci
 ```
 
 **1. Log in to Cloudflare and create the database**
@@ -172,6 +174,7 @@ npm run cf -- d1 info solar-lens  # the general escape hatch
 
 ```bash
 npm run cf -- secret put API_TOKEN       # the owner's key: the sign-in setup code, and the gate on writes
+npm run cf -- secret put SECRET_KEY      # what every key is derived from, so a new API_TOKEN resets nothing
 npm run cf -- secret put INGEST_TOKEN    # gates the push endpoints used by local agents
 ```
 
@@ -181,11 +184,14 @@ Generate strong tokens with:
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
 ```
 
-Keep both somewhere you can find them again — a password manager, not a file
+Keep all three somewhere you can find them again — a password manager, not a file
 on the machine. Cloudflare will never show a secret back to you, so a lost
 token can only be replaced, not recovered (see
 [Replacing a token](#replacing-a-token)). Put the same values in `.dev.vars`
 as well: the relay agent and `npm run dev` read them from there.
+`SECRET_KEY` is optional but recommended: without it `API_TOKEN` does its job
+too, and replacing the token then means setting the password and the alert
+channels again (see [Replacing a token](#replacing-a-token)).
 
 Then add whichever provider credentials you have (see [Getting credentials](#getting-credentials)):
 
@@ -336,7 +342,7 @@ Useful switches:
 ### On macOS or Linux, or by hand
 
 ```bash
-git clone https://github.com/<you>/SolarLens.git && cd SolarLens && npm install
+git clone https://github.com/<you>/SolarLens.git && cd SolarLens && npm ci
 cp .dev.vars.example .dev.vars      # set SOLARLENS_URL and INGEST_TOKEN
 npm run relay:solis
 ```
@@ -458,12 +464,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\rotate-tokens.ps1 -I
 
 `-Ingest` sets a new `INGEST_TOKEN` in Cloudflare, writes it to `.dev.vars` and
 restarts the relay. `-Api` does the same for `API_TOKEN`. Signed-in devices and
-passkeys keep working through it, but **the password does not**: it is keyed
-with `API_TOKEN`, so set it again afterwards - Settings, *Forgot your
-password?*, with the new token as the setup code. Nor do the places under
-*Alerts elsewhere*, whose tokens are encrypted with a key derived from it: add
-each again (Settings says which "cannot be read"). Cloudflare is updated first,
-so a failure leaves the old token working everywhere rather than half-changed.
+passkeys keep working through it. What else does depends on `SECRET_KEY`:
+
+- **With `SECRET_KEY` set**, nothing else changes: the password and the places
+  under *Alerts elsewhere* are keyed with it, not with the token.
+- **Without it**, `API_TOKEN` is the key as well, so **the password stops
+  working**: set it again afterwards - Settings, *Forgot your password?*, with
+  the new token as the setup code. The places under *Alerts elsewhere*, whose
+  tokens are encrypted with a key derived from it, stop too: add each again
+  (Settings says which "cannot be read").
+
+Cloudflare is updated first, so a failure leaves the old token working
+everywhere rather than half-changed.
+
+**Adding `SECRET_KEY` later** resets nothing: `npm run cf -- secret put
+SECRET_KEY`, with a long random value kept with the others. Signed-in devices
+renew their session under it on their next request (a refresh token is not
+keyed), the password moves over the next time it signs you in, and the alert
+channels at the next hourly run. Replace `API_TOKEN` only after that - one
+sign-in with the password, and an hour - since until then those are still read
+with it. `SECRET_KEY` itself is the one secret meant to stay put: replacing it
+means setting the password and the channels again, and a SolarMan web session
+if you use one.
 
 Elsewhere, do the same three steps by hand: `npm run cf -- secret put <NAME>`,
 update `.dev.vars`, restart the relay.
@@ -502,15 +524,18 @@ alerts a phone gets - told once each - and a summary every Monday morning to
 up to five places: **ntfy**, **Telegram**, **Discord**, or **any webhook**. Each
 gets a test the moment it is added, and Settings shows how its last post went.
 What posting takes - a bot token, a webhook address, a topic - is kept
-encrypted with a key derived from `API_TOKEN` and never shown again, so these
-need `API_TOKEN` set, and changing it means adding each place again. How to set
-each one up: [docs/alerts-elsewhere.md](docs/alerts-elsewhere.md).
+encrypted with a key derived from `SECRET_KEY` (or from `API_TOKEN`, where
+`SECRET_KEY` is not set) and never shown again. With `SECRET_KEY` set, replacing
+`API_TOKEN` leaves them alone; without it, each place has to be added again. How
+to set each one up: [docs/alerts-elsewhere.md](docs/alerts-elsewhere.md).
 
 **The weekly summary** covers the seven days before Monday: the energy against
 the week before (counting only the systems recorded in both), each system's
 share and best day, the money saved and CO₂ avoided if the tariff is set, and
-the faults. It goes from 08:00 on the first system's clock, once, and at the
-next run if the Worker missed that moment. `GET /api/summary` serves the same.
+the faults. It goes once a week, from the hourly run after the week's report is
+written - Monday from 08:00 on the first system's clock - or three hours after
+08:00 without it, if the report could not be written; a missed Monday is caught
+up at the next run. `GET /api/summary` serves the same.
 
 **Home Assistant.** Settings → *Home Assistant* writes a `configuration.yaml`
 block that reads `GET /api/sensors` every five minutes into sensors - power,
@@ -552,13 +577,16 @@ server that speaks OpenAI's chat API. Anyone who can see the dashboard can ask;
 someone signed in (the owner, or a share link) gets the model, and anyone else
 SolarLens's own reading of the question - as does everyone when there is no
 model, or none of the day's calls left. A daily cap, `AI_DAILY_CALLS` (100),
-keeps inside Workers AI's free allowance. The conversation stays in the browser
-tab; the Worker keeps none of it.
+keeps inside Workers AI's free allowance, and a question from anyone not signed
+in covers a year at most, so a stranger cannot make one answer read the whole
+history. The conversation stays in the browser tab; the Worker keeps none of it.
 
 Every Monday, a **health check** sets each system's output against the sunlight
 on its panels, week by week; a fall of 8% or more over a few weeks is flagged
 and told like any other alert. A **weekly report** follows, in a few sentences,
-and goes out with the weekly summary. And beside a low day on Historical Data,
+and goes out with the weekly summary; a run that fails - a model that does not
+answer, a database that refuses - is tried again the next hour, three times at
+most. And beside a low day on Historical Data,
 **Why?** explains it: the sunlight against usual, stretches with no readings,
 faults, or a system that made less than its sunlight allowed.
 
@@ -593,7 +621,8 @@ dashboard stays open to anyone with its address until you switch that off.
    least twelve characters - or none, if you will use passkeys only.
 2. **Add a passkey** (recommended) under Settings → Passkeys, on each phone or
    computer you use: a fingerprint, a face or the device PIN, and nothing that
-   could sign anyone in is kept on the server. A passkey is never locked out.
+   could sign anyone in is kept on the server. A passkey signs in only when it
+   is unlocked that way - a touch alone is refused - and is never locked out.
 3. **Turn on _Require sign-in to view_** in Settings. From then on the readings
    need a sign-in. It cannot be turned on before a password or a passkey exists,
    so you cannot lock yourself out.
@@ -621,7 +650,15 @@ is, for a monitor.
 (`API_TOKEN`) and a new password, and signs every other device out. Five wrong
 tries from one address lock it out for a quarter of an hour, and thirty from
 everywhere in an hour pause password sign-in for an hour; passkeys still work
-through both.
+through both. The setup code is held to the first limit only: a stranger's
+thirty wrong passwords can pause the password, but never the setup code from
+your own address.
+
+**The 2.x unlock link is retired.** `/auth?t=<API_TOKEN>` put the key to
+everything into an address, where the browser's history, request logs and
+anything it was pasted into keep it. It now signs nothing in and says where to
+go instead: type the same token as the setup code, sign in with a passkey or
+the password, or open a share link on a screen that only needs to view.
 
 ## The demo on GitHub Pages
 
@@ -652,8 +689,9 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 
 | Name | Required | Purpose |
 |---|---|---|
-| `API_TOKEN` | for sign-in and writes | The owner's key. It is the setup code for sign-in, the key the session cookies are signed with and the password is keyed with, and a bearer token for the write routes. Replacing it keeps devices signed in, but the password must be set again. |
-| `INGEST_TOKEN` | for agents | Gates `/api/ingest`, `/api/ingest/station` and `/api/ingest/history`. |
+| `API_TOKEN` | for sign-in and writes | The owner's key: the setup code for sign-in, and a bearer token for the write routes. Without it nothing can be written - every write answers 503. Without `SECRET_KEY` it is the key secret too, and replacing it means setting the password and the alert channels again. |
+| `SECRET_KEY` | recommended | The key secret: the session cookies are signed, the password keyed, and the alert channels and the vendors' cached tokens sealed with keys derived from it. It never travels, so replacing `API_TOKEN` resets none of those. Unset, `API_TOKEN` does the job. Set it once and keep it - see [Replacing a token](#replacing-a-token). |
+| `INGEST_TOKEN` | for agents | Gates every `/api/ingest` route: the relay's readings, hardware, alarms, totals, day curves and reports on itself. |
 | `VAPID_KEY` | for notifications to a closed browser | The Web Push signing key, a private P-256 JWK. Made and stored by `node scripts/make-vapid-key.mjs`; never typed by hand. Unset, the Alerts tab says notifications to a closed browser are not set up. |
 | `SOLIS_KEY_ID`, `SOLIS_KEY_SECRET` | Solis official | From SolisCloud API Management. Present = the Worker polls Solis directly and the relay becomes optional. |
 | `SOLARMAN_APP_ID`, `SOLARMAN_APP_SECRET`, `SOLARMAN_EMAIL`, `SOLARMAN_PASSWORD_SHA256` | SolarMan official | From SolarMan support + your login. |
@@ -664,6 +702,7 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 | `AI_API_KEY` | with `AI_BASE_URL` | That server's key, sent as a bearer token and never logged. |
 | `AI_DAILY_CALLS` | optional | Model calls a day, every feature together, 0 to 10,000; default 100, well inside the free 10,000 neurons. |
 | `INCLUDE_PLANTS` | optional | Comma-separated vendor plant/station ids to poll. Unset = every plant visible to the accounts, including plants shared into them. |
+| `RATE_LIMIT` (the `ratelimits` binding in `wrangler.jsonc`) | optional | Holds callers who are not signed in to a rate per address - 120 requests a minute in the commented example - so a flood of anonymous requests cannot spend D1's daily allowance; past it, `429` with `Retry-After`. Signed-in callers and the relays are never held back. Off until uncommented, since not every plan has the binding. |
 
 **Read locally only, from `.dev.vars` — never sent to Cloudflare:**
 
@@ -685,18 +724,20 @@ Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars
 
 ### How often anything actually happens
 
-Five intervals, easily confused:
+The intervals, easily confused:
 
 | What | How often | Set where |
 |---|---|---|
 | Worker polls the vendor clouds | 5 min; past four plants a vendor, each run reads a share and every plant is read at least every 15 min | `triggers.crons` in `wrangler.jsonc`; `PLANTS_PER_RUN`, `MAX_GROUPS` in `src/poll.ts` |
+| The hourly run: the weekly agents and summary when due, the weather, the housekeeping | 1 hour, at seven minutes past | `triggers.crons` in `wrangler.jsonc`; `HOURLY` in `src/cron.ts` |
 | Relay agent pushes Solis readings | 5 min | `RELAY_INTERVAL_MIN` |
 | Alarm history is re-read (both vendors) | 1 hour | `EXTRAS` in `agent/solis-relay.mjs`; `HOUR` in `src/poll.ts` |
 | Vendor period totals are re-read (both vendors) | 1 day | `EXTRAS` in `agent/solis-relay.mjs`; `DAY` in `src/poll.ts` |
 | Open dashboard re-fetches | 10 min, and never in a hidden tab | `REFRESH_MS` in `public/index.html` |
-| The health check and the weekly report | Mondays from 08:00 on the first system's clock, once | `runWeeklyAgents` in `src/agents.ts` |
-| Weekly summary to the places that take it | Mondays from 08:00 on the first system's clock, once | `SEND_DOW`, `SEND_HOUR` in `src/summary.ts` |
+| The health check and the weekly report | Once a week: the first hourly run from Monday 08:00 on the first system's clock; a run that fails is tried again the next hour, three times at most | `runWeeklyAgents`, `MAX_TRIES` in `src/agents.ts` |
+| Weekly summary to the places that take it | Once a week: the hourly run after the week's report is written, or three hours past Monday 08:00 without it | `SEND_DOW`, `SEND_HOUR`, `REPORT_WAIT_S` in `src/summary.ts` |
 | Weather is fetched from Open-Meteo | 1 hour per system with a position (three months back the first time) | `refreshWeather` in `src/weather.ts` |
+| A reading's vendor payload is cleared | After 30 days; a day of readings each hour | `RAW_KEEP_S` in `src/db.ts` |
 
 A system is drawn as offline once its newest sample is older than
 `STALE_AFTER_S` (25 min). That figure has to stay comfortably above the poll
@@ -733,7 +774,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**825 unit tests**, **596 end-to-end tests** (298 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**898 unit tests**, **596 end-to-end tests** (298 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -770,10 +811,10 @@ exact lines no test reaches.
 
 ### Unit tests — `tests/unit/`
 
-Thirty-one files, one concern each. Most are pure-function tests against fixtures shaped like real vendor payloads; eleven drive the Worker or its database layer against a real database, through the helpers in `tests/helpers/`:
+Forty-two files, one concern each. Twenty-four drive the Worker or its database layer against a real database, through the helpers in `tests/helpers/`; the rest are pure-function tests against fixtures shaped like real vendor payloads:
 
 - **`helpers/d1.ts`** — SQLite behind the D1 interface, with the project's own migrations applied. D1 *is* SQLite and Node ships one, so the SQL a test exercises is the SQL that runs in production. It also refuses a bound value D1 would refuse, which is how a `undefined` reaches a test rather than a deploy.
-- **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about.
+- **`helpers/worker.ts`** — the Worker's exported fetch and cron handlers, called with that database, a stub for the static-assets binding and whichever tokens the case is about; either cron, by its expression.
 - **`helpers/passkey.ts`** — a pretend authenticator with real P-256 and RSA keys: it makes passkeys and signs challenges the way a phone or a security key does, so the Worker's verification is tested against genuine signatures.
 
 - **`units.test.ts`** — the paired value/unit fields the vendors use (`power` + `powerStr`), `kWp`/`MWh` scaling, numeric strings, and epoch milliseconds vs seconds. A missing unit means watts rather than an invented factor.
@@ -781,34 +822,36 @@ Thirty-one files, one concern each. Most are pure-function tests against fixture
 - **`queue.test.ts`** — the rate limiter that stands between a cron run and a SolisCloud ban: calls stay in order, the minimum gap is a floor, and one failed call does not strand the ones behind it.
 - **`history.test.ts`** — the day-curve backfill: the shapes the chart payload has been seen in, epoch-ms/epoch-s/datetime timestamps, trailing zero padding trimmed but an interior zero kept, and rows missing either half skipped rather than guessed at.
 - **`logging.test.ts`** — what is cut out of a vendor error before it is persisted, and just as importantly that an ordinary log line passes through untouched.
-- **`clients.test.ts`** — all three vendor HTTP clients against a stubbed `fetch`: SolisCloud request signing, SolarMan token acquisition and refresh-and-retry, the browser-session refresh flow, the alert and period reads, error envelopes and HTTP failures.
+- **`clients.test.ts`** — all three vendor HTTP clients against a stubbed `fetch`: SolisCloud request signing, SolarMan token acquisition and refresh-and-retry, the browser-session refresh flow, the alert and period reads, error envelopes and HTTP failures; SolarMan's plants read page by page, fifty at a time; and a timeout on every call all three make.
 - **`public-view.test.ts`** — what a public response may carry: systems named by alias, serial numbers masked, and no vendor plant id anywhere, including inside an alarm's internal id. Also the two things made from the raw payload: the alert fields as named columns (a SolisCloud zero kept apart from a vendor that sends no counter), and the telemetry table, which keeps only fields on a reviewed list of measurements - so the ids, the owner's notes, the platform codes and the zone name a live plant record carries are all left out, and so is any field nobody has reviewed, whatever it is called. Device rows are named by a positional alias ("s1-datalogger-1") rather than their serial.
 - **`datalogger.test.ts`** — everything a datalogger reports: its link read from the model name (and left unknown rather than guessed), SolisCloud's signal bars, restart and working time and make date, the operator, cell and MAC address kept apart and never published; and the link history - a row the first time, on each change of status, on a signal move beyond its jitter (3 dBm, 5 points), and hourly otherwise, the window opened by the row before it, and 90 days kept.
-- **`auth.test.ts`** — the owner login through the Worker, with a cookie jar and a moving clock: setup with the setup code, the password and its lockout (per caller and for everyone), the session renewed silently when its hour is up and a device kept in across a year of occasional use, two tabs renewing at once without signing either out, a copied refresh token signing the device out, sign-out at once for one device or all others, the *require sign-in* switch and what stays open with it on (the relays, `/api/status`, the notification reader), share links that read and never write and are taken back with their viewers, passkeys through the routes, a logger's network handles for the owner only, and `private` caching.
+- **`auth.test.ts`** — the owner login through the Worker, with a cookie jar and a moving clock: setup with the setup code, the password and its lockout (per caller and for everyone), the session renewed silently when its hour is up and a device kept in across a year of occasional use, two tabs renewing at once without signing either out, a copied refresh token signing the device out, sign-out at once for one device or all others, the *require sign-in* switch and what stays open with it on (the relays, `/api/status`, the notification reader), share links that read and never write and are taken back with their viewers, passkeys through the routes, a logger's network handles for the owner only, and `private` caching; the 2.x `/auth?t=` link signing nothing in; a sign-in challenge handed to anyone without writing a row, one this server did not sign refused, and a passkey only touched, not unlocked, refused; the setup code still letting the owner in from their own address while password sign-in is paused for everyone; and `SECRET_KEY` - a password moved over at its next use and kept through a new `API_TOKEN`, and without it a new token still meaning a new password.
 - **`webauthn.test.ts`** — passkey verification against real signatures: CBOR, DER and COSE, both ES256 and RS256, and each refusal an attacker would try - another challenge, another origin, another site, no touch, a replayed registration, a key that is not the passkey's, a counter that went backwards.
 - **`weather.test.ts`** — each system's position: read from both vendors' field names and range-checked, kept when a record carries none, served to the owner and nobody else, and absent from every public answer; the weather: asked for at the position rounded to about a kilometre, stamped at the end of each hour, only hours that have happened, three months the first time and an hour after, one failing position not stopping the rest; and the expected output: the ratio as the median of full sunny days, a typical one until three exist, today's curve and total.
-- **`oauth.test.ts`** — an app connected to the MCP server: discovery, and CORS where it belongs and not on the approval page; registration - public clients, redirects only to https, this computer or a native app's scheme, at most a hundred, the stale cleared; the approval page - a link it cannot trust answered on the page, anything else sent back to the app, anyone but the owner's own browser asked to sign in, the app's name kept as text and where its answer goes shown; tokens - PKCE, the wrong verifier, another app or address, a late code, a code used twice disconnecting the app, renewing for a year, a request crossing its own renewal let through and a copied refresh token disconnecting; revocation; the endpoint taking nothing but an app's token; and Connected apps in Settings.
+- **`oauth.test.ts`** — an app connected to the MCP server: discovery, and CORS where it belongs and not on the approval page; registration - public clients, redirects only to https, this computer or a native app's scheme, at most a hundred, one never approved cleared after an hour; the approval page - a link it cannot trust answered on the page, anything else sent back to the app, anyone but the owner's own browser asked to sign in, the app's name kept as text and where its answer goes shown; tokens - PKCE, the wrong verifier, another app or address, a late code, a code used twice disconnecting the app, renewing for a year, a request crossing its own renewal let through and a copied refresh token disconnecting; revocation; the endpoint taking nothing but an app's token; and Connected apps in Settings.
 - **`mcp.test.ts`** — the MCP server: initialize and its protocol version, ping and notifications, the tools listed as read-only with their JSON Schema, a call answered as text and structured content, a bad question as a tool error, the JSON-RPC errors, batches, and no event stream or session.
 - **`tools.test.ts`** — the read-only tools: a period the way a person means it, on the plants' calendar; arguments checked, tidied and described as JSON Schema; energy per day, week, month and year, with the vendor's month totals before SolarLens began, the best and lowest period, exports and which system does not report them, and the money by the tariff; systems per kWp; faults; the state right now, with what the house draws and which way the grid flows; why a day was low - a gap in the readings, less sun, a fault, a system short of its sunlight, or an ordinary day; a system slowly making less for its sunlight; the statistics - average and median day, best and worst, spread, capacity factor, low days, and the days before - over whole days only, a first evening with one reading of nothing named and left out, as it is from energy's best and lowest day; a report made of all of them, with its headline figures; a day's power - what was made between two times from the day counter, the peak, a cloud's sharp drop and how much the power went up and down, hour by hour; outages - a stretch of daylight with no readings, one still going, the night not counted, a long silence said in days, and why - the plant's datalogger offline, the relay silent or its login run out, or the relay cleared while it still reports, with its login date; the battery - its charge now, what it took in and gave out, its lowest and highest, one battery silent and one reporting only its charge; the money saved, or that no tariff is set; how much was used at home and how much the sun covered, over the systems that report it; days above and below an amount; an inverter's temperature as last read; a chart of any measure - the systems added together every hour, a total a system would leave short left out and named while one asleep adds nothing, a second measure beside the first and how often it was above, the grid and the battery said by their direction with a battery's drift left out, the average day with its hours as spans, a week from Monday, the highest or lowest reading, a battery's charge averaged, bars for one measure day by day, three months at most, and a system with no readings of a measure named; what the inverter shows - each string, phase and the battery's own readings, a weak string named (or two), strings that cannot be compared because the readings are old or none is producing, a record with parts missing, and a system with no record; an analysis - a battery kept full while the nights are bought and one that runs low, power sold that the house could use and what it is worth by the tariff, an always-on load, the systems per kWp, the lowest day put down to the sun, to one system alone or to a system short of its sunlight, a fall the weather explains told from a system slowly making less, a system down with its datalogger or the relay said, a fault active or coming back, a weak string, a day recorded only from the afternoon left out, and what needs a look first; any figure - the days a battery was full with a system that has none left to a note, the first time the grid was bought from above an amount and how often it was sold to, energy day by day with every system together, each weekday's average, a moment's highest and when, what each inverter has made since it was installed and one with no counter, a day's figure by the hour given as the moment's, buying and selling, charging and discharging said as such, a single day or a span named as asked, never told from no record, and every measure every way by every step with no gap in its words; and how to do something in the app, or what a word means, from the guide's own entries - figures made up to be checked by hand.
 - **`assistant.test.ts`** — the assistant: a question read without a model - its kind, its period (a month by name, last year's when it is still to come; a date; a year), a time of day (between two times, one side of one, "this afternoon", midnight at the end) and its system, by name or by one word only its name has; questions as owners type them, slips and all, read as meant, while a word near one it routes on - "expected", "warning" - is left alone; a day's hours kept through a follow-up; the battery, the money, the share used at home, a temperature, a count of days above an amount, "is it online" and the relay's login each routed to what answers it; a graph of any measure - the measures in the order named, the step, the highest or lowest, the last few days - with a graph of energy left to the energy tool's bars; the usual day hour by hour ("when does my load peak", "which hours do I buy"); PV1, the strings, the grid's frequency, the power factor and the battery's own readings, each to the part of the inverter asked about; a call for analysis - "analyse", "insights", "how is my system doing", "how can I improve" - with "doing right now" left to the moment and a report to its figures; any question, written every which way - a bank of an owner's questions each reaching what answers it, the figure a question asks for read as the measure, how, by what and its amount (watts as kW, selling and discharging below zero, "full" and "empty" as the battery's), short forms written out and two letters swapped mended, the first period named and a second set against it, two questions in one message, a word asked about, and a greeting or thanks answered as such; a question about tomorrow told there is no forecast; a follow-up moving the answer before to another period, the one before (a whole month, year or week, or as many days again, from the period the tool actually covered) or another system; the conversation checked as sent; with a scripted model, up to three calls chosen and run, a report worded and held to every figure it used, a reply of the model's own with a figure in it set aside; the provider - Workers AI, a server that speaks OpenAI's API over https (or on the same computer) with its key, or none; and the cap shared by every turn.
 - **`ask.test.ts`** — one question at a time, through the assistant: the model's choice made from today, the systems and the tools, and checked; the figures worded, and a sentence with a number of the model's own set aside; a chatty reply, a question about something else, a bad choice, no answer; the daily cap, per UTC day; a stranger answered by SolarLens reading the question itself; and a tool asked for directly, answered in the tool's own words - or refused in them when its arguments cannot answer.
-- **`agents.test.ts`** — the weekly agents: a system slowly making less flagged and one steady not; the report written from the figures, or by the model and held to them, and saying what the week's analysis found needs a look and what to do - the decline said once, by the health check; once a week; the decline told once as an alert; and the report going out with the weekly summary.
-- **`channels.test.ts`** — the places alerts are posted to: https to a named host only, never plain http, a user and password, an address by number or one only this network reaches; each service's fields checked for the shape it gives them; labels that leave the secret out; the secret sealed at rest, opened by the same key and label only, and unreadable once `API_TOKEN` changes; the request each service expects, with Telegram's HTML escaped and Discord pinging nobody; a failure in the service's own words, never with the address; at most five; the routes the owner's alone, a test posted on adding; and as a listener, told each condition once with no push key, one post a run, primed as the first listener, and the told-state kept while any listener remains.
-- **`summary.test.ts`** — the weekly summary: the seven full days before today and the seven before, on the plants' clock; each system's week, best day and days reported, the change counted only over systems recorded in both weeks, the money and CO₂ by the tariff with an upper bound said so, the faults; its words; and its schedule - Monday 08:00 on the first system's clock, marked rather than sent the first time, once a week, caught up after a missed Monday. And `/api/sensors`: flat, in fixed units, an offline system making nothing, no internal id, and a share link as a bearer token the way Home Assistant reads a private dashboard - refused once taken back or run out.
+- **`agents.test.ts`** — the weekly agents: a system slowly making less flagged and one steady not; the report written from the figures, or by the model and held to them, and saying what the week's analysis found needs a look and what to do - the decline said once, by the health check; once a week; the decline told once as an alert; the report going out with the weekly summary; and a run that fails - not marked done, tried again the next hour, given up after three tries - with the rest of the hour's work waiting in the hour the agents run, and each step of it running whatever a step before it did.
+- **`channels.test.ts`** — the places alerts are posted to: https to a named host only, never plain http, a user and password, an address by number or one only this network reaches; each service's fields checked for the shape it gives them; labels that leave the secret out; the secret sealed at rest, opened by the same key and label only, unreadable once the key secret changes, and moved over to `SECRET_KEY` - on first use, or by the hourly housekeeping - so it outlives a new `API_TOKEN`; the request each service expects, with Telegram's HTML escaped and Discord pinging nobody; a failure in the service's own words, never with the address; at most five; the routes the owner's alone, a test posted on adding; and as a listener, told each condition once with no push key, one post a run, primed as the first listener, and the told-state kept while any listener remains.
+- **`summary.test.ts`** — the weekly summary: the seven full days before today and the seven before, on the plants' clock; each system's week, best day and days reported, the change counted only over systems recorded in both weeks, the money and CO₂ by the tariff with an upper bound said so, the faults; its words; and its schedule - Monday 08:00 on the first system's clock, marked rather than sent the first time, once a week, caught up after a missed Monday, waiting for the week's report and going without it once it has waited long enough, from the hourly cron and not the five-minute one. And `/api/sensors`: flat, in fixed units, an offline system making nothing, no internal id, and a share link as a bearer token the way Home Assistant reads a private dashboard - refused once taken back or run out.
 - **`settings.test.ts`** — the groups: kept against each system's real id and served by alias, so a system added later cannot inherit one and a system that has gone drops out; names tidied, blank ones meaning no group, and a system that does not exist, a name too long or too many groups refused; set by the owner only. And the tariff: a three-letter currency, prices from 0 to 1000 and a CO₂ figure from 0 to 2 or a plain reason why not; replaced when set again and gone when cleared; read by anyone who may read the dashboard, set and cleared by the owner only, and an old tariff kept when a new one is refused.
-- **`ci-scripts.test.ts`** — the two CI scripts that decide on the owner's behalf: when the production watcher opens an issue (a feed quiet while another delivers is not one; no feed for 90 minutes, a failing poll or no answer is), and when the owner's own pull request is approved (every check done and green, Copilot's review of the newest commit, no open thread, not a draft, not "do not merge", never anyone else's).
+- **`ci-scripts.test.ts`** — the two CI scripts that decide on the owner's behalf: when the production watcher opens an issue (a feed quiet while another delivers is not one; no feed for 90 minutes, a failing poll or no answer is; so is a database filling up), and when the owner's own pull request is approved (every check done and green, Copilot's review of the newest commit, no open thread, not a draft, not "do not merge", never anyone else's). And the wrangler wrapper, which hands wrangler every argument whole with no shell between, so the deploy's rollback message keeps its spaces.
 - **`fixture-contract.test.ts`** — the end-to-end fixtures held to the real Worker. It runs the Worker on the vendor fixtures and fails if a row in `tests/fixtures/dashboard-api.ts` carries a field `/api/latest` or `/api/devices` does not send, or lacks one they do, and if any spec serves a raw payload. This is the test that would have caught gap 5. The demo's sample is held to the Worker the same way, answer by answer - the assistant's replies among them, a report with its parts, a graph, an analysis with its findings, and "Why?" included.
 - **`pii.test.ts`** — what gets stripped from a stored payload and, just as important, what does not: `capacity` merely contains the letters of `city`.
 - **`events.test.ts`** — alarms and period totals from both vendors: severity mapping, a SolisCloud alarm record's owner fields proven dropped, SolarMan's missing end time kept missing, fault names made readable, and an unmetered plant's copied load figures refused.
 - **`solarman-alarm-detail.test.ts`** — SolarMan's advice and timeline read the way its own detail panel reads them: each run of five-minute samples one occurrence with an end, a recent run left active, a run into midnight left unknown, the plant's own day asked for, and only the newest few alerts detailed each hour.
-- **`push.test.ts`** — a real ES256 signature verified with the public key the browser is given; what is worth waking a phone for, including that a system going quiet at dusk is not; each event told once; a device the browser dropped forgotten; and the routes keeping sign-up behind the key while anyone can turn their own device off.
+- **`push.test.ts`** — a real ES256 signature verified with the public key the browser is given; what is worth waking a phone for, including that a system going quiet at dusk is not; a vendor failing for hours counted whole while only the last two hours are read to find it; each event told once; each wake given a timeout; a device the browser dropped forgotten; and the routes keeping sign-up behind the key while anyone can turn their own device off.
 - **`release-version.test.ts`** — the release the guide names is the one in `package.json`, and the changelog has a section for it.
 - **`service-worker.test.ts`** — `public/sw.js` run in a stand-in worker scope: a push shows what is new and never brings back a notification already shown, and a tap opens the Alerts tab.
 - **`extras.test.ts`** — the hourly and daily schedule for those reads: what the first run walks back through, what later runs skip, and that an empty current year in January does not stop the walk.
 - **`relays.test.ts`** — a relay's report on itself: what the Worker refuses, including a computer name offered as an id; the login expiry read from the portal's cookie; the random id a relay keeps; relays named by nickname or order, never by id; and the exit code that tells the renewal script to open a window for a login.
-- **`worker-routes.test.ts`** — the Worker itself, against a real database: the security headers on both an API response and the page; reads open and writes refused; `/auth`'s cookie; every ingest route's contract, including what each refuses; identifiers proved absent from what is served; and the cron entry point.
-- **`worker-edges.test.ts`** — what only happens when something is unusual: the generic ingest route, a Worker deployed with no `API_TOKEN`, the poll log's trimming and per-provider newest line, the token store, and the hardware fan-out that fetches each inverter's own page.
-- **`poll.test.ts`** — the cron fan-out: which providers get built from which secrets, `INCLUDE_PLANTS`, a large fleet dealt into groups one run at a time (every plant read at least every fifteen minutes, whatever order the vendor lists them in), a provider that throws not costing the other one, a hardware list failing without costing the reading, and the extras' hourly and daily schedules including the first run's walk back through the years.
+- **`worker-routes.test.ts`** — the Worker itself, against a real database: the security headers on both an API response and the page; reads open and writes refused; `/auth` signing nothing in; every ingest route's contract, including what each refuses; identifiers proved absent from what is served; and the cron entry point.
+- **`worker-edges.test.ts`** — what only happens when something is unusual: the generic ingest route, checking every field it is given; a body that is not JSON, answered 400 on every ingest route; a device list longer than any plant has; a Worker deployed with no `API_TOKEN`, refusing every write; a poll that fails inside the cron, logged, with the alerts still judged; a number of days that is not a number; the database kept in bounds - payloads cleared past `RAW_KEEP_S`, expired kv entries forgotten, its size reported, vendor tokens sealed under `SECRET_KEY`; callers not signed in held to the rate limit and to a year a question; the poll log's trimming and per-provider newest line, the token store, and the hardware fan-out that fetches each inverter's own page.
+- **`access.test.ts`** — who may change what: every write route read from the source and placed - the owner's, a signed-in browser's, an approved app's, the relays', or open for a stated reason - so a new route cannot go unplaced; each then asked by nobody, a share link, a relay and the owner's token, and refused to whoever it is not for; and the reads that are the owner's alone.
+- **`budgets.test.ts`** — every D1 statement counted, against the free plan's 50 queries in one invocation: the five-minute run, each of Monday morning's hourly runs, a relay's backfilled day however much of it is new, and the heaviest question - a report on a month.
+- **`poll.test.ts`** — the cron fan-out: which providers get built from which secrets, `INCLUDE_PLANTS`, a large fleet dealt into groups one run at a time (every plant read at least every fifteen minutes, whatever order the vendor lists them in), a provider that throws not costing the other one, a hardware list failing without costing the reading, an extras read failing logged and costing nothing, and the extras' hourly and daily schedules including the first run's walk back through the years.
 - **`readings.test.ts`** — turning a vendor reply into a reading: SolisCloud's inverter page with the grid sign flipped to the project's convention, and SolarMan's per-device registers layered over its station snapshot, including a register that is present but empty.
 - **`sparse.test.ts`** — what happens when a vendor sends almost nothing: nulls rather than zeros, an empty database answering every read, a device merged rather than overwritten by a thinner second view, and an id with no alias answered as `unknown` rather than echoed.
 - **`device-shapes.test.ts`** — the shapes a device record arrives in and the fallback each takes: serial, then device id, then nothing; the plant from the record when the caller did not say; every status code the portals use; per-phase AC when only the voltage or only the current is there; import and export preferred over a net wire figure; and metering decided on lifetime totals rather than on a number being present.
@@ -887,16 +930,17 @@ while charts keep the brighter ones.
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **98.1%** | **92.2%** | **97.5%** | **99.4%** |
-| &nbsp;&nbsp;`index.ts` — routes, who is asking, headers, cron | 97% | 92% | 89% | **100%** |
-| &nbsp;&nbsp;`auth/` — the owner login | 98% | 91% | 98% | 99% |
-| &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 92% | **100%** | **100%** |
-| &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 96% | 94% | **100%** |
-| &nbsp;&nbsp;`push.ts` — phone notifications | **100%** | 99% | **100%** | **100%** |
+| **All of `src/`** — everything the Worker ships | **98.2%** | **91.3%** | **98.1%** | **99.6%** |
+| &nbsp;&nbsp;`index.ts` — routes, who is asking, headers | 96% | 94% | 90% | **100%** |
+| &nbsp;&nbsp;`cron.ts` — the two crons, and the hourly run | **100%** | **100%** | **100%** | **100%** |
+| &nbsp;&nbsp;`auth/` — the owner login | 98% | 93% | 98% | 99% |
+| &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 90% | **100%** | **100%** |
+| &nbsp;&nbsp;`poll.ts` — the cron fan-out | **100%** | 94% | **100%** | **100%** |
+| &nbsp;&nbsp;`push.ts` — phone notifications | **100%** | 98% | **100%** | **100%** |
 | &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 96% | **100%** | **100%** |
 | &nbsp;&nbsp;`relays.ts` — a relay's report, validated | **100%** | **100%** | **100%** | **100%** |
 | &nbsp;&nbsp;`events.ts` — alarms and period totals | **100%** | 91% | **100%** | **100%** |
-| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 94% | 93% | **100%** | **100%** |
+| &nbsp;&nbsp;`units.ts` — W / kWh / timestamp / timezone scaling | 95% | 95% | **100%** | **100%** |
 | &nbsp;&nbsp;`solarman.ts` | 99% | 91% | **100%** | 99% |
 | &nbsp;&nbsp;`soliscloud.ts` | 98% | 91% | **100%** | 99% |
 | &nbsp;&nbsp;`solarman-web.ts` — unofficial fallback | 95% | 84% | 93% | 97% |
@@ -1027,6 +1071,12 @@ login. It needs `SOLARLENS_URL` as a repository secret (the deploy's copy lives 
 the `production` environment, which asks for approval on every run); without it
 the job says so and does nothing. `DRY_RUN=1 SOLARLENS_URL=<url> node
 scripts/ci/watch.mjs` shows what it would do.
+
+It also warns before the database is full. `/api/status` carries its size, and
+past 400 MB - D1's free plan stops every write at 500 - the issue says **The
+database is filling up**. A paid plan's database holds ten gigabytes: set a
+`DB_WARN_MB` repository variable (Settings → Secrets and variables → Actions →
+Variables) to move the line.
 
 ### Who reviews a pull request
 
@@ -1165,27 +1215,27 @@ node scripts/ci/check-privacy.mjs     # the guard, over the working tree
 Twenty-one tables in D1, made by the files in `migrations/`, applied in order:
 
 - **`inverters`** — one row per monitored unit: `id` (`{provider}:{vendor_id}` or `{provider}:station:{plant_id}` when the plant is the unit), `provider`, `serial`, `name`, `plant_id`, `plant_name`, `capacity_w`, `display_order`, `enabled`, `first_seen`, `last_seen`, and where the plant stands: `tz_name` (the zone's own name, such as `Europe/London`, when the vendor states one) and `tz_offset_sec` (the offset in force now).
-- **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (untouched vendor JSON), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
+- **`readings`** — one row per sample, keyed on `(inverter_id, ts, source)`: `tz_offset_sec` (the offset in force *when this was read*, so a day keeps the boundary it was recorded under after the clocks change), `ac_power_w`, `dc_power_w`, `today_kwh`, `total_kwh`, `battery_soc`, `battery_power_w`, `grid_power_w`, `load_power_w`, `temp_c`, `status`, `raw` (the untouched vendor JSON, kept 30 days and then cleared by the hourly housekeeping, a day of readings at a time - the figures stay), and `metrics` — a JSON object with the extended figures the vendor apps show: generation by month/year/lifetime, consumption, self-consumption, grid import/export today and lifetime, battery charge/discharge today and lifetime, full-load hours, today's weather, and grid/battery status strings. Re-polling a vendor that has not produced a new sample stores no new row — but it does refresh that row's derived columns, so an improvement to a normaliser reaches the newest sample instead of waiting for the vendor to produce a fresh timestamp.
 - **`devices`** — hardware behind the readings: `kind` (`inverter` / `datalogger` / `battery` / `meter`), `sn`, `model`, `firmware`, `rated_power_w`, `status`, `signal_dbm` (datalogger RSSI), `upload_cycle_s`, `commissioned_at`, `warranty_until`, `last_seen`, `strings` — a JSON array of per-MPPT-string DC power — and `battery`, a JSON record of the pack: temperature, voltage, current, BMS figures and limits, nameplate capacity, nominal voltage and chemistry. A datalogger also has `logger` - how it connects, signal bars, seconds since restart and in total, when it was made - Its network handles - mobile operator and cell, or MAC address - are **not** on this row: see `device_network`. Filled by the relay agent and the cron; the vendor payload is stripped of address, coordinates and account identifiers before storage.
 - **`plant_location`** — each system's position, from its vendor's plant record. **The owner's alone**: served only to a signed-in owner, for the site map, and sent nowhere but to Open-Meteo, rounded to about a kilometre. A table of its own, for the same reason as `device_network`.
 - **`app_settings`** — the owner's settings, one JSON value per key (`k`, `v`, `updated_at`): `tariff` (currency, import and export price, net metering, and the grid's CO₂ per kWh) and `groups` (each system's real id and the name of its group).
 - **`weather_hourly`** — each system's weather from Open-Meteo, hour by hour: sunlight on the ground (`ghi_wm2`, the average over the hour ending at `ts`), temperature and cloud. Kept 400 days.
 - **`device_network`** — a datalogger's network handles: its mobile operator and cell, or its MAC address, as JSON. **Kept for the owner and never part of a public answer**, since either can place a logger. A table of its own rather than a column on `devices` on purpose: a Worker rolled back to 2.10 serves `SELECT * FROM devices` minus the columns it knew about, so a new column there would reach anyone; a table it has never heard of cannot.
-- **`device_samples`** — each device's status and signal over time, for its link history: a row when either changes, or at least hourly while nothing does, so a steady logger writes 24 rows a day rather than 288. Kept 90 days; pruned by the cron.
-- **`auth_owner`** — the one owner: the password's stored form (PBKDF2, then keyed with a value derived from `API_TOKEN`), or null for passkeys only, and `require_sign_in`, the switch in Settings.
+- **`device_samples`** — each device's status and signal over time, for its link history: a row when either changes, or at least hourly while nothing does, so a steady logger writes 24 rows a day rather than 288. Kept 90 days; pruned by the hourly cron.
+- **`auth_owner`** — the one owner: the password's stored form (PBKDF2, then keyed with a value derived from the key secret - `SECRET_KEY`, or `API_TOKEN` without one), or null for passkeys only, and `require_sign_in`, the switch in Settings.
 - **`auth_passkeys`** — each passkey's public key and signature counter; nothing that signs anyone in by itself.
 - **`auth_devices`** — every signed-in browser: its role (`owner` / `viewer`), a name like "Chrome on Android", the hash of its refresh token and of the one before (to catch a copy), when it last renewed, and when it runs out or was signed out. A viewer carries the share link it came through.
 - **`auth_shares`** — view-only links: a hash of the secret, a name, and when it runs out or was taken back.
-- **`auth_challenges`** — passkey challenges in flight, used once, good for five minutes. **`auth_attempts`** — failed sign-ins per caller (a hash of its address) and across everyone, for the lockout.
+- **`auth_challenges`** — a passkey registration's challenge in flight, used once, good for five minutes; and each sign-in challenge once it is used, for those five minutes - the challenge itself is signed rather than stored, so asking for one writes nothing. **`auth_attempts`** — failed sign-ins per caller (a hash of its address) and across everyone, for the lockout.
 - **`alarms`** — each vendor fault: `code`, `message`, `severity` (`info` / `warning` / `fault`), the vendor's own `vendor_level`, `advice`, `begin_ts`, `end_ts` (null while active, or where the vendor never says), and `state` (`active` / `recovered` / `unknown`). Its `id` contains the vendor's plant id and is never served.
 - **`vendor_periods`** — each vendor's own totals per `period` (`day` / `month` / `year`) and `key` (`2026-09`, `2026`): generation, load, grid both ways, battery both ways and full-load hours. These reach back to installation, which SolarLens's own readings cannot.
 - **`relays`** — each SolisCloud relay's report on itself: a random `id` (never a computer name, never served), an optional `name`, `state` (`ok` / `login-expired` / `error`), `login_expires_at` from the portal's own login cookie, and when it was first and last heard from.
-- **`kv`** — a small expiring key/value shelf (`k`, `v`, `expires_at`), used by the weather cache, the hourly and daily schedules, and to remember which notification events have already been told.
+- **`kv`** — a small expiring key/value shelf (`k`, `v`, `expires_at`), used by the weather cache, the hourly and daily schedules, the weekly jobs' progress, where the payload clearing has reached, and to remember which notification events have already been told. Expired entries are cleared hourly.
 - **`oauth_clients`**, **`oauth_codes`**, **`oauth_grants`**, **`oauth_access`** — the apps connected to the MCP server: each registration (its name and redirect addresses), each approval waiting to be swapped (single use, ten minutes, bound to its PKCE challenge), each connection (its rotating refresh token, the one before remembered) and its access tokens. Only hashes of codes and tokens.
 - **`agent_reports`** — what the agents found, one row a report a week: the weekly report (`body`, and whether the model or SolarLens `worded` it) and each system's health check (`flagged` when it is slowly making less, with the weekly ratios in `data`). Kept a year.
-- **`channels`** — each place alerts and the weekly summary are posted to: its `kind` (`ntfy` / `telegram` / `discord` / `webhook`), a `name`, a `label` that says where it posts with the secret parts left out, what it takes (`alerts`, `weekly`), the dashboard `origin` for the link in each message, and how its last post went (`last_ok_at`, `last_error`, `failures`). **`secret`** - the token, address or topic - is AES-GCM encrypted under a key derived from `API_TOKEN`, and never served. At most five.
+- **`channels`** — each place alerts and the weekly summary are posted to: its `kind` (`ntfy` / `telegram` / `discord` / `webhook`), a `name`, a `label` that says where it posts with the secret parts left out, what it takes (`alerts`, `weekly`), the dashboard `origin` for the link in each message, and how its last post went (`last_ok_at`, `last_error`, `failures`). **`secret`** - the token, address or topic - is AES-GCM encrypted under a key derived from the key secret, and never served. At most five.
 - **`push_subscriptions`** — each device signed up for notifications: its push `endpoint` (never served), the dashboard `origin` it subscribed from, a short `audience` hash, and its delivery record. At most ten. **`push_messages`** — what a woken device shows (`title`, `body`), for every device or for one; kept a week.
-- **`tokens`** — cached bearer/refresh tokens per provider. **`poll_log`** — one line per poll with success and detail, surfaced in the dashboard footer.
+- **`tokens`** — cached bearer/refresh tokens per provider, sealed under `SECRET_KEY` when it is set. **`poll_log`** — one line per poll with success and detail, surfaced in the dashboard footer.
 
 ### Upgrading from before 2.9: stamping the readings you already have
 
@@ -1200,7 +1250,7 @@ A plant whose zone name is not known is left alone rather than stamped with toda
 
 Neither cloud reports a battery cycle counter, so the detail view derives one — lifetime charge energy over the pack's usable capacity — and labels it `derived` rather than presenting it as a vendor figure.
 
-Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**; `grid_power_w` is **+ import / − export**; `battery_power_w` is **+ charging / − discharging** (|x| < 50 W is shown as idle). Free-tier headroom is comfortable: two inverters every 5 minutes is ≈ 600 writes/day against D1's 100 000.
+Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**; `grid_power_w` is **+ import / − export**; `battery_power_w` is **+ charging / − discharging** (|x| < 50 W is shown as idle). Free-tier headroom is comfortable: two inverters every 5 minutes is ≈ 600 writes/day against D1's 100 000. Each invocation keeps inside the free plan's 50 queries too - 35 for a five-minute run, at most 41 for an hourly one and 43 for a relay's history post - which `tests/unit/budgets.test.ts` measures on every run.
 
 ## HTTP API
 
@@ -1222,10 +1272,10 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `DELETE /api/settings/tariff` | owner | clear it, and with it every money figure |
 | `GET /api/settings/groups` | open | the owner's groups, `{groups: {s1: 'House'}}`, by alias; kept against each system's real id |
 | `PUT /api/settings/groups` | owner | set every system's group at once, by alias; a blank name is no group. At most 20 groups, 40 characters a name |
-| `POST /api/chat` | open (signed in when private) | the assistant: `{messages}`, the conversation with the latest last, answered with its words, the calls it made and their results. The model - for someone signed in - spends calls from the daily cap; anyone else gets SolarLens's own reading. See [docs/ask-solarlens.md](docs/ask-solarlens.md#the-api) |
+| `POST /api/chat` | open (signed in when private) | the assistant: `{messages}`, the conversation with the latest last, answered with its words, the calls it made and their results. The model - for someone signed in - spends calls from the daily cap; anyone else gets SolarLens's own reading, over a year at most. See [docs/ask-solarlens.md](docs/ask-solarlens.md#the-api) |
 | `POST /api/ask` | open (signed in when private) | one question, `{question}`, answered as `/api/chat` answers; or `{tool, args}` directly - "Why?" on Historical Data |
 | `GET /api/ask/status` | open | whether there is a model here (`available`), which one and where (`model`, `provider`), whether this caller gets it (`can_ask`), and the day's calls `used` of `limit` |
-| `GET /api/tools` · `GET /api/tools/<name>?<args>` | open | the read-only tools, with their arguments as JSON Schema; and one of them run, answered in its own words, with no model |
+| `GET /api/tools` · `GET /api/tools/<name>?<args>` | open | the read-only tools, with their arguments as JSON Schema; and one of them run, answered in its own words, with no model - over a year at most for a caller not signed in |
 | `GET /api/agents` | open | the newest weekly report, and each system's newest health check |
 | `POST /mcp` | an approved app's OAuth access token | the MCP server: the read-only tools over MCP's Streamable HTTP, JSON answers - see [docs/mcp.md](docs/mcp.md) |
 | `GET /.well-known/oauth-protected-resource` · `/.well-known/oauth-authorization-server` | open | where an app gets a token, and the endpoints (RFC 9728, RFC 8414) |
@@ -1239,12 +1289,12 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `POST /api/settings/channels` | owner | add one (`{kind, name?, alerts?, weekly?}` and `server`, `topic`, `token` for ntfy; `token`, `chat` for Telegram; `url` for Discord or a webhook), and post a test to it at once. Needs `API_TOKEN` |
 | `PATCH /api/settings/channels/<id>` · `DELETE` · `POST …/test` | owner | change what one takes (`{alerts?, weekly?, name?}`), remove it, or post it a test |
 | `POST /api/settings/summary` | owner | send the weekly summary now, to the places that take it |
-| `GET /api/status` | always open | how fresh each feed is: `{now, feeds: [{provider, ok, ts}]}` and nothing else, for a monitor and the deploy's smoke test |
+| `GET /api/status` | always open | how fresh each feed is, and the database's size: `{now, feeds: [{provider, ok, ts}], db_bytes}` and nothing else, for a monitor and the deploy's smoke test |
 | `POST /api/poll` | owner | poll all providers now — makes live vendor calls, so it spends quota |
-| `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`) |
+| `POST /api/ingest` | INGEST_TOKEN | push an already-normalised reading (`{inverter, reading}`), every field checked and a missing one stored as not reported; `INCLUDE_PLANTS` applies |
 | `POST /api/ingest/station` | INGEST_TOKEN | push a raw vendor station payload (`{provider, plantId, name?, capacityW?, raw}`); normalised server-side |
-| `POST /api/ingest/devices` | INGEST_TOKEN | push raw vendor device records (`{provider, plantId, inverters[], collectors[]}`); normalised server-side |
-| `POST /api/ingest/history` | INGEST_TOKEN | backfill a day curve; rejects a peak above 5× nameplate |
+| `POST /api/ingest/devices` | INGEST_TOKEN | push raw vendor device records (`{provider, plantId, inverters[], collectors[]}`); normalised server-side; at most 50 records a post |
+| `POST /api/ingest/history` | INGEST_TOKEN | backfill a day curve; rejects a peak above 5× nameplate. Only points newer than the last one stored are kept, at most 40 a post, oldest first - the rest come with the next, as a relay sends the whole day every time |
 | `POST /api/ingest/relay` | INGEST_TOKEN | a relay's report on itself (`{provider, id, name?, state: ok\|login-expired\|error, loginExpiresAt?}`), validated to that narrow shape |
 | `POST /api/ingest/alarms` | INGEST_TOKEN | raw SolisCloud alarm records (`{provider, plantId, records[]}`), normalised and stripped of owner fields in the Worker |
 | `POST /api/ingest/periods` | INGEST_TOKEN | raw SolisCloud chart totals (`{provider, plantId, which: month\|year\|all, points[]}`); rejects a total the nameplate could not produce |
@@ -1253,11 +1303,11 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `POST /api/push/test` | owner | send one test notification to one signed-up device (`{endpoint}`) |
 | `POST /api/push/unsubscribe` | open | turn a device off (`{endpoint}`). Needs no key: only that device knows its endpoint |
 | `GET /api/push/recent?for=` | a signed-up device | what a woken device shows: the last day's messages - as long as a push service holds a wake-up - for every device and for the one whose hash is `for`, newest first, at most 20, with `more` when there were others. 404 for any hash that is not a signed-up device. Never cached |
-| `GET /auth?t=` | API_TOKEN in the query | sign this browser in as the owner - the 2.x unlock link, kept as a way in that needs no password |
+| `GET /auth` | — | the 2.x unlock link (`?t=<API_TOKEN>`), retired: `410` and where to sign in instead, whatever it carries. Signs nothing in |
 | `GET /auth/status` | open | whether sign-in is set up and required, and who this browser is |
 | `POST /auth/setup` | the setup code | `{code, password \| null}`: first set-up, or a forgotten password; signs this browser in and every other device out |
 | `POST /auth/login` | — | `{password}`; five wrong tries lock the caller out for 15 minutes |
-| `POST /auth/passkey/options` | open, or owner to register | `{purpose: register \| login}`: the WebAuthn options, with a challenge good for five minutes |
+| `POST /auth/passkey/options` | open, or owner to register | `{purpose: register \| login}`: the WebAuthn options, with a challenge good for five minutes - for a sign-in, signed rather than stored, so asking writes nothing. The passkey must be unlocked, not only touched |
 | `POST /auth/passkey/register` · `/auth/passkey/login` | owner · — | keep a new passkey; sign in with one |
 | `POST /auth/logout` | a signed-in browser | sign this browser out |
 | `GET /auth/settings` | owner | passkeys, signed-in devices, share links, and the switches |
@@ -1272,11 +1322,16 @@ either way — see [Who can read, and who can write](#who-can-read-and-who-can-w
 share link's token - the part after `/s/` - works as `Authorization: Bearer <token>`
 too, as a viewer: that is how Home Assistant reads a private dashboard.
 
+A Worker with no `API_TOKEN` refuses every write with `503`, whoever asks. A
+body that is not JSON is answered `400`, never a crash, and a `days` that is not
+a number reads as the default. With the optional rate limit, a caller not signed
+in who asks too fast gets `429` and `Retry-After: 60`.
+
 ## Project layout
 
 ```
 solar-lens/
-├── wrangler.jsonc            Worker, D1 binding, cron, static assets
+├── wrangler.jsonc            Worker, D1 binding, the two crons, static assets
 ├── .gitattributes            Windows line endings for the relay's .cmd, .ps1 and .vbs
 ├── .nvmrc                    the Node version the automated checks use
 ├── .github/
@@ -1304,7 +1359,8 @@ solar-lens/
 │                              0018 the places alerts are posted to
 │                              0019 what the agents found
 │                              0020 the apps connected to the MCP server
-│                              0021 SolarMan battery charging, turned the right way round)
+│                              0021 SolarMan battery charging, turned the right way round
+│                              0022 an index for the alarms rule; a duplicate readings index dropped)
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log
@@ -1313,6 +1369,7 @@ solar-lens/
 │                              0011 SolisCloud relays and their login expiry)
 ├── src/
 │   ├── index.ts              Hono app: API routes, ingest, static UI, scheduled()
+│   ├── cron.ts               the two crons told apart, and the hourly run's steps
 │   ├── poll.ts               builds providers from present secrets; polls; plant filter;
 │   │                         hourly alarms and daily period totals
 │   ├── db.ts                 D1 queries and the Env type
@@ -1365,7 +1422,7 @@ solar-lens/
 ├── setup-relay.cmd           double-click entry point for the relay installer
 ├── renew-solis-login.cmd     double-click when a SolisCloud login needs renewing
 ├── scripts/
-│   ├── wrangler.mjs             fills CF_D1_DATABASE_ID into a temp config
+│   ├── wrangler.mjs             fills CF_D1_DATABASE_ID into a temp config; hands wrangler its arguments whole
 │   ├── wrangler-config.mjs      that config step, shared with the scripts below
 │   ├── backfill-reading-offsets.mjs  stamps pre-2.9 readings with their offset
 │   ├── make-vapid-key.mjs       makes the Web Push key and stores it as a Worker secret
@@ -1419,6 +1476,8 @@ solar-lens/
 │   ├── unit/agents.test.ts      the health check, the weekly report, and the alert a decline makes
 │   ├── unit/oauth.test.ts       an app approved once: every OAuth step, and every refusal
 │   ├── unit/mcp.test.ts         the MCP server: the handshake, the tools, the errors
+│   ├── unit/access.test.ts      who may change what: every write route placed, and held to it
+│   ├── unit/budgets.test.ts     every cron run, the heaviest post and question, inside D1's 50 queries
 │   ├── helpers/solar-days.ts    weeks of made-up days, sunlight and faults, quickly
 │   ├── integration/             the real Worker, in workerd, over HTTP
 │   ├── visual/                  each view of the demo, compared with its picture
@@ -1476,7 +1535,8 @@ with the others - except the dashboard, `public/index.html`, which is HTML
 first: its explanation is the map at the start of its script. Opening a file
 is the quickest way to learn it. Three places to start:
 
-- **`src/index.ts`** - every route and the cron. Follow a route to the function
+- **`src/index.ts`** - every route, and the scheduled handler that tells the two
+  crons apart (their work is in `src/cron.ts`). Follow a route to the function
   it calls in `src/db.ts` (most of the SQL) or `src/push.ts` (notifications,
   with its own tables).
 - **`public/index.html`** - the whole dashboard. Its script opens with a map of
@@ -1523,7 +1583,11 @@ is the quickest way to learn it. Three places to start:
 |---|---|
 | Dashboard shows *Sign in* | The owner has made it private. Sign in, or ask the owner for a share link. |
 | Dashboard says *unauthorized* | A refusal other than "sign in": usually a deployment older than the page. Run `npm run deploy`. |
-| The password stopped working after replacing `API_TOKEN` | Expected: the password is keyed with it. Sign in with a passkey, or use *Forgot your password?* with the new token as the setup code. |
+| The password stopped working after replacing `API_TOKEN` | Expected where `SECRET_KEY` is not set: the password is keyed with the token then. Sign in with a passkey, or use *Forgot your password?* with the new token as the setup code - and set `SECRET_KEY`, so the next new token resets nothing. |
+| `/auth?t=…` says the link no longer signs a browser in | The 2.x unlock link is retired. Sign in on the page: the same token is the setup code. |
+| Every change is refused: *This server has no API_TOKEN* (503) | The Worker has no `API_TOKEN`, so nothing on it can be written. Set one: `npm run cf -- secret put API_TOKEN`. |
+| *Too many requests from this address* (429) | The optional rate limit: a caller not signed in asked faster than it allows. Wait a minute, or sign in. |
+| Watcher issue: *The database is filling up* | D1's free plan stops every write at 500 MB. Readings keep their vendor payload for 30 days only, which slows the growth a great deal; a paid plan's database holds ten gigabytes (set `DB_WARN_MB` to match). |
 | Footer: *no provider credentials configured* | No provider secrets present. Set at least one route's secrets and redeploy or `POST /api/poll`. |
 | `soliscloud: HTTP 408` | Your clock is > 15 min off SolisCloud's. Fix the system clock (Workers are fine; this affects local probes/agents). |
 | `soliscloud: HTTP 403/401` on official API | Key not activated, or API access not enabled on the account. Check Basic Settings → API Management. |
@@ -1549,7 +1613,7 @@ is the quickest way to learn it. Three places to start:
 
 ## Security and privacy
 
-Headers on every response: a Content-Security-Policy that is strict about where anything may be **sent** as well as where it may come from (`connect-src 'self'`, so injected script could not exfiltrate a reading), `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` — the last of which also stops the one-time `/auth?t=<token>` link putting the token in a `Referer`. The policy is written twice, in `src/index.ts` and `public/_headers`, because Cloudflare serves the static page from the edge without invoking the Worker; change both or neither.
+Headers on every response: a Content-Security-Policy that is strict about where anything may be **sent** as well as where it may come from (`connect-src 'self'` and `form-action 'none'`, so a script that got in could not post a reading to another site - though no policy stops one navigating the page away with data in the address, which is why every value the page shows is escaped first), `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Strict-Transport-Security` for a year (a browser that has been here never tries plain http again) and a `Permissions-Policy` that turns off the camera, microphone, location, payment and USB, none of which the page uses. They are written twice, in `src/index.ts` and `public/_headers`, because Cloudflare serves the static page from the edge without invoking the Worker; change both or neither - `scripts/ci/check-headers.mjs` fails a pull request that changes one.
 
 Vendor errors are stripped of query strings before they reach `poll_log` — SolarMan's token endpoint takes the account's `appId` in the URL, and that log is kept for a week, served by `/api/health` and printed in the footer. No credential should travel that far because a DNS lookup failed.
 
@@ -1581,7 +1645,10 @@ Either way, what a read can carry is bounded:
 - **Nothing readable can spend money or change data.** `POST /api/poll` makes
   live vendor calls, so it needs the owner; `/api/ingest/*` keeps its own
   `INGEST_TOKEN`. A share link can read and never write, an agent key still
-  cannot read, and a reader still cannot write.
+  cannot read, and a reader still cannot write. A Worker deployed without
+  `API_TOKEN` refuses every write rather than taking it from anyone, as 2.x did;
+  and `tests/unit/access.test.ts` reads every write route from the source and
+  fails if one is not placed and held to its guard.
 - **Signing a phone up for notifications is a write**, so it needs the owner too,
   and a stranger who can read the dashboard cannot have their own phone told
   about your systems. Turning a device *off* is the one write that needs no
@@ -1601,8 +1668,9 @@ Either way, what a read can carry is bounded:
   refresh tokens rotated, a copy caught; only hashes stored; its token opens
   `/mcp` and nothing else, and can only read. Settings disconnects an app at
   once.
-- **Asking a question is for anyone signed in** - the owner or a share link -
-  and never an anonymous caller: it spends model calls from a daily cap. The
+- **The model is for anyone signed in** - the owner or a share link - and
+  never an anonymous caller: it spends model calls from a daily cap. Anyone
+  else gets SolarLens's own reading of the question, over a year at most. The
   model only chooses among read-only tools, whose arguments are checked before
   anything runs; it never writes a query, and it is sent the question, the
   systems' names and the tool's figures, nothing else. A reply stating a number
@@ -1611,10 +1679,19 @@ Either way, what a read can carry is bounded:
   link would, never writes, and taking the link back stops it at once.
 - **The places alerts are posted to** are the owner's alone - a share link
   cannot even list them. What posting takes is encrypted under a key derived
-  from `API_TOKEN` and never served or logged; a failure is recorded as a
+  from the key secret and never served or logged; a failure is recorded as a
   status and a few words, never the address; only `https://` to a named host
   on the internet is accepted; and vendor text reaches a chat as text, with
   Discord told to ping nobody.
+
+- **Strangers cannot spend the database's day.** D1's free plan has a daily
+  allowance of reads and writes, and once it is spent every query fails until
+  midnight UTC - the poller's too. So a question from anyone not signed in
+  covers a year at most; a passkey sign-in challenge is signed rather than
+  stored, so asking for one writes nothing; an app that registers and is never
+  approved is cleared after an hour; and with the optional rate limit
+  (`RATE_LIMIT`), a caller not signed in is held to a rate per address. Making
+  the dashboard private closes the rest.
 
 What the open setting does *not* protect is the measurements themselves.
 **With sign-in not required, anyone with the URL can see your generation and
@@ -1623,16 +1700,20 @@ is what the switch is for.
 
 **How the sign-in is built** (`src/auth/`): passkeys (WebAuthn, ES256 and
 RS256, verified in the Worker with no library) and a password (PBKDF2, then
-keyed with a value derived from `API_TOKEN` that the database never holds, so
-a copy of the database cannot be attacked offline). A one-hour session cookie,
+keyed with a value derived from the key secret - `SECRET_KEY`, or `API_TOKEN`
+without one - that the database never holds, so a copy of the database cannot
+be attacked offline). A passkey must be unlocked - a fingerprint, a face or the
+PIN - not only touched, and each sign-in challenge is spent once it works. A one-hour session cookie,
 signed and checked against its device on every request, so signing a device
 out takes effect at once; a year-long refresh token that renews on use and
 rotates each time, with the one before remembered so a copy is caught; both
 `HttpOnly`, `Secure` and `SameSite=Strict`. Every token is stored only as a
-hash. `/auth?t=<token>` now signs the browser in with such a session instead of
-leaving the token itself in a cookie, as 2.x did. That 2.x cookie is no longer
-accepted, and is cleared when seen: it could not be signed out short of
-replacing the token. Vendor payloads are stripped of the account holder's name, email and
+hash. `/auth?t=<token>`, the 2.x unlock link, signs nothing in any more: a
+link carrying the key to everything travels into browser history and request
+logs. The cookie it left, which held the token itself, is no longer accepted,
+and is cleared when seen: it could not be signed out short of replacing the
+token. The vendors' own login tokens, cached between runs, are sealed under
+`SECRET_KEY` when it is set. Vendor payloads are stripped of the account holder's name, email and
 the site's coordinates before storage, and every vendor-controlled string is
 escaped before it reaches the page.
 
@@ -1643,7 +1724,7 @@ escaped before it reaches the page.
 Third parties the dashboard talks to: the page loads its web font from Google, which sees the viewer's IP (self-hosting Manrope, which is OFL-licensed, or dropping to the system font stack removes that). The Worker asks **Open-Meteo** for each system's weather, at its position rounded to about a kilometre. The owner's site map loads **Leaflet** from cdnjs, checked against an integrity hash, and map tiles from **OpenStreetMap**, which see the viewer's IP and this site's origin (their usage policy wants a referrer; only the origin is sent). Nobody but the owner ever loads the map. The places the owner adds under *Alerts elsewhere* - ntfy, Telegram, Discord, or a webhook - receive each alert and summary they take, which name the systems and their faults.
 
 - Nothing identifying belongs in the repo: credentials, tokens and plant ids live only in `wrangler secret`, the Cloudflare dashboard, or the gitignored `.dev.vars`. `captures/`, `.capture-profile/` and `.relay-profile/` (browser sessions) are gitignored too.
-- The `workers.dev` URL serves readings to anyone who opens it until the owner turns on *Require sign-in to view*; vendor identifiers are stripped either way. `INGEST_TOKEN` and the owner's sign-in (or `API_TOKEN`) gate the routes that write or spend quota.
+- The `workers.dev` URL serves readings to anyone who opens it until the owner turns on *Require sign-in to view*; vendor identifiers are stripped either way. `INGEST_TOKEN` and the owner's sign-in (or `API_TOKEN`) gate the routes that write or spend quota. Preview addresses are off (`preview_urls: false`), so no other address serves the Worker.
 - The SolarMan portal login sends your password in clear text in the form body. The capture helper redacts it, but never paste DevTools request bodies anywhere.
 - Unofficial routes reuse *your* browser session against *your* data only. Vendor terms may restrict automation; the official APIs are the durable path and everything here prefers them when their secrets are present.
 
@@ -1671,6 +1752,7 @@ Third parties the dashboard talks to: the page loads its web font from Google, w
 - [x] A demo on GitHub Pages, on made-up data, and screenshots taken of it (3.0)
 - [x] Weather from Open-Meteo, expected output and an underperformance alert, battery capacity over time, and an owner-only site map (3.0)
 - [x] Integration tests against a real local Worker, screenshot comparison, Lighthouse, a production watcher, a restore point before migrations, and the owner's own pull requests approved once ready (3.0)
+- [x] A review of the whole repository, applied: every cron run inside D1's per-invocation limit, keys from a secret of their own, the database kept from filling, strangers kept from spending its day, and every write route's guard tested (3.0)
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed

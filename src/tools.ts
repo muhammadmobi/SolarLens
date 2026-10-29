@@ -473,12 +473,23 @@ async function energyBuckets(db: D1Database, systems: Sys[], p: Period, off: num
     if (keys[keys.length - 1] !== k) keys.push(k);
   }
   let usedVendor = false;
+  // Each system's rows by bucket, gathered in one pass. Filtering every row for
+  // every bucket of every system grew with the square of the period: three
+  // years by day was tens of millions of comparisons, against a free plan's ten
+  // milliseconds of CPU a request.
+  const grouped = new Map<string, DayRow[]>();
+  for (const d of days) {
+    const at = `${d.inverter_id}|${byMonth ? d.day.slice(0, 7) : d.day}`;
+    const list = grouped.get(at);
+    if (list) list.push(d);
+    else grouped.set(at, [d]);
+  }
   const table = new Map<string, Map<string, Figures>>();     // key -> system -> figures
   for (const k of keys) {
     const whole = byMonth && `${k}-01` >= p.from && isoDay(noOfYmd(Number(k.slice(0, 4)), Number(k.slice(5, 7)), 1) - 1) <= p.to;
     const per = new Map<string, Figures>();
     for (const s of systems) {
-      const mine = days.filter((d) => d.inverter_id === s.id && (byMonth ? d.day.startsWith(k) : d.day === k));
+      const mine = grouped.get(`${s.id}|${k}`) ?? [];
       const own: Figures = {
         made: sumOrNull(mine.map((d) => d.yield_kwh)), used: sumOrNull(mine.map((d) => d.load_kwh)),
         imported: sumOrNull(mine.map((d) => d.import_kwh)), exported: sumOrNull(mine.map((d) => d.export_kwh)),
@@ -2889,14 +2900,34 @@ export const TOOLS: readonly Tool[] = [
 export const toolByName = (name: unknown): Tool | undefined => TOOLS.find((t) => t.name === name);
 
 /**
+ * The longest span of days a caller who is not signed in may ask a tool for.
+ *
+ * A tool's figures are worked out from every reading in its period, so its cost
+ * grows with the period, and a question from anyone could name three years. A
+ * year is every named period there is - "last year", "the last 12 months" - and
+ * the owner and a share link keep the full three.
+ */
+export const ANONYMOUS_DAYS = 366;
+
+/** What a caller may ask of the tools: `maxDays`, the longest span of dates, for one not signed in. */
+export interface ToolLimits { maxDays?: number }
+
+/**
  * Run a tool by name with arguments as given - checked first. Returns the
  * result, or why the arguments do not let it answer.
  */
-export async function runTool(db: D1Database, name: string, raw: unknown, now = nowSec()): Promise<{ result: ToolResult; args: Args } | { error: string }> {
+export async function runTool(
+  db: D1Database, name: string, raw: unknown, now = nowSec(), limits: ToolLimits = {},
+): Promise<{ result: ToolResult; args: Args } | { error: string }> {
   const tool = toolByName(name);
   if (!tool) return { error: `There is no tool called ${String(name).slice(0, 40)}.` };
   const args = checkArgs(tool, raw);
   if (typeof args === 'string') return { error: args };
+  // Dates are checked for their span before any is read; a named period is never longer than a year.
+  if (limits.maxDays && args.from !== undefined && args.to !== undefined
+    && Math.abs(noOf(String(args.to)) - noOf(String(args.from))) + 1 > limits.maxDays) {
+    return { error: `A period can be at most ${limits.maxDays} days long without signing in.` };
+  }
   try {
     return { result: await tool.run({ db, now }, args), args };
   } catch (e) {

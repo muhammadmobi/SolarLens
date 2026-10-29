@@ -43,9 +43,9 @@ describe('the token header, read exactly', () => {
     h.close();
   });
 
-  it('refuses /auth with no token at all, not only with a wrong one', async () => {
+  it('signs nothing in at /auth with no token at all, as with any other', async () => {
     const h = createHarness();
-    expect((await h.fetch('/auth')).status).toBe(403);
+    expect((await h.fetch('/auth')).status).toBe(410);
     h.close();
   });
 });

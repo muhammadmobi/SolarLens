@@ -13,7 +13,7 @@
  */
 import { converse, numbersAgree, numbersIn, type Reply } from './assistant';
 import { nowSec, type Env } from './db';
-import { toolByName, type Args, type ToolResult } from './tools';
+import { toolByName, type Args, type ToolLimits, type ToolResult } from './tools';
 
 export { numbersAgree, numbersIn };
 
@@ -34,9 +34,10 @@ type Outcome = { status: number; body: AskReply | { error: string } };
 
 /**
  * Answer `body`: `{question}` in words, or `{tool, args}` directly. `useModel`
- * says whether this caller may spend the day's model calls.
+ * says whether this caller may spend the day's model calls, and `limits` what
+ * it may ask of the tools (see ./assistant converse).
  */
-export async function ask(env: Env, body: unknown, useModel: boolean, now = nowSec()): Promise<Outcome> {
+export async function ask(env: Env, body: unknown, useModel: boolean, now = nowSec(), limits: ToolLimits = {}): Promise<Outcome> {
   const b = (body && typeof body === 'object' ? body : {}) as { question?: unknown; tool?: unknown; args?: unknown };
   let question: string | null = null;
   let out: Awaited<ReturnType<typeof converse>>;
@@ -46,7 +47,7 @@ export async function ask(env: Env, body: unknown, useModel: boolean, now = nowS
     out = await converse(env, {
       messages: [{ role: 'user', content: `(from the dashboard) ${tool.name}` }],
       calls: [{ tool: tool.name, args: (b.args && typeof b.args === 'object' ? b.args : {}) as Args }],
-    }, useModel, now);
+    }, useModel, now, limits);
     // A tool asked for directly, whose arguments do not let it answer, is the asker's mistake.
     if (out.status === 200 && 'errors' in out.body && out.body.errors.length && !out.body.results.length) {
       return { status: 400, body: { error: out.body.errors[0].replace(/^[a-z_]+: /, '') } };
@@ -55,7 +56,7 @@ export async function ask(env: Env, body: unknown, useModel: boolean, now = nowS
     if (typeof b.question !== 'string' || b.question.trim().length < 3) return { status: 400, body: { error: 'Ask a question of a few words at least.' } };
     question = b.question.replace(/\s+/g, ' ').trim();
     if (question.length > QUESTION_MAX) return { status: 400, body: { error: `A question is at most ${QUESTION_MAX} characters.` } };
-    out = await converse(env, { messages: [{ role: 'user', content: question }] }, useModel, now);
+    out = await converse(env, { messages: [{ role: 'user', content: question }] }, useModel, now, limits);
   }
   if (out.status !== 200 || !('answer' in out.body)) return out as Outcome;
   const { calls, results, errors: _errors, ...rest } = out.body;

@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { b64url, sha256 } from '../../src/auth/crypto';
 import { createShare, setRequired, startDevice } from '../../src/auth/sessions';
-import { ACCESS_S, CODE_S, GRACE_S, MAX_CLIENTS, redirectProblem } from '../../src/oauth';
+import { ACCESS_S, CODE_S, GRACE_S, MAX_CLIENTS, STALE_CLIENT_S, redirectProblem, register } from '../../src/oauth';
 import { bearer, createHarness, type Harness } from '../helpers/worker';
 
 const API = 'api-token-for-tests';
@@ -365,5 +365,16 @@ describe('connected apps, in Settings', () => {
     expect((await mcp(app.access_token)).status).toBe(401);
     expect((await h.fetch(`/api/settings/apps/${id}`, { method: 'DELETE', headers: bearer(API) })).status).toBe(404);
     expect(((await (await h.fetch('/api/settings/apps', { headers: bearer(API) })).json()) as { apps: unknown[] }).apps).toEqual([]);
+  });
+});
+
+describe('registrations nobody approved', () => {
+  it('are cleared after an hour, so a stranger who fills the list holds it that long at most', async () => {
+    const reg = (n: number) => register(h.env.DB, { client_name: `App ${n}`, redirect_uris: [APP_REDIRECT] });
+    for (let i = 0; i < MAX_CLIENTS; i++) expect('client' in (await reg(i))).toBe(true);
+    expect(await reg(MAX_CLIENTS)).toMatchObject({ error: 'invalid_client_metadata' });
+    at(STALE_CLIENT_S + 1);
+    expect('client' in (await reg(MAX_CLIENTS + 1))).toBe(true);
+    expect(h.d1.raw.prepare('SELECT COUNT(*) AS n FROM oauth_clients').get()).toEqual({ n: 1 });
   });
 });

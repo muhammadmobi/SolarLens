@@ -12,8 +12,8 @@
  * binding, real network. Those are covered by the end-to-end suite, the probe
  * scripts, and the smoke test that runs after every deploy.
  *
- * Node 22 keeps `node:sqlite` behind `--experimental-sqlite`, which the test
- * script passes; Node 24 and newer need no flag and ignore it.
+ * `node:sqlite` needs no flag from Node 22.13 on, which package.json's
+ * engines asks for; before that it sat behind `--experimental-sqlite`.
  */
 import { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';

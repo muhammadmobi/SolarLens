@@ -26,7 +26,7 @@ import { nowSec, type Env } from './db';
 import { findHelp } from './help';
 import {
   DEFAULT_RANGE, RANGES, TOOLS, dayNo, dayWords, isoDay, jsonSchemaOf, loadSystems, resolvePeriod, runTool, zoneOf,
-  type Args, type Period, type Range, type Sys, type ToolResult,
+  type Args, type Period, type Range, type Sys, type ToolLimits, type ToolResult,
 } from './tools';
 
 /** The longest message taken, and how many earlier turns are read with it. */
@@ -773,9 +773,12 @@ function smallTalk(question: string): string | null {
  * Answer the conversation's last message. `calls`, when given, are what to
  * look up, decided already (a "Why?" button); otherwise the model decides -
  * when `useModel` allows it, there is one, and a call is left today - or
- * SolarLens reads the message itself.
+ * SolarLens reads the message itself. `limits` are what the caller may ask of
+ * the tools: a caller not signed in, a year of dates at most (../tools ANONYMOUS_DAYS).
  */
-export async function converse(env: Env, input: { messages: unknown; calls?: Call[] }, useModel: boolean, now = nowSec()): Promise<Outcome> {
+export async function converse(
+  env: Env, input: { messages: unknown; calls?: Call[] }, useModel: boolean, now = nowSec(), limits: ToolLimits = {},
+): Promise<Outcome> {
   const turns = checkTurns(input.messages);
   if (typeof turns === 'string') return { status: 400, body: { error: turns } };
   const question = turns[turns.length - 1].content;
@@ -833,7 +836,7 @@ export async function converse(env: Env, input: { messages: unknown; calls?: Cal
   const errors: string[] = [];
   const ran: Call[] = [];
   for (const c of calls.slice(0, MAX_CALLS)) {
-    const out = await runTool(env.DB, c.tool, c.args, now);
+    const out = await runTool(env.DB, c.tool, c.args, now, limits);
     if ('error' in out) errors.push(`${c.tool}: ${out.error}`);
     else { results.push(out.result); ran.push({ tool: c.tool, args: out.args }); }
   }

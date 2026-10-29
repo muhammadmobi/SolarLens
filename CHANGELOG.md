@@ -108,8 +108,8 @@ checkout of any tag says which release it is.
   each, one post a run however many - and a summary every Monday. Each is
   tested the moment it is added, and Settings shows how its last post went, in
   the service's own words. The token or address posting takes is encrypted
-  with AES-GCM under a key derived from `API_TOKEN`, never served and never
-  logged; only `https://` to a named host is accepted; Discord is told to ping
+  with AES-GCM under a key derived from `SECRET_KEY` (or `API_TOKEN` without
+  one), never served and never logged; only `https://` to a named host is accepted; Discord is told to ping
   nobody and Telegram's HTML is escaped. A channel taking alerts counts as a
   listener like a signed-up phone, so the told-state is shared and primed the
   same way. No email. Migration 0018; `GET`, `POST`, `PATCH` and `DELETE
@@ -118,8 +118,9 @@ checkout of any tag says which release it is.
 - **A weekly summary**, from 08:00 each Monday on the first system's clock:
   last week's energy against the week before (only systems recorded in both),
   each system's share, best day and days reported, the money saved and CO₂
-  avoided by the tariff, and the faults. Sent once, caught up if a Monday was
-  missed, and on request from Settings. `GET /api/summary` serves it as data.
+  avoided by the tariff, and the faults. Sent once, with the week's report -
+  waiting up to three hours for it - caught up if a Monday was missed, and on
+  request from Settings. `GET /api/summary` serves it as data.
 
 - **Home Assistant.** `GET /api/sensors` answers every figure a sensor wants,
   flat and in fixed units, and Settings writes the `configuration.yaml` for it
@@ -187,7 +188,8 @@ checkout of any tag says which release it is.
   - *A restore point before every migration*: the deploy writes a D1 Time
     Travel bookmark, and the command to restore it, into its summary.
   - *A production watcher*: every half hour, an issue if the site is down or no
-    feed has delivered for 90 minutes, closed again when readings return.
+    feed has delivered for 90 minutes, closed again when readings return - and
+    one when the database passes 400 MB of the free plan's 500 (`DB_WARN_MB`).
   - *The owner's own pull requests approved* by the Actions bot once every check
     has passed, Copilot has reviewed the newest commit and no thread is open.
 
@@ -239,10 +241,11 @@ checkout of any tag says which release it is.
 
 - **A lockout**: five wrong tries from one address lock it for fifteen
   minutes; thirty from everywhere in an hour pause password sign-in for an
-  hour.
+  hour. The setup code is held to the first alone, so no stranger can pause
+  the owner's way back in.
 
-- **`GET /api/status`**: how fresh each feed is and nothing else, open even on
-  a private dashboard, for a monitor and the deploy's smoke test.
+- **`GET /api/status`**: how fresh each feed is and how large the database
+  is, and nothing else, open even on a private dashboard, for a monitor and the deploy's smoke test.
 
 - **Everything each datalogger reports, and its week.** The Devices tab opens
   with a card per datalogger: how it connects, its signal and signal bars, how
@@ -276,10 +279,14 @@ checkout of any tag says which release it is.
   caching: an answer now depends on who is asking, and no cache may go on
   showing it after a sign-out.
 
-- **`/auth?t=<API_TOKEN>` signs the browser in with a proper session** instead
-  of leaving the token itself in a cookie. That 2.x cookie is no longer
-  accepted, and is cleared when seen, since nothing could sign it out: a
-  browser that had it signs in once.
+- **`/auth?t=<API_TOKEN>` no longer signs a browser in.** The 2.x unlock link
+  carried the key to everything in an address, where the browser's history,
+  request logs and anything it was pasted into keep it. It now answers `410`
+  with where to sign in instead: the same token typed as the setup code does
+  the same job without leaving it anywhere, and `rotate-tokens.ps1` no longer
+  prints such a link. The cookie the link left, which held the token itself,
+  is no longer accepted, and is cleared when seen, since nothing could sign it
+  out: a browser that had it signs in once.
 
 - **The deploy's smoke test** reads freshness from `/api/status`, and on a
   private dashboard checks that a signed-out caller is asked to sign in.
@@ -297,8 +304,56 @@ checkout of any tag says which release it is.
 - **A passkey's counter moves atomically**, so two sign-ins racing with the
   same count - a copied key used at the same moment - cannot both succeed.
 
-- **Replacing `API_TOKEN`** now keeps every signed-in device signed in, but the
-  password must be set again, since it is keyed with the token.
+- **Replacing `API_TOKEN`** now keeps every signed-in device signed in - and,
+  with `SECRET_KEY` set, the password and the alert channels too. Without it
+  the password must be set again and each channel added again, since both are
+  keyed with the token.
+
+- **The slower work has a cron of its own.** The week's agents and summary,
+  the weather and the housekeeping rode on the five-minute run, and on a Monday
+  that run made some ninety-five database queries, where D1's free plan allows
+  fifty in one invocation - past which every query fails. They now run once an
+  hour, at seven minutes past, each step on its own, so a failure is logged and
+  the next step still runs; in the hour the agents run, the rest waits for the
+  next. The five-minute run keeps to the readings and the alerts.
+  `tests/unit/budgets.test.ts` counts every statement on every run: 35 for a
+  five-minute run, at most 41 for an hourly one. `src/cron.ts`.
+
+- **The weekly agents are marked done only once they are done.** The week was
+  claimed before the work, so one failure lost its report and health check
+  with no second try. A failed run is tried again the next hour, three times
+  at most, so a fault that fails every time cannot spend the day's model calls.
+
+- **A reading keeps its vendor payload for 30 days.** The payload was some five
+  kilobytes of each reading, against a few hundred bytes for everything else,
+  and nothing ever deleted a reading, so the database grew by the better part
+  of a gigabyte a year where the free plan stops at 500 MB. The hourly
+  housekeeping clears the payload from readings older than a month, a day of
+  them an hour; the figures stay. Expired kv entries are cleared too.
+
+- **A relay's day curve costs a few queries, not hundreds.** The relay sends
+  the whole of today's curve every five minutes, and each point was stored one
+  by one, three queries apiece: some twenty thousand rows written a day that
+  changed nothing, and several hundred queries in one request. Only points
+  newer than the last one stored are written now, in batches, at most 40 a
+  post, oldest first - a day slept through is taken over a few posts.
+
+- **The "polls failing" alert reads two hours of the poll log, not a week.** It
+  read every line of the week on every run with a listener - about a fifth of
+  the free plan's daily reads on its own. Migration 0022 indexes the alarms by
+  when each was first seen, for the alarms rule, and drops an index on the
+  readings that repeated the table's own key and cost a row written with every
+  reading.
+
+- **Every vendor call gives up after 20 seconds**, and a push service after
+  10: a vendor that never answered held up every call queued behind it.
+
+- **SolarMan's plant list is read page by page**, fifty at a time, where only
+  the first fifty plants were read.
+
+- **The laptops install exactly what the lockfile says**: `setup-relay.ps1`
+  runs `npm ci`, not `npm install`, as does the README. The development tools
+  want Node.js 22.13 or newer.
 
 ### Fixed
 
@@ -341,6 +396,78 @@ checkout of any tag says which release it is.
 - **The footer's feed lines fit a phone.** As long as a relay's really are, they
   made the page wider than the screen too; their detail now gives way, cut
   short, to fit.
+
+- **The deploy's automatic rollback works.** `scripts/wrangler.mjs` ran
+  wrangler through a shell, which split the rollback's message - "Smoke test
+  failed for <commit>" - into separate words; wrangler refuses arguments it
+  does not know, so the rollback would have failed exactly when it was needed.
+  The wrapper now runs wrangler's own entry with Node, every argument whole.
+
+- **A reading pushed to `/api/ingest` with fields missing is stored**, with
+  them as not reported, where D1 refused it with a 500 - found by the new
+  tests. Every field is checked as a normaliser would, and `INCLUDE_PLANTS`
+  applies as on every other route.
+
+- **A body that is not JSON is answered 400** on every ingest route, not 500; a
+  device list is 50 records at most; and a `days` that is not a number reads as
+  the default, where `NaN` reached the query.
+
+- **A poll that fails no longer takes the rest of the run with it**: the alerts
+  are judged regardless, and an alarm or totals read that fails is logged - it
+  was dropped without a word, so fault history could stop with nobody the
+  wiser.
+
+### Security
+
+From a review of the whole repository, before the release:
+
+- **`SECRET_KEY`, a secret that only ever derives keys.** `API_TOKEN` was the
+  bearer token for writes, the setup code, and the root of every key - the
+  session signature, the password's pepper, the seal on the alert channels -
+  so replacing a token that had leaked reset all of those. With `SECRET_KEY`
+  set the keys come from it instead, and it never travels. What was keyed
+  with `API_TOKEN` moves over as it is used: a password at its next sign-in,
+  the channels at the next hourly housekeeping, a device's session at its next
+  renewal. The vendors' cached login tokens are sealed under it too.
+
+- **Writes fail closed.** A Worker deployed without `API_TOKEN` let every write
+  through, with a line in the log; it now refuses every one (503) and says
+  what to set.
+
+- **A passkey must be unlocked** - a fingerprint, a face or the PIN - not only
+  touched. A sign-in challenge is signed rather than stored, so asking for one
+  writes nothing, and it is spent once it works, so a copied answer cannot be
+  sent twice.
+
+- **Strangers cannot spend the database's day.** On the free plan a spent
+  daily allowance fails every query until midnight UTC, the poller's
+  included. A question from anyone not signed in covers a year at most; an
+  app that registers and is never approved is cleared after an hour, not a
+  week, so a stranger who fills the list of a hundred holds it that long at
+  most; and an optional rate limit (`RATE_LIMIT` in `wrangler.jsonc`) holds
+  callers who are not signed in to a rate per address.
+
+- **Two more headers**: `Strict-Transport-Security` for a year, and a
+  `Permissions-Policy` that turns off the device features the page never
+  uses. The security policy's own comment no longer claims more than it does:
+  it stops a script posting a reading elsewhere, not navigating the page away.
+
+- **No preview addresses** (`preview_urls: false`): each uploaded version had a
+  public address of its own, with the production database behind it.
+
+- **The workflows**: the release's version reaches its script through the
+  environment rather than pasted into it; a deploy started by hand runs only
+  from `main`; the PowerShell analyser the checks install is pinned to a
+  version.
+
+- **The page escapes the apostrophe too**, so text is safe in an attribute
+  quoted either way.
+
+- **Who may change what, tested**: `tests/unit/access.test.ts` reads every
+  write route from the source and fails if one is not placed - the owner's, a
+  signed-in browser's, an approved app's, the relays', or open for a stated
+  reason - then asks each as nobody, a share link, a relay and the owner, and
+  fails if it answers anyone it is not for.
 
 ## [2.11.0] — 2026-10-19
 

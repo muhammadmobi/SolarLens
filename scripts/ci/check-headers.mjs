@@ -60,7 +60,7 @@ if (csp && fromStatic.size) {
     problems.push(`  worker: ${csp}`);
     problems.push(`  page:   ${staticCsp}`);
   }
-  for (const name of ['X-Content-Type-Options', 'Referrer-Policy', 'Cross-Origin-Opener-Policy', 'X-Frame-Options']) {
+  for (const name of ['X-Content-Type-Options', 'Referrer-Policy', 'Cross-Origin-Opener-Policy', 'X-Frame-Options', 'Strict-Transport-Security', 'Permissions-Policy']) {
     const a = fromWorker.get(name);
     const b = fromStatic.get(name);
     if (a === undefined) problems.push(`the Worker no longer sets ${name}`);

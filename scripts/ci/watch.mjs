@@ -9,7 +9,11 @@
  * - **stale**: it answers, but no feed at all has delivered for longer than
  *   STALE_MIN - SolarMan's session lapsed and the relays off, a vendor outage,
  *   a Worker whose cron has stopped;
- * - **ok**: at least one feed is current.
+ * - **filling**: readings arrive, but the database has grown past DB_WARN_MB
+ *   (/api/status says its size): on D1's free plan a database stops taking
+ *   writes at 500 MB, so this warns at 400. On a paid plan, whose limit is
+ *   ten gigabytes, set the repository variable DB_WARN_MB higher;
+ * - **ok**: at least one feed is current, and the database has room.
  *
  * One feed quiet while another delivers is not an issue: the SolisCloud relay
  * runs on laptops that are switched off now and then, and the phone
@@ -32,11 +36,13 @@
 import { execFileSync } from 'node:child_process';
 
 export const STALE_MIN = 90;
+/** The database size, in MB, past which the watcher warns: 80% of D1's free-plan 500 MB. */
+export const DB_WARN_MB = 400;
 const LABEL = 'watcher';
 const TITLE = 'The live dashboard needs a look';
 
 /** What /api/status says, reduced to one verdict and the lines that explain it. */
-export function judge(res, now = Math.floor(Date.now() / 1000)) {
+export function judge(res, now = Math.floor(Date.now() / 1000), warnMb = DB_WARN_MB) {
   if (!res || res.error) return { state: 'down', lines: [`The site did not answer: ${res?.error ?? 'no response'}.`] };
   if (!res.ok) return { state: 'down', lines: [`The site answered HTTP ${res.status}.`] };
   const feeds = Array.isArray(res.body?.feeds) ? res.body.feeds : [];
@@ -47,7 +53,15 @@ export function judge(res, now = Math.floor(Date.now() / 1000)) {
   });
   const fresh = feeds.some((f) => f.ok && now - (f.ts ?? 0) <= STALE_MIN * 60);
   if (!fresh) return { state: 'stale', lines: [`No feed has delivered for over ${STALE_MIN} minutes.`, ...lines] };
-  return { state: 'ok', lines };
+  // Size only when the Worker reports it: one before 3.0, or a test double, says nothing.
+  const mb = typeof res.body?.db_bytes === 'number' ? res.body.db_bytes / 1e6 : null;
+  if (mb !== null && mb >= warnMb) {
+    return {
+      state: 'filling',
+      lines: [`The database is ${Math.round(mb)} MB, past the ${warnMb} MB this watcher warns at. On the free plan it stops taking readings at 500 MB: see the handoff's "When something is wrong".`, ...lines],
+    };
+  }
+  return { state: 'ok', lines: mb === null ? lines : [...lines, `database: ${Math.round(mb)} MB`] };
 }
 
 async function fetchStatus(base) {
@@ -74,9 +88,9 @@ async function main() {
     console.log('SOLARLENS_URL is not set: nothing to watch. Add it as a repository secret to turn the watcher on.');
     return;
   }
-  const verdict = judge(await fetchStatus(base));
+  const verdict = judge(await fetchStatus(base), undefined, Number(process.env.DB_WARN_MB) || DB_WARN_MB);
   const when = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
-  const text = [`**${verdict.state === 'down' ? 'The site is down' : verdict.state === 'stale' ? 'Readings have stopped' : 'Back to normal'}** - ${when}`, '', ...verdict.lines.map((l) => `- ${l}`)].join('\n');
+  const text = [`**${verdict.state === 'down' ? 'The site is down' : verdict.state === 'stale' ? 'Readings have stopped' : verdict.state === 'filling' ? 'The database is filling up' : 'Back to normal'}** - ${when}`, '', ...verdict.lines.map((l) => `- ${l}`)].join('\n');
   console.log(text);
   if (process.env.DRY_RUN) return;
 

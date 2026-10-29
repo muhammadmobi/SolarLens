@@ -13,11 +13,11 @@
 import { Hono, type Context } from 'hono';
 import { setCookie } from 'hono/cookie';
 import type { Env } from '../db';
-import { PASSWORD_MIN, b64url, fromB64url, hashPassword, timingSafeEqual, verifyPassword } from './crypto';
+import { PASSWORD_MIN, b64url, fromB64url, hashPassword, keySecret, previousKeySecret, timingSafeEqual, verifyPassword } from './crypto';
 import {
   type Caller, type CookieOut, callerKey, clearCookies, createShare, deviceLabel, forgiveCaller, listDevices, listShares,
-  lockedUntil, newChallenge, openShare, owner, passkeyCount, recordFailure, revokeDevice, revokeOthers, revokeShare,
-  setPassword, setRequired, startDevice, takeChallenge,
+  lockedUntil, loginChallenge, loginChallengeValid, newChallenge, openShare, owner, passkeyCount, recordFailure, revokeDevice,
+  revokeOthers, revokeShare, setPassword, setRequired, spendChallenge, startDevice, takeChallenge,
 } from './sessions';
 import { ES256, RS256, type StoredKey, verifyAssertion, verifyRegistration } from './webauthn';
 
@@ -52,6 +52,21 @@ function challengeIn(clientDataJSON: unknown): string | null {
 
 const body = async <T>(c: C): Promise<Partial<T>> => c.req.json<Partial<T>>().catch(() => ({}));
 const isOwner = (c: C) => c.get('caller').role === 'owner';
+
+/**
+ * Whether `password` is the owner's. A hash made before SECRET_KEY was set is
+ * peppered with API_TOKEN: it still matches, and is made again under the key
+ * secret there and then, so the password moves over the first time it is used.
+ */
+async function passwordMatches(c: C, password: unknown, stored: string | null | undefined): Promise<boolean> {
+  const key = keySecret(c.env);
+  if (!key || !stored || typeof password !== 'string') return false;
+  if (await verifyPassword(password, stored, key)) return true;
+  const before = previousKeySecret(c.env);
+  if (!before || !(await verifyPassword(password, stored, before))) return false;
+  await setPassword(c.env.DB, await hashPassword(password, key), now());
+  return true;
+}
 
 /** Refused, with the time the lock lifts, so the page can say how long to wait. */
 const locked = (c: C, until: number) =>
@@ -90,22 +105,24 @@ auth.get('/status', async (c) => {
  */
 auth.post('/setup', async (c) => {
   const secret = c.env.API_TOKEN;
-  if (!secret) return c.json({ error: 'Sign-in is not set up on this server: API_TOKEN is missing.' }, 503);
+  const keys = keySecret(c.env);
+  if (!secret || !keys) return c.json({ error: 'Sign-in is not set up on this server: API_TOKEN is missing.' }, 503);
   const key = await callerKey(c.req.header('cf-connecting-ip'));
-  const until = await lockedUntil(c.env.DB, key, now());
+  // The caller's own lock only: see lockedUntil, on why the setup code is kept out of the pause for everyone.
+  const until = await lockedUntil(c.env.DB, key, now(), false);
   if (until) return locked(c, until);
   const b = await body<{ code: string; password: string | null }>(c);
   if (typeof b.code !== 'string' || !timingSafeEqual(b.code.trim(), secret)) {
-    await recordFailure(c.env.DB, key, now());
+    await recordFailure(c.env.DB, key, now(), false);
     return c.json({ error: 'That setup code is not right.' }, 401);
   }
   if (b.password != null && (typeof b.password !== 'string' || b.password.length < PASSWORD_MIN)) {
     return c.json({ error: `A password needs at least ${PASSWORD_MIN} characters.` }, 400);
   }
   await forgiveCaller(c.env.DB, key);
-  if (typeof b.password === 'string') await setPassword(c.env.DB, await hashPassword(b.password, secret), now());
+  if (typeof b.password === 'string') await setPassword(c.env.DB, await hashPassword(b.password, keys), now());
   else if (!(await owner(c.env.DB))) await setPassword(c.env.DB, null, now());
-  const cookies = await startDevice(c.env.DB, secret, 'owner', deviceLabel(c.req.header('user-agent')), now());
+  const cookies = await startDevice(c.env.DB, keys, 'owner', deviceLabel(c.req.header('user-agent')), now());
   const deviceId = cookies[1].value.split('.')[0];
   await revokeOthers(c.env.DB, deviceId, now());
   applyCookies(c, cookies);
@@ -114,20 +131,19 @@ auth.post('/setup', async (c) => {
 
 /** Sign in with the password. */
 auth.post('/login', async (c) => {
-  const secret = c.env.API_TOKEN;
-  if (!secret) return c.json({ error: 'Sign-in is not set up on this server.' }, 503);
+  const keys = keySecret(c.env);
+  if (!c.env.API_TOKEN || !keys) return c.json({ error: 'Sign-in is not set up on this server.' }, 503);
   const key = await callerKey(c.req.header('cf-connecting-ip'));
   const until = await lockedUntil(c.env.DB, key, now());
   if (until) return locked(c, until);
   const b = await body<{ password: string }>(c);
   const o = await owner(c.env.DB);
-  const ok = !!o?.password && typeof b.password === 'string' && (await verifyPassword(b.password, o.password, secret));
-  if (!ok) {
+  if (!(await passwordMatches(c, b.password, o?.password))) {
     await recordFailure(c.env.DB, key, now());
     return c.json({ error: o?.password ? 'That password is not right.' : 'No password is set. Use a passkey, or the setup code.' }, 401);
   }
   await forgiveCaller(c.env.DB, key);
-  applyCookies(c, await startDevice(c.env.DB, secret, 'owner', deviceLabel(c.req.header('user-agent')), now()));
+  applyCookies(c, await startDevice(c.env.DB, keys, 'owner', deviceLabel(c.req.header('user-agent')), now()));
   return c.json({ ok: true });
 });
 
@@ -142,6 +158,12 @@ auth.post('/logout', async (c) => {
 /**
  * The options for navigator.credentials.create() or .get(), with a fresh
  * challenge. Making a passkey needs the owner signed in; using one does not.
+ *
+ * User verification is required both ways: the fingerprint, face or PIN that
+ * unlocks the passkey, not just a touch. A passkey is the whole sign-in here,
+ * with no password beside it, so a security key without a PIN - or one picked
+ * up off a desk - must not be enough on its own. Phones, laptops and password
+ * managers verify anyway; a security key with no PIN is asked to set one.
  */
 auth.post('/passkey/options', async (c) => {
   const b = await body<{ purpose: 'register' | 'login' }>(c);
@@ -155,15 +177,19 @@ auth.post('/passkey/options', async (c) => {
       // One owner, so one fixed user handle: every passkey here is the owner's.
       user: { id: b64url(new TextEncoder().encode('solarlens-owner')), name: 'owner', displayName: 'SolarLens owner' },
       pubKeyCredParams: [{ type: 'public-key', alg: ES256 }, { type: 'public-key', alg: RS256 }],
-      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
       excludeCredentials: results.map((r) => ({ type: 'public-key', id: r.id })),
       attestation: 'none',
       timeout: 120_000,
     });
   }
+  const keys = keySecret(c.env);
+  if (!keys) return c.json({ error: 'Sign-in is not set up on this server.' }, 503);
   // A passkey made here is discoverable, so the browser offers it without
   // being told which one: no list of credential ids is handed to a stranger.
-  return c.json({ challenge: await newChallenge(c.env.DB, 'login', now()), rpId: rp.id, userVerification: 'preferred', timeout: 120_000 });
+  // Its challenge is signed rather than stored (loginChallenge), so a stranger
+  // asking writes nothing.
+  return c.json({ challenge: await loginChallenge(keys, now()), rpId: rp.id, userVerification: 'required', timeout: 120_000 });
 });
 
 /** Keep a new passkey. */
@@ -189,11 +215,11 @@ auth.post('/passkey/register', async (c) => {
 
 /** Sign in with a passkey. */
 auth.post('/passkey/login', async (c) => {
-  const secret = c.env.API_TOKEN;
-  if (!secret) return c.json({ error: 'Sign-in is not set up on this server.' }, 503);
+  const keys = keySecret(c.env);
+  if (!c.env.API_TOKEN || !keys) return c.json({ error: 'Sign-in is not set up on this server.' }, 503);
   const b = await body<{ id: string; response: { clientDataJSON: string; authenticatorData: string; signature: string } }>(c);
   const challenge = challengeIn(b.response?.clientDataJSON);
-  if (!challenge || !(await takeChallenge(c.env.DB, challenge, 'login', now()))) {
+  if (!challenge || !(await loginChallengeValid(keys, challenge, now()))) {
     return c.json({ error: 'That request ran out. Try again.' }, 400);
   }
   const row = typeof b.id === 'string'
@@ -202,6 +228,8 @@ auth.post('/passkey/login', async (c) => {
   if (!row) return c.json({ error: 'This passkey is not one of this dashboard\'s. It may have been removed.' }, 401);
   try {
     const { signCount } = await verifyAssertion(b.response as never, challenge, rpOf(c), JSON.parse(row.public_key) as StoredKey, row.sign_count);
+    // Verified: the challenge is spent now, so the same signed answer sent again is refused.
+    if (!(await spendChallenge(c.env.DB, challenge, now()))) throw new Error('that sign-in was already used');
     // The counter moves only from the value this check read. Two sign-ins
     // racing with the same counter - which is what a copied key used at the
     // same moment looks like - cannot both succeed: the second finds the count
@@ -215,7 +243,7 @@ auth.post('/passkey/login', async (c) => {
   } catch (e) {
     return c.json({ error: `That passkey did not verify: ${(e as Error).message}.` }, 401);
   }
-  applyCookies(c, await startDevice(c.env.DB, secret, 'owner', deviceLabel(c.req.header('user-agent')), now()));
+  applyCookies(c, await startDevice(c.env.DB, keys, 'owner', deviceLabel(c.req.header('user-agent')), now()));
   return c.json({ ok: true });
 });
 
@@ -259,14 +287,14 @@ auth.post('/settings/required', async (c) => {
 
 /** Change the password, or set one, or remove it when a passkey remains. */
 auth.post('/settings/password', async (c) => {
-  const secret = c.env.API_TOKEN as string;
+  const keys = keySecret(c.env) as string;
   const b = await body<{ current: string; next: string | null }>(c);
   const o = await owner(c.env.DB);
   if (o?.password) {
     const key = await callerKey(c.req.header('cf-connecting-ip'));
     const until = await lockedUntil(c.env.DB, key, now());
     if (until) return locked(c, until);
-    if (typeof b.current !== 'string' || !(await verifyPassword(b.current, o.password, secret))) {
+    if (!(await passwordMatches(c, b.current, o.password))) {
       await recordFailure(c.env.DB, key, now());
       return c.json({ error: 'The current password is not right.' }, 401);
     }
@@ -279,7 +307,7 @@ auth.post('/settings/password', async (c) => {
   if (typeof b.next !== 'string' || b.next.length < PASSWORD_MIN) {
     return c.json({ error: `A password needs at least ${PASSWORD_MIN} characters.` }, 400);
   }
-  await setPassword(c.env.DB, await hashPassword(b.next, secret), now());
+  await setPassword(c.env.DB, await hashPassword(b.next, keys), now());
   return c.json({ ok: true, password: true });
 });
 
@@ -322,10 +350,11 @@ auth.post('/settings/shares/revoke', async (c) => {
  */
 export async function openShareLink(c: Context<{ Bindings: Env; Variables: AuthVars }>): Promise<Response> {
   const secret = c.env.API_TOKEN;
+  const keys = keySecret(c.env);
   const link = c.req.param('link') ?? '';
-  const share = secret ? await openShare(c.env.DB, link, now()) : null;
+  const share = secret && keys ? await openShare(c.env.DB, link, now()) : null;
   c.header('Cache-Control', 'no-store');
-  if (!share || !secret) return c.redirect('/?link=expired');
-  applyCookies(c, await startDevice(c.env.DB, secret, 'viewer', deviceLabel(c.req.header('user-agent')), now(), { id: share.id, expiresAt: share.expires_at }));
+  if (!share || !keys) return c.redirect('/?link=expired');
+  applyCookies(c, await startDevice(c.env.DB, keys, 'viewer', deviceLabel(c.req.header('user-agent')), now(), { id: share.id, expiresAt: share.expires_at }));
   return c.redirect('/');
 }

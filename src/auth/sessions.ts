@@ -24,7 +24,7 @@
  *   checked against its device row on every request, so signing a device out
  *   takes effect at once rather than when its hour runs out.
  */
-import { hashToken, hmac, randomToken, timingSafeEqual } from './crypto';
+import { b64url, fromB64url, hashToken, hmac, randomToken, timingSafeEqual } from './crypto';
 
 export type Role = 'owner' | 'viewer';
 
@@ -351,19 +351,29 @@ export const GLOBAL_LOCK_S = 3600;
  * password sign-in for everyone for an hour - which is what stops a guesser
  * with many addresses. A passkey is not a guess and is never locked out, so
  * the owner can always get in with one while a lock is on.
+ *
+ * The setup code is held to the first limit only (`everyone` false). It is
+ * API_TOKEN, a long random secret that no number of guesses reaches, so the
+ * pause for everyone buys nothing against it - and anyone can set that pause
+ * off with thirty wrong passwords. Kept out of it, the setup code stays a way
+ * in for the owner, from their own address, whatever a stranger does.
  */
-export async function lockedUntil(db: D1Database, ipKey: string, now: number): Promise<number | null> {
+export async function lockedUntil(db: D1Database, ipKey: string, now: number, everyone = true): Promise<number | null> {
   const { results } = await db
     .prepare('SELECT key, locked_until FROM auth_attempts WHERE key IN (?1, ?2)')
-    .bind(ipKey, 'all')
+    .bind(ipKey, everyone ? 'all' : ipKey)
     .all<{ key: string; locked_until: number | null }>();
   const until = Math.max(0, ...results.map((r) => r.locked_until ?? 0));
   return until > now ? until : null;
 }
 
-/** Count one failure against the caller and against everyone, locking when a limit is reached. */
-export async function recordFailure(db: D1Database, ipKey: string, now: number): Promise<void> {
-  for (const [key, max, window, lock] of [[ipKey, CALLER_FAILS, CALLER_LOCK_S, CALLER_LOCK_S], ['all', GLOBAL_FAILS, 3600, GLOBAL_LOCK_S]] as const) {
+/**
+ * Count one failure against the caller and - unless `everyone` is false, for
+ * the setup code - against everyone, locking when a limit is reached.
+ */
+export async function recordFailure(db: D1Database, ipKey: string, now: number, everyone = true): Promise<void> {
+  const limits = [[ipKey, CALLER_FAILS, CALLER_LOCK_S, CALLER_LOCK_S], ['all', GLOBAL_FAILS, 3600, GLOBAL_LOCK_S]] as const;
+  for (const [key, max, window, lock] of everyone ? limits : limits.slice(0, 1)) {
     await db
       .prepare(
         `INSERT INTO auth_attempts (key, fails, window_start, locked_until) VALUES (?1, 1, ?2, NULL)
@@ -405,6 +415,57 @@ export async function takeChallenge(db: D1Database, challenge: string, kind: 're
   const res = await db
     .prepare('DELETE FROM auth_challenges WHERE challenge = ?1 AND kind = ?2 AND created_at >= ?3')
     .bind(challenge, kind, now - CHALLENGE_S)
+    .run();
+  return (res.meta.changes ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------- passkey sign-in challenges
+
+const LOGIN_CHALLENGE_LABEL = 'solarlens passkey challenge v1';
+/** 16 random bytes, the moment as 4 bytes, and an HMAC-SHA256 of the two: 52 bytes. */
+const LOGIN_CHALLENGE_BYTES = 52;
+
+/**
+ * A challenge for signing in with a passkey, made without writing anything.
+ *
+ * Anyone may ask for one - a passkey is offered before anyone is known - so a
+ * challenge kept in the database was a row written for every stranger who
+ * asked, and D1's free plan allows a hundred thousand writes a day for
+ * everything. This one carries what the database kept: random bytes, the
+ * moment it was made, and a signature over both under the key secret. The
+ * browser signs it as it is; checking it needs only the key. It is base64url,
+ * as the page decodes it and the browser writes it back into its client data.
+ */
+export async function loginChallenge(secret: string, now: number): Promise<string> {
+  const bytes = new Uint8Array(LOGIN_CHALLENGE_BYTES);
+  bytes.set(crypto.getRandomValues(new Uint8Array(16)), 0);
+  new DataView(bytes.buffer).setUint32(16, now);
+  bytes.set(fromB64url(await hmac(secret, LOGIN_CHALLENGE_LABEL, bytes.slice(0, 20))), 20);
+  return b64url(bytes);
+}
+
+/** Whether a sign-in challenge is one this server made, in the last five minutes. */
+export async function loginChallengeValid(secret: string, challenge: string, now: number): Promise<boolean> {
+  let bytes: Uint8Array;
+  try { bytes = fromB64url(challenge); } catch { return false; }
+  if (bytes.length !== LOGIN_CHALLENGE_BYTES) return false;
+  const made = new DataView(bytes.buffer, bytes.byteOffset).getUint32(16);
+  if (made > now + 60 || now - made > CHALLENGE_S) return false;
+  return timingSafeEqual(await hmac(secret, LOGIN_CHALLENGE_LABEL, bytes.slice(0, 20)), b64url(bytes.slice(20)));
+}
+
+/**
+ * Spend a sign-in challenge, once its passkey signature has verified: true the
+ * first time, false for the same one again. A copied answer sent twice is the
+ * one thing a signature cannot tell from the original - a synced passkey keeps
+ * no counter - so the challenges used in the last five minutes are remembered,
+ * and only a real sign-in writes one.
+ */
+export async function spendChallenge(db: D1Database, challenge: string, now: number): Promise<boolean> {
+  await db.prepare("DELETE FROM auth_challenges WHERE kind = 'used' AND created_at < ?1").bind(now - CHALLENGE_S).run();
+  const res = await db
+    .prepare("INSERT OR IGNORE INTO auth_challenges (challenge, kind, created_at) VALUES (?1, 'used', ?2)")
+    .bind(challenge, now)
     .run();
   return (res.meta.changes ?? 0) > 0;
 }

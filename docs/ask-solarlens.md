@@ -328,6 +328,14 @@ none of it. A message is at most 500 characters.
   written by SolarLens itself when there is no model or no call left. It is
   shown on the Ask tab and goes out with the weekly summary, so the week's
   analysis reaches ntfy, Telegram, Discord or a webhook without anyone asking.
+- **When they run.** From the first run of the hourly cron after Monday 08:00
+  on the first system's clock (`src/cron.ts`). The week is marked done only
+  once both are written: a run that fails - a model that does not answer, a
+  database that refuses - is tried again the next hour, three times at most
+  (`MAX_TRIES`), so a fault that fails every time cannot spend the day's model
+  calls. In the hour they run, the rest of the hourly work waits for the next;
+  the weekly summary goes in the hour after, with the report - or three hours
+  past 08:00 without it, if it could not be written.
 
 ## Who can ask, and what it costs
 
@@ -335,7 +343,11 @@ none of it. A message is at most 500 characters.
 the owner and anyone with a share link; on an open one, anyone. **Only someone
 signed in - the owner, or a share link - gets the model**: each message spends
 model calls, and a stranger could spend them all. Anyone else gets SolarLens's
-own reading of the question and the figures' own words.
+own reading of the question and the figures' own words - over a year at most
+(`ANONYMOUS_DAYS` in `src/tools.ts`). A longer period, asked by someone not
+signed in, is answered with a sentence saying so: on the free plan a day's
+reads are a fixed allowance for everything, the poller's included, and a
+stranger should not be able to spend it on the whole history at once.
 
 SolarLens counts its model calls - every feature together, per UTC day - and
 stops at `AI_DAILY_CALLS` (100 unless set). A message takes two calls,

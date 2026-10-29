@@ -304,7 +304,9 @@ jobs:
       - name: PowerShell lint
         shell: powershell
         run: |
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          # Pinned like everything else CI installs: a new release of the linter
+          # must not fail a pull request that changed nothing.
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser -ErrorAction Stop
           $found = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error, Warning
           $found | Format-Table -AutoSize | Out-String | Write-Host
           # Warnings are shown but do not fail: the scripts deliberately use

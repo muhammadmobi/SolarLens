@@ -9,12 +9,12 @@
  * out with the weekly summary. Workers AI is a script of replies.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { latestReports, runWeeklyAgents } from '../../src/agents';
+import { MAX_TRIES, latestReports, runWeeklyAgents } from '../../src/agents';
 import { addChannel, parseChannel, type NewChannel } from '../../src/channels';
 import { announce, pushEvents } from '../../src/push';
 import { sendWeekly } from '../../src/summary';
 import { createShare, setRequired } from '../../src/auth/sessions';
-import { bearer, createHarness, type Harness } from '../helpers/worker';
+import { HOURLY, bearer, createHarness, type Harness } from '../helpers/worker';
 import { addDay, addFault, addSun, addSystem, dayNumber, isoOf } from '../helpers/solar-days';
 
 /** Monday 28 September 2026, 09:00 UTC: the week before is 21 to 27 September. */
@@ -160,7 +160,10 @@ describe('the weekly agents', () => {
   it('run from the cron', async () => {
     h = createHarness();
     await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    // The five-minute cron keeps to the readings and the alerts; the week is the hourly one's.
     await h.cron();
+    expect(await h.env.DB.prepare("SELECT COUNT(*) AS n FROM agent_reports WHERE kind = 'weekly'").first()).toEqual({ n: 0 });
+    await h.cron(HOURLY);
     expect(await h.env.DB.prepare("SELECT COUNT(*) AS n FROM agent_reports WHERE kind = 'weekly'").first()).toEqual({ n: 1 });
   });
 });
@@ -182,5 +185,70 @@ describe('/api/agents', () => {
     expect((await h.fetch('/api/agents')).status).toBe(401);
     const share = await createShare(h.env.DB, 'Family', null, now);
     expect((await h.fetch('/api/agents', { headers: bearer(share.token) })).status).toBe(200);
+  });
+});
+
+describe('the week, when a run of the agents fails', () => {
+  let h: Harness;
+  afterEach(() => h.close());
+  const weekly = () => h.env.DB.prepare("SELECT COUNT(*) AS n FROM agent_reports WHERE kind = 'weekly'").first();
+  // agent_reports taken away, and put back as it was: a database refusing, then answering again.
+  const breakReports = () => h.d1.raw.exec('ALTER TABLE agent_reports RENAME TO agent_reports_away');
+  const mendReports = () => h.d1.raw.exec('ALTER TABLE agent_reports_away RENAME TO agent_reports');
+
+  it('is not marked done, so the next hour tries again - and then it is', async () => {
+    h = createHarness();
+    await quarter(h.env.DB);
+    breakReports();
+    await expect(runWeeklyAgents(h.env, NOW)).rejects.toThrow();
+    mendReports();
+    expect(await weekly()).toEqual({ n: 0 });
+    expect(await runWeeklyAgents(h.env, NOW + 3600)).toBe(true);
+    expect(await weekly()).toEqual({ n: 1 });
+    // Done now: the rest of the week, nothing more.
+    expect(await runWeeklyAgents(h.env, NOW + 7200)).toBe(false);
+  });
+
+  it(`gives up after ${MAX_TRIES} tries, so a fault that fails every time cannot spend the day's model calls`, async () => {
+    h = createHarness();
+    await quarter(h.env.DB);
+    breakReports();
+    for (let i = 0; i < MAX_TRIES; i++) await expect(runWeeklyAgents(h.env, NOW + i * 3600)).rejects.toThrow();
+    mendReports();
+    expect(await runWeeklyAgents(h.env, NOW + MAX_TRIES * 3600)).toBe(false);
+    expect(await weekly()).toEqual({ n: 0 });
+    // The next week starts afresh.
+    expect(await runWeeklyAgents(h.env, NOW + WEEK)).toBe(true);
+  });
+
+  it('leaves the rest of the hourly work to the next hour, in the hour it runs', async () => {
+    h = createHarness();
+    await quarter(h.env.DB);
+    const asked: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => { asked.push(String(input)); return Response.json({ hourly: { time: [], shortwave_radiation: [], temperature_2m: [], cloud_cover: [] } }); }));
+    await h.env.DB.prepare("INSERT INTO plant_location (inverter_id, lat, lng, updated_at) VALUES (?1, 10, 20, 0)").bind(ROOF).run();
+    const { hourly } = await import('../../src/cron');
+    await hourly(h.env, NOW);
+    expect(await weekly()).toEqual({ n: 1 });
+    expect(asked.some((u) => u.includes('open-meteo'))).toBe(false);
+    await hourly(h.env, NOW + 3600);
+    expect(asked.some((u) => u.includes('open-meteo'))).toBe(true);
+  });
+
+  it('is logged, and the rest of the hour runs regardless - as does every step after one that fails', async () => {
+    h = createHarness();
+    await quarter(h.env.DB);
+    // A row past its expiry, for the housekeeping to clear (../../src/db forgetExpiredKv).
+    await h.env.DB.prepare("INSERT INTO kv (k, v, expires_at) VALUES ('weather:gone', '1', ?1)").bind(NOW - 60).run();
+    breakReports();
+    // The weather's own table taken away too, so the step before the housekeeping fails.
+    h.d1.raw.exec('ALTER TABLE plant_location RENAME TO plant_location_away');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { hourly } = await import('../../src/cron');
+    await hourly(h.env, NOW);
+    // The summary has no channel to go to, so of the three steps only the weather fails.
+    expect(errors.mock.calls.map(([step]) => step)).toEqual(['agents:', 'weather:']);
+    expect(await h.env.DB.prepare("SELECT COUNT(*) AS n FROM kv WHERE k = 'weather:gone'").first()).toEqual({ n: 0 });
+    errors.mockRestore();
   });
 });

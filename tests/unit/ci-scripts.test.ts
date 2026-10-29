@@ -1,11 +1,29 @@
 /**
  * Two of the CI scripts decide something on the owner's behalf, so what they
  * decide is pinned here: when the production watcher opens an issue, and when
- * the owner's own pull request is approved.
+ * the owner's own pull request is approved. So is how the wrangler wrapper
+ * hands wrangler its arguments, which the deploy's rollback depends on.
  */
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { STALE_MIN, judge } from '../../scripts/ci/watch.mjs';
+import { DB_WARN_MB, STALE_MIN, judge } from '../../scripts/ci/watch.mjs';
 import { OWNER, type PullRequestState, readiness } from '../../scripts/ci/approve-if-ready.mjs';
+import { WRANGLER_CLI, wranglerArgs } from '../../scripts/wrangler.mjs';
+
+describe('the wrangler wrapper', () => {
+  it('hands wrangler every argument whole: a rollback message keeps its spaces', () => {
+    const args = wranglerArgs(['rollback', 'v-1', '--yes', '--message', 'Smoke test failed for abc123'], '.wrangler.local.jsonc');
+    expect(args).toEqual([WRANGLER_CLI, 'rollback', 'v-1', '--yes', '--message', 'Smoke test failed for abc123', '--config', '.wrangler.local.jsonc']);
+  });
+
+  it("reaches wrangler's own entry with Node alone - no shell, no npx shim", () => {
+    expect(existsSync(WRANGLER_CLI)).toBe(true);
+    const run = spawnSync(process.execPath, [WRANGLER_CLI, '--version'], { encoding: 'utf8', timeout: 60_000 });
+    expect(run.status).toBe(0);
+    expect(run.stdout).toMatch(/\d+\.\d+\.\d+/);
+  }, 90_000);
+});
 
 describe('the production watcher', () => {
   const now = 1_790_000_000;
@@ -31,6 +49,18 @@ describe('the production watcher', () => {
 
   it('counts a failing poll as not delivering, however recent', () => {
     expect(judge(answer([feed('solarman', 2, 0)]), now).state).toBe('stale');
+  });
+
+  it('warns when the database is filling up, and says how large it is when it is not', () => {
+    const at = (bytes: number) => ({ ok: true, status: 200, body: { feeds: [feed('solarman', 4)], db_bytes: bytes } });
+    const full = judge(at((DB_WARN_MB + 20) * 1e6), now);
+    expect(full.state).toBe('filling');
+    expect(full.lines[0]).toMatch(new RegExp(`^The database is ${DB_WARN_MB + 20} MB`));
+    const fine = judge(at(120e6), now);
+    expect(fine.state).toBe('ok');
+    expect(fine.lines).toContain('database: 120 MB');
+    // A paid plan's owner sets the line higher.
+    expect(judge(at((DB_WARN_MB + 20) * 1e6), now, 8000).state).toBe('ok');
   });
 
   it('calls it stale when nothing has ever logged', () => {

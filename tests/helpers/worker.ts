@@ -7,6 +7,9 @@
  * case is about. Nothing here talks to Cloudflare or to a vendor.
  */
 import worker from '../../src/index';
+import { FIVE_MINUTES } from '../../src/cron';
+
+export { FIVE_MINUTES, HOURLY } from '../../src/cron';
 import type { Env } from '../../src/db';
 import { createTestD1, type TestD1 } from './d1';
 
@@ -15,8 +18,13 @@ export interface Harness {
   d1: TestD1;
   /** Request the Worker the way the edge would. Paths are relative: '/api/health'. */
   fetch(path: string, init?: RequestInit): Promise<Response>;
-  /** Run the scheduled handler and wait for the work it hands to waitUntil. */
-  cron(): Promise<void>;
+  /**
+   * Run the scheduled handler and wait for the work it hands to waitUntil: the
+   * five-minute cron (the readings and the alerts) unless `expression` names
+   * the hourly one (HOURLY: the weekly agents and summary, the weather, the
+   * housekeeping).
+   */
+  cron(expression?: string): Promise<void>;
   close(): void;
 }
 
@@ -57,8 +65,8 @@ export function createHarness(overrides: Partial<Env> = {}): Harness {
     env,
     d1,
     fetch: (path, init) => worker.fetch(new Request(`https://dashboard.test${path}`, init), env, ctx) as Promise<Response>,
-    async cron() {
-      await worker.scheduled?.({ cron: '*/5 * * * *', scheduledTime: Date.now(), noRetry() {} } as ScheduledController, env, ctx);
+    async cron(expression = FIVE_MINUTES) {
+      await worker.scheduled?.({ cron: expression, scheduledTime: Date.now(), noRetry() {} } as ScheduledController, env, ctx);
       await Promise.all(pending);
     },
     close: () => d1.close(),
@@ -67,6 +75,13 @@ export function createHarness(overrides: Partial<Env> = {}): Harness {
 
 /** Authorization header for a route that wants one. */
 export const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+/**
+ * Mark the week's agents done, so an hourly run goes on to the summary, the
+ * weather and the housekeeping: in the hour the agents run, those wait (src/cron.ts hourly).
+ */
+export const agentsDone = (db: D1Database) =>
+  db.prepare("INSERT OR REPLACE INTO kv (k, v, expires_at) VALUES ('agents:week', '999999', 9999999999)").run();
 
 /** A plant-level inverter row, the shape both vendors end up producing. */
 export const testInverter = (over: Record<string, unknown> = {}) => ({

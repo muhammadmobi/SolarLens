@@ -19,8 +19,11 @@ the whole path work.
 - **The weekly summary** - every Monday from 08:00 on the first system's clock:
   last week's energy against the week before, each system's share, its best
   day and how many days it reported, the money saved and CO₂ avoided if the
-  tariff is set, and how many faults were recorded. *Send last week's summary
-  now* in Settings sends one straight away, to see what it looks like.
+  tariff is set, and how many faults were recorded. It carries the week's
+  report from the agents, so it goes in the hourly run after the report is
+  written - or three hours past 08:00 without it, if the report could not be.
+  *Send last week's summary now* in Settings sends one straight away, to see
+  what it looks like.
 
 Each place takes alerts, the summary, or both; the ticks in Settings change it.
 At most five places.
@@ -100,10 +103,14 @@ A bot token, a webhook address, a topic on a public server: each lets anyone who
 has it post to you. So:
 
 - **They are encrypted before they are stored**, with AES-GCM under a key
-  derived from `API_TOKEN` - which lives in the Worker's secrets, not in the
-  database. A copy of the database holds nothing that can post. This is also
-  why places need `API_TOKEN` to be set, and why **changing `API_TOKEN` means
-  adding each place again**: Settings then says a place "cannot be read".
+  derived from `SECRET_KEY` - or from `API_TOKEN`, where `SECRET_KEY` is not
+  set - which lives in the Worker's secrets, not in the database. A copy of the
+  database holds nothing that can post. This is also why places need one of
+  the two to be set. With `SECRET_KEY` set, a new `API_TOKEN` leaves every place
+  as it is; without it, **changing `API_TOKEN` means adding each place
+  again**: Settings then says a place "cannot be read". A place added before
+  `SECRET_KEY` was set is moved over to it on its next use, or by the next
+  hourly run, whichever comes first.
 - **They are never shown again.** Settings lists each place by a hint - `ntfy.sh
   · topic …ab`, `Discord webhook …wxyz`, `hooks.example.net webhook` - never the
   token, the topic or the path of an address.
