@@ -24,7 +24,9 @@
     "test:unit:coverage": "vitest run --coverage",
     "cf": "node scripts/wrangler.mjs",
     "demo:build": "node scripts/build-demo.mjs",
-    "screenshots": "node scripts/screenshots.mjs"
+    "screenshots": "node scripts/screenshots.mjs",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:visual": "playwright test -c playwright.visual.config.ts"
   },
   "dependencies": {
     "hono": "^4.13.8"

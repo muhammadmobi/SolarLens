@@ -1,0 +1,56 @@
+# Approve the owner's own pull request once everything says it is ready.
+#
+# The ruleset on main wants one approval, and GitHub will not let the owner
+# approve their own pull request. scripts/ci/approve-if-ready.mjs approves it as
+# the Actions bot instead - only when it is the owner's own, is not a draft,
+# does not say "do not merge", every check on its newest commit has passed,
+# Copilot has reviewed that commit, and no review thread is open. Anyone else's
+# pull request waits for the owner, as before.
+#
+# Runs when the checks finish and whenever a review lands, since either can be
+# the last thing a pull request was waiting for.
+#
+# Needs "Allow GitHub Actions to create and approve pull requests" turned on,
+# once (Settings -> Actions -> General -> Workflow permissions). Until then the
+# approval step fails, and nothing else is affected.
+
+name: Approve
+
+on:
+  workflow_run:
+    workflows: [Checks]
+    types: [completed]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: approve-${{ github.event.pull_request.number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  approve:
+    name: Approve when ready
+    # A fork's pull request gets a read-only token here, and is never the
+    # owner's own anyway.
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'pull_request_review' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Approve when ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+        run: node scripts/ci/approve-if-ready.mjs

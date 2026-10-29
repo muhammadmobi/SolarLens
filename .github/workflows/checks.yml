@@ -126,6 +126,100 @@ jobs:
         env:
           CF_D1_DATABASE_ID: dry-run-no-real-id
 
+  # Proves the Worker works in workerd, not only in the unit suite's Node: the
+  # page from the assets binding with its headers, cookies through the header
+  # rebuild, PBKDF2 and passkeys in workerd's WebCrypto, and the deploy's smoke
+  # test passing against a real Worker. It starts one with wrangler, on a
+  # throwaway local database, with made-up tokens - nothing touches Cloudflare.
+  # Locally: npm run test:integration
+  integration:
+    name: Integration (real Worker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run test:integration
+
+  # Each view of the demo, at a fixed moment, compared with the picture recorded
+  # before - for the change no text-based test notices. The pictures live in
+  # tests/visual/__screenshots__/linux/. A view with no picture yet has one
+  # recorded here, and the run passes and says so: download the
+  # visual-baselines artifact and add its files to that folder. After that, any
+  # difference fails, with the before, after and difference in the
+  # visual-report artifact. Locally: npm run test:visual (compares against a
+  # set recorded for your own machine; fonts differ between systems).
+  visual:
+    name: Screenshot comparison
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chrome
+      - name: Compare with the recorded pictures
+        run: |
+          before=$(ls tests/visual/__screenshots__/linux 2>/dev/null | wc -l)
+          # First pass: record a picture for any view that has none. Playwright
+          # marks such a test failed while writing it, so this pass is not the
+          # verdict...
+          npx playwright test -c playwright.visual.config.ts --update-snapshots=missing --reporter=dot || true
+          # ...this one is: every view now has a picture, and only a real
+          # difference from it fails.
+          npx playwright test -c playwright.visual.config.ts
+          after=$(ls tests/visual/__screenshots__/linux | wc -l)
+          if [ "$after" -gt "$before" ]; then
+            {
+              echo "### New screenshot baselines recorded"
+              echo
+              echo "$((after - before)) view(s) had no picture to compare with, so one was recorded."
+              echo "Download the **visual-baselines** artifact and add its files to \`tests/visual/__screenshots__/linux/\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: visual-baselines
+          path: tests/visual/__screenshots__/linux/
+          retention-days: 14
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: visual-report
+          path: test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # Lighthouse on the demo, which is the dashboard as it ships: accessibility at
+  # 0.95 and best practices at 0.9 or the run fails; performance below 0.8 is a
+  # warning, since the web font comes from a network the runner does not
+  # control. The reports stay in this run's lighthouse artifact, not on any
+  # outside service. Locally: npm run demo:build, then npx @lhci/cli autorun.
+  lighthouse:
+    name: Lighthouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/build-demo.mjs site
+      - uses: treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18 # 12.6.2
+        with:
+          configPath: ./lighthouserc.json
+          uploadArtifacts: true
+          temporaryPublicStorage: false
+
   # The project's own rules, each a small script in scripts/ci/ whose message
   # says what it refused and why. Locally: node scripts/ci/check-privacy.mjs,
   # check-attribution.mjs --range main..HEAD, check-headers.mjs, check-cmd-shape.mjs.

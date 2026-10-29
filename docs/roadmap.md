@@ -116,6 +116,14 @@ needs a sign-in, this is the public face of the project.
 - The owner's own pull requests approved automatically once every check is
   green.
 
+**As built:** Copilot's review is required through the approval: nothing is
+approved until Copilot has reviewed the newest commit and every thread is
+resolved, which the ruleset already enforces for merging. The screenshot
+pictures are recorded on Linux in CI, where the comparison runs, since fonts
+render differently elsewhere. Three things need turning on once in GitHub's
+settings: Pages (source: GitHub Actions), "Allow GitHub Actions to create and
+approve pull requests", and a `SOLARLENS_URL` repository secret for the watcher.
+
 ### 7. Weather, expected output, and the site map
 
 - Weather and irradiance from Open-Meteo, at the coordinates each vendor
