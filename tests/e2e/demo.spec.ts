@@ -67,7 +67,10 @@ test('shows most of a sunny day, whatever time the visitor comes', async ({ page
 
 test('Settings works, and says nothing is saved', async ({ page }) => {
   await page.goto('/demo/#/settings');
+  // The first refresh draws Settings again once the data lands; a tick before then would be drawn over.
+  await expect(page.locator('#fleet-today')).not.toHaveText('—');
   await expect(page.locator('.settings')).toBeVisible();
+  await expect(page.locator('#mcp-url')).toBeVisible();
   await page.locator('#req').check();
   await expect(page.locator('.authnote')).toBeVisible();
   await expect(page.locator('#demo-banner')).toContainText('Nothing you change here is saved');

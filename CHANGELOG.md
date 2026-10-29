@@ -18,6 +18,18 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **SolarLens as an MCP server**, at `/mcp`: AI apps outside SolarLens -
+  Claude, an IDE, anything that speaks the Model Context Protocol - ask the
+  same six read-only questions as the Ask tab, from the same tools, whether the
+  relay laptops are on or off. Streamable HTTP with JSON answers; protocol
+  versions 2025-06-18, 2025-03-26 and 2024-11-05. Protected by OAuth 2.1 tied to
+  the owner's sign-in: discovery (RFC 9728, RFC 8414), dynamic registration of
+  public clients (RFC 7591), an approval page only the owner's own browser can
+  answer, PKCE with S256, single-use codes, rotating refresh tokens with a copy
+  caught, revocation (RFC 7009), and only hashes stored. An app approved once
+  stays connected until the owner disconnects it under Settings → Connected
+  apps. Migration 0020. See docs/mcp.md.
+
 - **Ask SolarLens.** An Ask tab for questions in plain words - "Which month
   produced the most this year?", "How much did I export last week?", "Why was
   yesterday low?". A model on Workers AI chooses which of six read-only tools

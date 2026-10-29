@@ -97,6 +97,10 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     ] }
     : { ok: true, channel: { id: 'c3' }, test: { ok: false, error: 'HTTP 404' } })));
   await page.route('**/api/settings/summary', (r) => r.fulfill(json({ sent: 1, of: 1 })));
+  // One AI app connected to the MCP server.
+  await page.route('**/api/settings/apps**', (r) => r.fulfill(json(r.request().method() === 'GET'
+    ? { mcp: 'https://solarlens.example.com/mcp', apps: [{ id: 'g1', name: 'An app', redirect_to: 'app.example.org', connected_at: NOW - 86_400, last_used_at: NOW - 60 }] }
+    : { ok: true })));
   // Ask SolarLens: a model on hand, a report, a health check each way, and an answer with its figures.
   await page.route('**/api/ask/status', (r) => r.fulfill(json({ available: true, model: 'm', used: 1, limit: 100, can_ask: true })));
   await page.route('**/api/agents', (r) => r.fulfill(json({
@@ -275,7 +279,7 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   await page.locator('#ntfy-topic').fill('walk-topic').catch(() => {});
   await page.getByRole('button', { name: 'Add, and send a test' }).click().catch(() => {});
   await page.waitForTimeout(150);
-  for (const sel of ['[data-chan][data-what="weekly"]', '[data-chan-test]', '#summary-now', '[data-chan-remove]', '#ha-copy']) {
+  for (const sel of ['[data-chan][data-what="weekly"]', '[data-chan-test]', '#summary-now', '[data-chan-remove]', '#ha-copy', '#mcp-copy', '[data-unapp]']) {
     await page.locator(sel).first().click({ timeout: 2000 }).catch(() => {});
     await page.waitForTimeout(150);
   }
