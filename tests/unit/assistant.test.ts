@@ -169,12 +169,37 @@ describe('the questions an owner asks of a day, as typed', () => {
     expect(ask('how much did the battery charge yesterday')).toEqual([{ tool: 'battery', args: { range: 'yesterday' } }]);
     expect(ask('how much money did I save this month')).toEqual([{ tool: 'energy', args: { measure: 'saved', range: 'this_month' } }]);
     expect(ask('what percent of my solar did i use myself')).toEqual([{ tool: 'energy', args: { measure: 'self' } }]);
-    expect(ask('what was the inverter temperature yesterday on the orchard')).toEqual([{ tool: 'status_now', args: { system: 'Orchard Hybrid' } }]);
+    expect(ask('what was the inverter temperature yesterday on the orchard')).toEqual([{ tool: 'inverter', args: { part: 'temperature', system: 'Orchard Hybrid' } }]);
     expect(ask('how many days did riverside make more than 50 kwh')).toEqual([{ tool: 'stats', args: { above: 50, system: 'Riverside Ongrid' } }]);
     expect(ask('how many days under 10 kwh last month')).toEqual([{ tool: 'stats', args: { below: 10, range: 'last_month' } }]);
     expect(ask('is orchard online')).toEqual([{ tool: 'outages', args: { system: 'Orchard Hybrid' } }]);
     expect(ask('when does the riverside login expire')).toEqual([{ tool: 'outages', args: { system: 'Riverside Ongrid' } }]);
     expect(ask('how much will I make tomorrow')).toEqual([]);
+  });
+
+  it('draws a graph of any measure, or the usual day hour by hour, and reads what the inverter shows', () => {
+    expect(ask('show me a graph of the load yesterday')).toEqual([{ tool: 'chart', args: { metric: 'load', range: 'yesterday' } }]);
+    expect(ask('plot pv vs load today')).toEqual([{ tool: 'chart', args: { metric: 'power', versus: 'load', range: 'today' } }]);
+    expect(ask('chart the grid and the battery over the last 3 days')).toEqual([{ tool: 'chart', args: { metric: 'grid', versus: 'battery', from: '2026-09-26', to: '2026-09-28' } }]);
+    expect(ask('draw the battery charge this week on the orchard')).toEqual([{ tool: 'chart', args: { metric: 'soc', range: 'this_week', system: 'Orchard Hybrid' } }]);
+    expect(ask('graph of power every 15 minutes yesterday')).toEqual([{ tool: 'chart', args: { metric: 'power', every: '15min', range: 'yesterday' } }]);
+    expect(ask('hourly chart of the house load last week')).toEqual([{ tool: 'chart', args: { metric: 'load', every: 'hour', range: 'last_week' } }]);
+    expect(ask('plot the highest power each day this month')).toEqual([{ tool: 'chart', args: { metric: 'power', every: 'day', stat: 'highest', range: 'this_month' } }]);
+    expect(ask('weekly graph of the lowest battery charge')).toEqual([{ tool: 'chart', args: { metric: 'soc', every: 'week', stat: 'lowest' } }]);
+    // A graph of energy per day or month is the energy tool's bars.
+    expect(ask('graph of energy per day this month')).toEqual([{ tool: 'energy', args: { group_by: 'day', range: 'this_month' } }]);
+    expect(ask('chart my monthly kwh')).toEqual([{ tool: 'energy', args: { group_by: 'month' } }]);
+    // The usual day: across the last week unless another period is named.
+    expect(ask('when does my load usually peak')).toEqual([{ tool: 'chart', args: { metric: 'load', profile: 'hour_of_day', range: 'last_7_days' } }]);
+    expect(ask('which hours do I buy from the grid')).toEqual([{ tool: 'chart', args: { metric: 'grid', profile: 'hour_of_day', range: 'last_7_days' } }]);
+    expect(ask('what time does the battery discharge on the orchard last month')).toEqual([{ tool: 'chart', args: { metric: 'battery', profile: 'hour_of_day', range: 'last_month', system: 'Orchard Hybrid' } }]);
+    // What the inverter shows, led by the part asked about.
+    expect(ask('what is the PV1 voltage')).toEqual([{ tool: 'inverter', args: { part: 'strings' } }]);
+    expect(ask('is a string down on the orchard')).toEqual([{ tool: 'inverter', args: { part: 'strings', system: 'Orchard Hybrid' } }]);
+    expect(ask('grid frequency now')).toEqual([{ tool: 'inverter', args: { part: 'grid' } }]);
+    expect(ask('what is the power factor')).toEqual([{ tool: 'inverter', args: { part: 'grid' } }]);
+    expect(ask('battery voltage and bms')).toEqual([{ tool: 'inverter', args: { part: 'battery' } }]);
+    expect(ask('what does the inverter show on riverside')).toEqual([{ tool: 'inverter', args: { system: 'Riverside Ongrid' } }]);
   });
 
   it("keeps a day's hours through a follow-up, and moves the day or the system", () => {

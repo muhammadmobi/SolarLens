@@ -59,12 +59,12 @@ describe('the tools', () => {
   it('lists each with its arguments as JSON Schema, marked read-only', async () => {
     const { body } = await send(call(3, 'tools/list'));
     const tools = body!.result.tools as Record<string, any>[];
-    expect(tools.map((t) => t.name)).toEqual(['status_now', 'outages', 'energy', 'power_day', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
-    expect(tools[2]).toMatchObject({
+    expect(tools.map((t) => t.name)).toEqual(['status_now', 'outages', 'inverter', 'energy', 'power_day', 'chart', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
+    expect(tools[3]).toMatchObject({
       title: 'Energy over a period', inputSchema: { type: 'object', additionalProperties: false },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     });
-    expect(tools[2].inputSchema.properties.range.enum).toContain('last_month');
+    expect(tools[3].inputSchema.properties.range.enum).toContain('last_month');
     // Every tool has a title of its own for an app's list.
     expect(tools.filter((t) => t.title === t.name)).toEqual([]);
   });

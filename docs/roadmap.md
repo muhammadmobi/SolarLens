@@ -261,7 +261,15 @@ one word of its name, and typing slips in the words it routes on. Then a
 spread of everyday questions, asked of the same data, filled the gaps left: a
 `battery` tool, the money saved and the share used at home, days above an
 amount, an inverter's temperature, why a system went quiet - its datalogger,
-or the relay and its login - and a plain "no forecast" for tomorrow.
+or the relay and its login - and a plain "no forecast" for tomorrow. Asked for
+graphs of any time and anything the inverter shows, it gained two more: `chart`,
+any measure a reading records over up to three months - summed in the
+database, so the Worker's share stays small - with a second beside it, or the
+average day hour by hour; and `inverter`, the latest device record read out -
+strings, phases, frequency, the battery's own readings - with a weak string
+named. The page draws a chart answer as lines, and keeps it in a download.
+Those graphs showed SolarMan's charging stored as discharging since 2.x: the
+normaliser was put right, and migration 0021 turns the stored readings round.
 
 ## Order
 

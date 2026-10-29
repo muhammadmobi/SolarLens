@@ -199,6 +199,13 @@ export function periodIn(text: string, today: string): Args | null {
     [/\b(last|past) (12|twelve) months\b|\bpast year\b/, 'last_12_months'],
   ];
   for (const [re, range] of named) if (re.test(t)) return { range };
+  // "the last 3 days", "past 2 weeks": that many days, up to today.
+  const back = /\b(last|past) (\d{1,3}) (days?|weeks?)\b/.exec(t);
+  if (back) {
+    const n = Number(back[2]) * (back[3].startsWith('week') ? 7 : 1);
+    const end = Date.parse(`${today}T00:00:00Z`) / (86400 * 1000);
+    if (n >= 1 && n <= 3 * 366) return { from: isoDay(end - n + 1), to: today };
+  }
   const iso = /\b(\d{4}-\d{2}-\d{2})\b/.exec(t);
   if (iso) return { from: iso[1], to: iso[1] };
   const year = Number(today.slice(0, 4));
@@ -236,10 +243,30 @@ function systemIn(text: string, systems: Sys[]): Sys | null {
   return hits.length === 1 ? hits[0] : null;
 }
 
-/** What a question is about, from its words. */
+/**
+ * The measures a question names, in the order it names them - "PV against load" is power, then load -
+ * as the chart tool calls them; power when it names none.
+ */
+function metricsIn(t: string): string[] {
+  const words: [string, RegExp][] = [
+    ['soc', /\b(soc|state of charge|battery (charge|level|percent\w*)|charge level)\b/],
+    ['battery', /\b(batter(y|ies)|charging|discharging)\b/],
+    ['grid', /\b(grid|import\w*|export\w*|buy\w*|bought|sell\w*|sold|feed[- ]?in)\b/],
+    ['load', /\b(load|consum\w*|usage|house|home use|demand)\b/],
+    ['power', /\b(power|pv|solar|generat\w*|produc\w*|output|made|yield)\b/],
+  ];
+  const found = words.map(([m, re]) => ({ m, at: t.search(re) })).filter((x) => x.at >= 0);
+  // A battery's charge is also "battery": the more exact one wins where both match at the same place.
+  const picked = found.filter((x) => !(x.m === 'battery' && found.some((y) => y.m === 'soc' && y.at === x.at)))
+    .sort((x, y) => x.at - y.at).map((x) => x.m);
+  const out = [...new Set(picked)].slice(0, 2);
+  return out.length ? out : ['power'];
+}
+
 /** A question about what is still to come, which no figure here can answer. */
 const FUTURE = /\b(tomorrow|next (week|month|year)|forecast\w*|predict\w*|will (i|it|we|my|the|they|\w+) (make|produce|generate|get|earn|save))\b/;
 
+/** What a question is about, from its words. */
 function kindOf(t: string): string | null {
   if (/\b(how (do|can|to|should)|where (is|do|can|are|should)|set ?up|turn (on|off)|enable|disable|install|connect)\b/.test(t)) return 'help';
   if (FUTURE.test(t)) return 'future';
@@ -250,8 +277,13 @@ function kindOf(t: string): string | null {
   if (/\b(degrad\w*|declin\w*|dirty|trend|health|getting worse|losing|slowly)\b/.test(t)) return 'trend';
   if (/\b(faults?|alarms?|errors?|warnings?)\b/.test(t)) return 'faults';
   if (/\b(compare|comparison|per kwp|which system|best system|worst system)\b/.test(t)) return 'compare';
+  // What the inverter itself shows: its strings, voltages, currents, the grid's frequency, the battery's own readings.
+  if (/\b(pv ?\d|strings?|mppt|volts?|voltage\w*|amps?|amperes?|frequency|hz|power factor|dc bus|phases?|bms|inverter (shows?|readings?|data|details?|display\w*))\b/.test(t)) return 'inverter';
+  if (/\b(temp\w*|heat\w*|hot|hottest|overheat\w*|degrees?)\b/.test(t)) return 'inverter';
+  // A graph over a time, or the usual day hour by hour.
+  if (/\b(graph\w*|chart\w*|plot\w*|visuali[sz]\w*|draw)\b/.test(t)) return 'chart';
+  if (/\b(which hours?|what time|time of (the )?day|hour of (the )?day|by hour|each hour|daily pattern|typical day)\b|\bwhen do(es)?\b.*\bpeak/.test(t)) return 'profile';
   if (/\b(batter(y|ies)|soc|state of charge|discharg\w*)\b/.test(t)) return 'battery';
-  if (/\b(temp\w*|heat\w*|hot|hottest|overheat\w*|degrees?)\b/.test(t)) return 'temp';
   // How the power went through a day: its swings, dips and peak. Over many days, that is the statistics.
   if (/\b(fluc\w*|swing\w*|spikes?|dips?|dipped|choppy|stable|steady|unstable|stability|curve|profile|variab\w*|variation|vary|varies|varied|peak(ed|s)?|highest power|max(imum)? power|min(imum)? power)\b/.test(t)) return 'power';
   // How much of the sun's energy was used at home, and how much of the house's use the sun covered.
@@ -352,8 +384,32 @@ export function guessCalls(question: string, systems: Sys[], now: number, off: n
     // What is still to come has no figures: no call, and the answer says so.
     case 'future': return [];
     case 'battery': return [{ tool: 'battery', args: named() }];
-    // An inverter's temperature is kept as last read: "right now" says it.
-    case 'temp': return [{ tool: 'status_now', args: system ? { system: system.name } : {} }];
+    case 'inverter': {
+      // What part of the inverter the question is about, so the answer leads with it.
+      const part = /\b(batter(y|ies)|bms)\b/.test(t) ? 'battery'
+        : /\b(pv ?\d|strings?|mppt)\b/.test(t) ? 'strings'
+          : /\b(frequency|hz|phases?|power factor|grid)\b/.test(t) ? 'grid'
+            : /\b(temp\w*|heat\w*|hot|hottest|overheat\w*|degrees?)\b/.test(t) ? 'temperature' : null;
+      return [{ tool: 'inverter', args: { ...(part ? { part } : {}), ...(system ? { system: system.name } : {}) } }];
+    }
+    case 'chart': {
+      // A graph of energy per day or month is the energy tool's bars; of anything a reading records, the chart tool's.
+      if (/\b(kwh|energy|per (day|month)|daily|monthly|each (day|month)|every day)\b/.test(t) && !/\b(load|grid|batter\w*|soc|power)\b/.test(t)) {
+        return [{ tool: 'energy', args: named({ group_by: /\b(month|monthly)\b/.test(t) && !/\bthis month\b|\blast month\b/.test(t) ? 'month' : 'day' }) }];
+      }
+      const [metric, versus] = metricsIn(t);
+      const every = /\b15[- ]?min\w*|\bquarter[- ]hour\w*/.test(t) ? '15min'
+        : /\b(hourly|by hour|each hour|every hour)\b/.test(t) ? 'hour'
+          : /\b(daily|by day|each day|per day)\b/.test(t) ? 'day'
+            : /\b(weekly|by week|each week)\b/.test(t) ? 'week' : null;
+      // Each point as its highest or lowest reading when asked - "the peak power each day" - else its average.
+      const stat = /\b(highest|max|maximum|peaks?)\b/.test(t) ? 'highest' : /\b(lowest|minimum)\b/.test(t) ? 'lowest' : null;
+      return [{ tool: 'chart', args: named({ metric, ...(versus ? { versus } : {}), ...(every ? { every } : {}), ...(stat ? { stat } : {}) }) }];
+    }
+    case 'profile': {
+      const [metric, versus] = metricsIn(t);
+      return [{ tool: 'chart', args: { metric, ...(versus ? { versus } : {}), profile: 'hour_of_day', ...(period ?? { range: 'last_7_days' }), ...(system ? { system: system.name } : {}) } }];
+    }
     case 'self': return [{ tool: 'energy', args: named({ measure: 'self' }) }];
     case 'saved': return [{ tool: 'energy', args: named({ measure: 'saved' }) }];
     case 'stats': {
@@ -390,6 +446,8 @@ async function understandingPrompt(systems: Sys[], today: string): Promise<strin
     'For part of a day - "between 2pm and 4pm", "this afternoon" - or how the power moved through a day - fluctuation, dips, the peak - use power_day, with start and end as HH:MM on the 24-hour clock.',
     'For whether a system is working or offline, since when, when it last made power, and the relay and its login, use outages.',
     'For money saved use energy with measure "saved"; for how much was used at home, measure "self"; for the battery, battery; for "how many days above 50 kWh", stats with above.',
+    'For a graph or chart of power, load, grid, battery power or battery charge over a time, use chart (with versus for a second measure); for the usual day hour by hour - when the load peaks, which hours buy from the grid - chart with profile "hour_of_day". A graph of energy per day or month is energy.',
+    "For anything the inverter itself shows - PV strings, voltages, currents, the grid's frequency, the power factor, its temperature, the DC bus, the battery's own readings - use inverter.",
     'SolarLens has no forecast: for tomorrow or the future, make no call and reply that it reports what has been made.',
     'Answer with JSON only: {"calls": [{"tool": "<name>", "args": {...}}], "reply": "<text>"}.',
     'Leave "calls" empty only for a greeting or when you must ask back; then "reply" is one or two sentences, and never states a figure.',

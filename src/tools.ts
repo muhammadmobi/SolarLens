@@ -60,6 +60,8 @@ export interface ToolResult {
   freshness: { newest: number | null; offline: string[] };
   /** A report's parts, each a result of its own: the energy, the statistics, the faults... */
   sections?: ToolResult[];
+  /** How to draw the rows: as a line or bars, and which columns are its series. */
+  chart?: { kind: 'line' | 'bar'; columns: number[] };
 }
 
 export type Args = Record<string, string | number>;
@@ -104,6 +106,9 @@ function someDays(isos: string[]): string {
   return isos.length > 5 ? `${named.join(', ')} and ${isos.length - 5} more` : named.join(', ');
 }
 
+/** Names as a person lists them: "Roof", "Roof and Shed", "Roof, Shed and Garage". */
+const inWords = (names: string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+
 /** Two days as a span: "21 Sep 2026", "21 – 27 Sep 2026", "30 Nov 2025 – 3 Jan 2026". */
 export function spanWords(from: string, to: string): string {
   if (from === to) return dayWords(from, true);
@@ -120,7 +125,6 @@ const clock = (ts: number, off: number) => {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
 
-/** "3 h 10 min", "45 min". */
 /** A length of time as a person says it: "45 min", "3 h 15 min", "35 h", "3 days 17 h". */
 const duration = (s: number) => {
   const m = Math.round(s / 60);
@@ -157,6 +161,7 @@ export const DEFAULT_RANGE: Record<string, Range> = {
   report: 'last_month',
   outages: 'last_7_days',
   battery: 'last_7_days',
+  chart: 'today',
 };
 
 /**
@@ -563,7 +568,7 @@ const energy: Tool = {
     for (const m of ['used', 'imported', 'exported'] as Measure[]) {
       if (measure !== m && !wide) continue;
       const blind = chosen.filter((s) => !days.some((d) => d.inverter_id === s.id && d[fieldOf[m]] != null));
-      if (blind.length && blind.length < chosen.length) notes.push(`${blind.map((s) => s.name).join(', ')} ${blind.length === 1 ? 'does' : 'do'} not report what ${m === 'used' ? 'the house used' : `was ${m === 'imported' ? 'bought' : 'sold'}`}.`);
+      if (blind.length && blind.length < chosen.length) notes.push(`${inWords(blind.map((s) => s.name))} ${blind.length === 1 ? 'does' : 'do'} not report what ${m === 'used' ? 'the house used' : `was ${m === 'imported' ? 'bought' : 'sold'}`}.`);
     }
     if (facts.saved_is_upper_bound) notes.push('Some of the saving counts every kWh at the price of one bought, since the export was not reported: an upper bound.');
     if (partDays.length && facts[`highest_${focus}_period`] !== undefined) {
@@ -1159,6 +1164,375 @@ const powerDay: Tool = {
   },
 };
 
+// ---------------------------------------------------------------- a chart of any measure
+
+/** What every reading records that can be charted over time, and how each reads. */
+const CHART_METRICS = {
+  power: { column: 'ac_power_w', words: 'power made', unit: 'kW', per: 1000, sum: true },
+  load: { column: 'load_power_w', words: 'house load', unit: 'kW', per: 1000, sum: true },
+  grid: { column: 'grid_power_w', words: 'grid power (+ buying, - selling)', unit: 'kW', per: 1000, sum: true },
+  battery: { column: 'battery_power_w', words: 'battery power (+ charging, - discharging)', unit: 'kW', per: 1000, sum: true },
+  soc: { column: 'battery_soc', words: 'battery charge', unit: '%', per: 1, sum: false },
+} as const;
+type ChartMetric = keyof typeof CHART_METRICS;
+/** A measure's name without its sign note: "grid power", not "grid power (+ buying, - selling)". */
+const measureName = (m: ChartMetric) => CHART_METRICS[m].words.replace(/ \(.*\)$/, '');
+/** How often a point can be, smallest first. Unasked, a chart takes the smallest that keeps it under CHART_POINTS. */
+const BUCKETS = { '15min': 900, hour: 3600, day: DAY, week: 7 * DAY } as const;
+const CHART_POINTS = 200;
+const MOST_POINTS = 800;
+/** Every reading in a chart's period is read: three months at most keeps a question cheap. */
+const CHART_DAYS = 93;
+
+const chartTool: Tool = {
+  name: 'chart',
+  description: 'A chart of any measure every reading records - power made, house load, grid power, battery power or battery charge - over a period, '
+    + 'as the average (or highest, or lowest) every 15 minutes, hour, day or week; with a second measure beside it to compare ("PV against load"); '
+    + 'or as the average day, hour by hour (profile "hour_of_day": when the load peaks, which hours buy from the grid). Three months at most. '
+    + 'For "graph", "chart", "plot", "over the week", "when does the load usually peak". Energy per day, week or month is the energy tool.',
+  params: {
+    ...periodParams,
+    metric: { type: 'string', enum: Object.keys(CHART_METRICS), description: 'What to chart: power (made), load, grid, battery (power) or soc (charge %). Power by default.', optional: true },
+    versus: { type: 'string', enum: Object.keys(CHART_METRICS), description: 'A second measure to chart beside the first.', optional: true },
+    every: { type: 'string', enum: Object.keys(BUCKETS), description: 'How often a point: 15min, hour, day or week; chosen to suit the period by default. With no period named, a day covers the last 30 days and a week the last 12 weeks.', optional: true },
+    stat: { type: 'string', enum: ['average', 'highest', 'lowest'], description: 'Each point as the average (the default), highest or lowest reading in it.', optional: true },
+    profile: { type: 'string', enum: ['hour_of_day'], description: 'hour_of_day: the average day across the period (the last 7 days unless named), hour by hour.', optional: true },
+    system: systemParam,
+  },
+  async run({ db, now }, args) {
+    const all = await loadSystems(db);
+    const chosen = pickSystems(all, args.system);
+    const off = zoneOf(all);
+    const profile = args.profile === 'hour_of_day';
+    // Unless a period is named: the average day across the last seven days, since it needs days to
+    // average; a point a day across the last 30 days, and a week across the last twelve; else today.
+    const asked = args.range !== undefined || args.from !== undefined || args.to !== undefined;
+    const today = dayNo(now, off);
+    const p = !asked && args.every === 'week'
+      ? resolvePeriod({ from: isoDay(today - 83), to: isoDay(today) }, now, off, DEFAULT_RANGE.chart)
+      : resolvePeriod(args, now, off, profile ? 'last_7_days' : args.every === 'day' ? 'last_30_days' : DEFAULT_RANGE.chart);
+    const days = noOf(p.to) - noOf(p.from) + 1;
+    if (days > CHART_DAYS) throw new ToolError('A chart of readings covers three months at most: for longer, ask for the energy per month.');
+    const metrics = [String(args.metric ?? 'power'), ...(args.versus && args.versus !== (args.metric ?? 'power') ? [String(args.versus)] : [])] as ChartMetric[];
+    const every: number = profile ? 3600
+      : args.every ? BUCKETS[args.every as keyof typeof BUCKETS]
+        // The smallest step that keeps the chart under CHART_POINTS: three months of days always does.
+        : Math.min(...Object.values(BUCKETS).filter((b) => (days * DAY) / b <= CHART_POINTS));
+    if ((days * DAY) / every > MOST_POINTS) throw new ToolError('That is too many points for one chart: ask for a coarser step, or a shorter period.');
+    const fn = args.stat === 'highest' ? 'MAX' : args.stat === 'lowest' ? 'MIN' : 'AVG';
+
+    // The database does the work: each system's readings in the period, on their own clocks, in buckets.
+    // The columns come from CHART_METRICS alone; nothing asked for is ever written into the query.
+    const local = 'ts + COALESCE(tz_offset_sec, ?3)';
+    // Weeks run Monday to Sunday, as everywhere here: the clock's day 0 was a Thursday, four days before a Monday.
+    const shift = every === BUCKETS.week ? 4 * DAY : 0;
+    const bucket = profile ? `CAST(((${local}) % 86400) / 3600 AS INTEGER)` : `CAST((${local} - ${shift}) / ${every} AS INTEGER)`;
+    const ids = chosen.map((s) => s.id);
+    const { results } = await db.prepare(
+      `SELECT inverter_id AS id, ${bucket} AS b,
+              ${metrics.map((m, i) => `${fn}(${CHART_METRICS[m].column}) AS v${i}`).join(', ')}
+       FROM readings
+       WHERE ts BETWEEN ?1 AND ?2 AND ${local} >= ?4 AND ${local} < ?5
+         AND inverter_id IN (${ids.map((_, i) => `?${i + 6}`).join(', ')})
+       GROUP BY inverter_id, b ORDER BY b`,
+    ).bind(noOf(p.from) * DAY - off - DAY, Math.min((noOf(p.to) + 1) * DAY - off + DAY, now), off, noOf(p.from) * DAY, (noOf(p.to) + 1) * DAY, ...ids)
+      .all<{ id: string; b: number } & Record<string, number | null>>();
+
+    // Across the systems chosen: power adds up, a battery's charge is averaged.
+    const points = new Map<number, (number | null)[]>();
+    const counts = new Map<number, number[]>();
+    const reporting = metrics.map(() => new Set<string>());
+    for (const r of results) {
+      const v = points.get(r.b) ?? metrics.map(() => null);
+      const c = counts.get(r.b) ?? metrics.map(() => 0);
+      metrics.forEach((m, i) => {
+        const x = r[`v${i}`];
+        if (x == null) return;
+        reporting[i].add(r.id);
+        v[i] = CHART_METRICS[m].sum ? (v[i] ?? 0) + x : ((v[i] ?? 0) * c[i] + x) / (c[i] + 1);
+        c[i]++;
+      });
+      points.set(r.b, v);
+      counts.set(r.b, c);
+    }
+    // A total is only shown whole. A system that measures something, with readings in a point but none
+    // of that measure - SolisCloud's history rows carry power and not the grid - would leave the total
+    // short: that point is left out, and said. A system with no readings in a point at all - an inverter
+    // asleep at night, or one that stopped reporting - adds nothing, as it makes nothing.
+    const short = metrics.map(() => new Map<string, number[]>());
+    for (const r of results) {
+      metrics.forEach((_, i) => {
+        if (r[`v${i}`] != null || !reporting[i].has(r.id)) return;
+        const v = points.get(r.b)!;
+        if (v[i] == null) return;
+        short[i].set(r.id, [...(short[i].get(r.id) ?? []), r.b]);
+      });
+    }
+    short.forEach((bySystem, i) => { for (const bs of bySystem.values()) for (const b of bs) points.get(b)![i] = null; });
+    const label = (b: number) => {
+      if (profile) return `${String(b).padStart(2, '0')}:00`;
+      const start = b * every + shift;
+      if (every >= 7 * DAY) return `week of ${dayWords(isoDay(Math.floor(start / DAY)))}`;
+      if (every >= DAY) return dayWords(isoDay(Math.floor(start / DAY)), true);
+      const hm = clock(start, 0);
+      return days === 1 ? hm : `${dayWords(isoDay(Math.floor(start / DAY)))} ${hm}`;
+    };
+    const show = (m: ChartMetric, v: number | null) => (v == null ? null : CHART_METRICS[m].per === 1 ? Math.round(v) : r2(v / CHART_METRICS[m].per));
+    const keys = [...points.keys()].sort((x, y) => x - y);
+    const rows = keys.map((b) => [label(b), ...metrics.map((m, i) => show(m, points.get(b)![i]))]);
+
+    const facts: ToolResult['facts'] = { points: rows.length };
+    const lines: string[] = [];
+    // Said as every other tool says power, in watts under a kilowatt; the table and the chart keep one unit.
+    const say = (m: ChartMetric, v: number) => (CHART_METRICS[m].unit === '%' ? `${show(m, v)}%` : kw(v));
+    // The period with the word before it: "on Sun 27 Sep 2026", "yesterday (...)", "last week (...)",
+    // "over the last 7 days (...)", "over 21 - 27 Sep 2026".
+    const during = p.from === p.to
+      ? (/^(today|yesterday)/.test(p.label) ? p.label : `on ${p.label}`)
+      : /^(this|last) /.test(p.label) ? p.label : `over ${p.label}`;
+    // A point with the word before it: "at 14:00", "on 23 Sep 2026 at 19:00", "on Tue 15 Sep 2026",
+    // "in the week of 14 Sep 2026".
+    const atPoint = (b: number) => {
+      if (profile || days === 1) return `at ${label(b)}`;
+      if (every < DAY) return `on ${label(b).replace(/ (\d\d:\d\d)$/, ' at $1')}`;
+      return `${every < 7 * DAY ? 'on' : 'in the'} ${label(b)}`;
+    };
+    // Each point its highest or lowest reading, said as such: "the highest power made each day".
+    const extreme = !profile && (args.stat === 'highest' || args.stat === 'lowest') ? String(args.stat) : null;
+    const each: Record<number, string> = { [BUCKETS['15min']]: 'every 15 minutes', [BUCKETS.hour]: 'each hour', [BUCKETS.day]: 'each day', [BUCKETS.week]: 'each week' };
+    // A measure that runs both ways - the grid, the battery - is said by its direction. A battery
+    // under 50 W either way is idle, as the dashboard reads it: drift, not a flow.
+    const ways: Partial<Record<ChartMetric, [string, string]>> = { grid: ['buying', 'selling'], battery: ['charging', 'discharging'] };
+    const idle: Partial<Record<ChartMetric, number>> = { battery: 50 };
+    // Consecutive hours as ranges: "00:00-06:00, 18:00-23:00".
+    const spans = (hours: number[]) => {
+      const out: string[] = [];
+      for (let i = 0; i < hours.length; i++) {
+        let j = i;
+        while (j + 1 < hours.length && hours[j + 1] === hours[j] + 1) j++;
+        out.push(i === j ? label(hours[i]) : `${label(hours[i])}–${String(hours[j] + 1).padStart(2, '0')}:00`);
+        i = j;
+      }
+      return out.join(', ');
+    };
+    metrics.forEach((m, i) => {
+      const got = keys.map((b) => ({ b, v: points.get(b)![i] })).filter((x): x is { b: number; v: number } => x.v != null);
+      if (!got.length) return;
+      const top = got.reduce((x, y) => (y.v > x.v ? y : x));
+      const low = got.reduce((x, y) => (y.v < x.v ? y : x));
+      const mean = got.reduce((x, y) => x + y.v, 0) / got.length;
+      Object.assign(facts, {
+        [`${m}_average`]: show(m, mean), [`${m}_highest`]: show(m, top.v), [`${m}_highest_at`]: label(top.b),
+        [`${m}_lowest`]: show(m, low.v), [`${m}_lowest_at`]: label(low.b),
+      });
+      const name = extreme ? `${extreme} ${measureName(m)} ${each[every]}` : measureName(m);
+      const way = ways[m];
+      // The average day is only that across more than one day; over one day, it is that day hour by hour.
+      const usual = profile && p.from !== p.to;
+      // Power made is nothing at night, so its lowest says only that: it is left out.
+      const dark = m === 'power' && low.v <= 0;
+      if (way) {
+        // Which way each point went, and the most each way; on the average day, the hours of each.
+        const floor = idle[m] ?? 0;
+        const upHours = got.filter((x) => x.v > floor);
+        const downHours = got.filter((x) => x.v < -floor);
+        Object.assign(facts, { [`${m}_${way[0]}_points`]: upHours.length, [`${m}_${way[1]}_points`]: downHours.length });
+        const most = (xs: typeof got, sign: 1 | -1) => (xs.length ? xs.reduce((x, y) => (sign * y.v > sign * x.v ? y : x)) : null);
+        const upTop = most(upHours, 1);
+        const downTop = most(downHours, -1);
+        if (usual) {
+          // "you buy from the grid at 00:00-06:00, 18:00-24:00 (most at 19:00, 0.76 kW), and sell to it at ..."
+          const [who, up, down] = m === 'grid' ? ['you', 'buy from the grid', 'sell to it'] : ['the battery', 'charges', 'discharges'];
+          const when = (xs: typeof got, topX: { b: number; v: number } | null, sign: 1 | -1) =>
+            (xs.length ? `at ${spans(xs.map((x) => x.b))} (most at ${label(topX!.b)}, ${say(m, sign * topX!.v)})` : 'at no hour');
+          lines.push(`On an average day ${during}, ${who} ${up} ${when(upHours, upTop, 1)}, and ${down} ${when(downHours, downTop, -1)}.`);
+        } else {
+          lines.push(`The ${name} ${during}: ${way[0]} in ${upHours.length} of ${got.length} points${upTop ? `, at most ${say(m, upTop.v)} ${atPoint(upTop.b)}` : ''}; `
+            + `${way[1]} in ${downHours.length}${downTop ? `, at most ${say(m, -downTop.v)} ${atPoint(downTop.b)}` : ''}.`);
+        }
+      } else {
+        lines.push(usual
+          ? `On an average day ${during}, the ${name} is highest at ${label(top.b)} (${say(m, top.v)})${dark ? '' : ` and lowest at ${label(low.b)} (${say(m, low.v)})`}, ${say(m, mean)} on average.`
+          : `The ${name} ${during}: ${say(m, mean)} on average; highest ${say(m, top.v)} ${atPoint(top.b)}${dark ? '' : `, lowest ${say(m, low.v)} ${atPoint(low.b)}`}.`);
+      }
+    });
+    // Two measures side by side: how often the first was the higher.
+    if (metrics.length === 2) {
+      const both = keys.map((b) => points.get(b)!).filter((v) => v[0] != null && v[1] != null);
+      const above = both.filter((v) => (v[0] as number) > (v[1] as number)).length;
+      facts[`${metrics[0]}_above_${metrics[1]}_points`] = above;
+      if (both.length) lines.push(`The ${measureName(metrics[0])} was above the ${measureName(metrics[1])} in ${above} of ${both.length} points.`);
+    }
+
+    const notes: string[] = [];
+    metrics.forEach((m, i) => {
+      // A system with none: one that never measures it, or one silent the whole time.
+      const silent = chosen.filter((s) => !reporting[i].has(s.id));
+      if (silent.length && silent.length < chosen.length) {
+        notes.push(`${inWords(silent.map((s) => s.name))} ${silent.length === 1 ? 'has' : 'have'} no readings of the ${measureName(m)} in that time.`);
+      }
+      // The points left out, by the system whose missing measure would have left the total short.
+      for (const [id, bs] of short[i]) {
+        const first = bs.slice(0, 3).map(label);
+        notes.push(`${chosen.find((s) => s.id === id)!.name} has readings but none of the ${measureName(m)} at ${inWords(bs.length > 3 ? [...first, `${bs.length - 3} more`] : first)}: `
+          + `the total there is left out, rather than shown short.`);
+      }
+      const out = new Set([...short[i].values()].flat());
+      if (out.size) facts[`${m}_points_left_out`] = out.size;
+    });
+    if (metrics.includes('grid')) notes.push('Grid power is above zero while buying from the grid, and below zero while selling to it.');
+    if (metrics.includes('battery')) notes.push('Battery power is above zero while charging, and below zero while discharging.');
+    if (chosen.length > 1) notes.push(`Each point adds the systems together${metrics.includes('soc') ? ", but for a battery's charge, which is their average" : ''}.`);
+    notes.push(`Times are on the clock where the panels are. Each point is the ${args.stat === 'highest' ? 'highest' : args.stat === 'lowest' ? 'lowest' : 'average'} reading in it.`);
+    const who = chosen.length === 1 ? `, ${chosen[0].name}` : '';
+    const named = `${extreme ? `${extreme} ` : ''}${metrics.map(measureName).join(' and ')}`;
+    const title = `${named[0].toUpperCase()}${named.slice(1)}`
+      + `${profile && p.from !== p.to ? ', on an average day' : profile ? ', hour by hour' : every >= 7 * DAY ? ', week by week' : every >= DAY ? ', day by day' : every >= 3600 ? ', hour by hour' : ', every 15 minutes'}${who}`;
+    return {
+      tool: 'chart',
+      title,
+      period: p,
+      columns: [profile ? 'Hour' : every >= DAY ? 'Day' : 'Time', ...metrics.map((m) => {
+        const w = measureName(m);
+        return `${w[0].toUpperCase()}${w.slice(1)} (${CHART_METRICS[m].unit})`;
+      })],
+      rows,
+      facts,
+      notes,
+      summary: lines.length ? lines.join(' ') : `There are no readings of the ${metrics.map(measureName).join(' or ')} ${during}.`,
+      freshness: await freshnessOf(db, chosen, now),
+      chart: { kind: every >= DAY && metrics.length === 1 && !profile ? 'bar' : 'line', columns: metrics.map((_, i) => i + 1) },
+    };
+  },
+};
+
+// ---------------------------------------------------------------- what the inverter shows
+
+/** A device record's JSON, or null. */
+function jsonOf<T>(s: string | null | undefined): T | null {
+  try { return s ? (JSON.parse(s) as T) : null; } catch { return null; }
+}
+/** A device record older than this is said as "as last read". */
+const DEVICE_FRESH_S = 2 * 3600;
+/** A producing string under this share of the best string's power is weak. */
+const WEAK_STRING = 0.5;
+/** The battery's own readings, in the order and words they are shown. */
+const BATTERY_READINGS: [string, string][] = [
+  ['voltageV', 'Voltage (V)'], ['currentA', 'Current (A)'], ['tempC', 'Temperature (°C)'], ['status', 'State'],
+  ['bmsSocPct', 'BMS charge (%)'], ['bmsVoltageV', 'BMS voltage (V)'], ['bmsCurrentA', 'BMS current (A)'], ['bmsTempC', 'BMS temperature (°C)'],
+  ['chargeLimitA', 'Charge limit (A)'], ['dischargeLimitA', 'Discharge limit (A)'], ['bmsChargeVoltageV', 'Charge voltage (V)'],
+  ['bmsDischargeVoltageV', 'Discharge voltage (V)'], ['ratedCapacityAh', 'Capacity (Ah)'], ['nominalVoltageV', 'Nominal voltage (V)'], ['chemistry', 'Chemistry'],
+];
+
+const inverterTool: Tool = {
+  name: 'inverter',
+  description: "What each inverter itself reports, from its latest device record: each PV string's voltage, current and power, each AC phase's voltage and current, "
+    + "the grid's frequency, the power factor, the inverter's temperature, the DC bus, and the battery's own readings - voltage, current, temperature, the BMS. "
+    + 'Compares the strings, and says when one is making far less than the others. Only the latest values are kept, not their history. '
+    + 'For "PV1 voltage", "string current", "grid frequency", "battery voltage", "inverter temperature", "is a string down". '
+    + 'part narrows the answer to the strings, the grid side, the battery or the temperature; every reading is in the table either way.',
+  params: {
+    system: systemParam,
+    part: { type: 'string', enum: ['strings', 'grid', 'battery', 'temperature', 'all'], description: 'What the question is about: strings, grid, battery, temperature, or all (the default).', optional: true },
+  },
+  async run({ db, now }, args) {
+    const all = await loadSystems(db);
+    const chosen = pickSystems(all, args.system);
+    const off = zoneOf(all);
+    const { results: devices } = await db.prepare(
+      `SELECT i.id AS inverter_id, d.status, d.last_seen, d.strings, d.ac_phases, d.frequency_hz, d.power_factor, d.temp_c, d.dc_bus_v, d.battery
+       FROM devices d JOIN inverters i ON i.plant_id = d.plant_id AND i.provider = d.provider WHERE d.kind = 'inverter'`,
+    ).all<{
+      inverter_id: string; status: string | null; last_seen: number | null; strings: string | null; ac_phases: string | null;
+      frequency_hz: number | null; power_factor: number | null; temp_c: number | null; dc_bus_v: number | null; battery: string | null;
+    }>();
+
+    type Part = { index: number; voltageV?: number | null; currentA?: number | null; powerW?: number | null };
+    const facts: ToolResult['facts'] = {};
+    const lines: string[] = [];
+    const notes: string[] = ['These are the inverter\'s latest readings: SolarLens keeps them as last read, not through the day.'];
+    const rows: (string | number | null)[][] = [];
+    const bms: (string | number | null)[][] = [];
+    for (const s of chosen) {
+      const o = s.off ?? off;
+      const k = chosen.length === 1 ? '' : `${s.alias}_`;
+      const d = devices.find((x) => x.inverter_id === s.id);
+      if (!d) {
+        lines.push(`${s.name} has no inverter record: its vendor has not sent one.`);
+        continue;
+      }
+      const strings = jsonOf<Part[]>(d.strings) ?? [];
+      const phases = jsonOf<Part[]>(d.ac_phases) ?? [];
+      const battery = jsonOf<Record<string, number | string | null>>(d.battery);
+      for (const x of strings) rows.push([s.name, `PV${x.index}`, x.voltageV ?? null, x.currentA ?? null, x.powerW ?? null]);
+      for (const x of phases) rows.push([s.name, phases.length > 1 ? `Phase L${x.index}` : 'Grid (AC)', x.voltageV ?? null, x.currentA ?? null, null]);
+      if (battery) for (const [key, words] of BATTERY_READINGS) if (battery[key] != null) bms.push([s.name, words, battery[key]]);
+
+      const fresh = !!d.last_seen && now - d.last_seen <= DEVICE_FRESH_S;
+      const when = fresh ? 'now' : d.last_seen ? `as last read, ${at(d.last_seen, o)}` : 'as last read';
+      const v = (x: number | null | undefined, unit: string) => (x == null ? null : `${r1(x)} ${unit}`);
+      const partWords = (x: Part) => [v(x.voltageV, 'V'), v(x.currentA, 'A'), x.powerW != null ? `${Math.round(x.powerW)} W` : null].filter(Boolean).join(', ');
+      // Each part in its own words, so an answer can say only what was asked.
+      const part = String(args.part ?? 'all');
+      const clauses: Record<string, string | null> = {
+        strings: strings.length ? strings.map((x) => `PV${x.index} ${partWords(x)}`).join('; ') : null,
+        grid: phases.length || d.frequency_hz != null || d.power_factor
+          ? [phases.length ? `the grid ${phases.map((x) => `${phases.length > 1 ? `L${x.index} ` : ''}${v(x.voltageV, 'V') ?? '-'}`).join(', ')}` : 'the grid',
+            d.frequency_hz != null ? ` at ${r2(d.frequency_hz)} Hz` : '',
+            // A power factor of 0 is an inverter asleep, not a reading.
+            d.power_factor ? `, power factor ${r2(d.power_factor)}` : ''].join('')
+          : null,
+        temperature: d.temp_c != null ? `the inverter at ${r1(d.temp_c)} °C` : null,
+        dcbus: d.dc_bus_v != null ? `the DC bus at ${r1(d.dc_bus_v)} V` : null,
+      };
+      const shown = part === 'all' ? Object.values(clauses) : part === 'battery' ? [] : [clauses[part]];
+      const bits = shown.filter((x): x is string => !!x);
+      let said = part === 'battery' ? '' : `${s.name}'s inverter, ${when}: ${bits.join('; ') || `no ${part === 'all' ? 'readings of its own' : `${part} readings`}`}.`;
+      if (battery && (part === 'all' || part === 'battery')) {
+        const flow = typeof battery.currentA === 'number' ? (battery.currentA < 0 ? ' (discharging)' : battery.currentA > 0 ? ' (charging)' : '') : '';
+        const parts = [v(battery.voltageV as number, 'V'), battery.currentA != null ? `${r2(battery.currentA as number)} A${flow}` : null, v(battery.tempC as number, '°C')].filter(Boolean);
+        said += `${said ? ' ' : ''}${part === 'battery' ? `${s.name}'s battery, ${when}` : 'Its battery'}: ${parts.join(', ')}${battery.bmsSocPct != null ? `; the BMS says ${Math.round(battery.bmsSocPct as number)}%` : ''}.`;
+      } else if (part === 'battery') said = `${s.name} reports no battery readings of its own.`;
+      // The strings against each other: one producing far less than the best, while the inverter is producing.
+      const producing = strings.filter((x) => (x.powerW ?? 0) > 20);
+      const best = producing.reduce<Part | null>((x, y) => (!x || (y.powerW ?? 0) > (x.powerW ?? 0) ? y : x), null);
+      const weak = best ? strings.filter((x) => x !== best && (x.voltageV ?? 0) > 0 && (x.powerW ?? 0) < (best.powerW ?? 0) * WEAK_STRING) : [];
+      if (fresh && best && weak.length) {
+        said += ` ${inWords(weak.map((x) => `PV${x.index}`))} ${weak.length === 1 ? 'is' : 'are'} making far less than PV${best.index} `
+          + `(${weak.map((x) => `${Math.round(x.powerW ?? 0)} W`).join(', ')} against ${Math.round(best.powerW ?? 0)} W): shade, dirt, or a fault on ${weak.length === 1 ? 'that string' : 'those strings'}.`;
+        facts[`${k}weak_strings`] = weak.map((x) => `PV${x.index}`).join(', ');
+      } else if (part === 'strings' && strings.length > 1) {
+        // Asked about the strings: say whether they can be compared, and if so that they are even.
+        said += !fresh ? ' Those are old readings, so they say nothing of the strings now.'
+          : !producing.length ? ' No string is producing at the moment, so they cannot be compared.'
+            : ' The strings are even: none is making far less than the others.';
+      }
+      Object.assign(facts, {
+        [`${k}strings`]: strings.length,
+        [`${k}frequency_hz`]: d.frequency_hz != null ? r2(d.frequency_hz) : null,
+        [`${k}inverter_temp_c`]: d.temp_c != null ? r1(d.temp_c) : null,
+        [`${k}dc_bus_v`]: d.dc_bus_v != null ? r1(d.dc_bus_v) : null,
+        [`${k}read_at`]: d.last_seen ? at(d.last_seen, o) : null,
+        ...(battery ? { [`${k}battery_voltage_v`]: typeof battery.voltageV === 'number' ? r2(battery.voltageV) : null, [`${k}bms_soc_pct`]: typeof battery.bmsSocPct === 'number' ? Math.round(battery.bmsSocPct) : null } : {}),
+      });
+      lines.push(said);
+    }
+    const freshness = await freshnessOf(db, chosen, now);
+    return {
+      tool: 'inverter',
+      title: 'What the inverter shows',
+      period: null,
+      columns: ['System', 'Part', 'Voltage (V)', 'Current (A)', 'Power (W)'],
+      rows,
+      facts,
+      notes,
+      summary: lines.join(' '),
+      freshness,
+      ...(bms.length ? { sections: [{ tool: 'inverter', title: "The battery's own readings", period: null, columns: ['System', 'Reading', 'Value'], rows: bms, facts: {}, notes: [], summary: 'As the battery management system last reported them.', freshness }] } : {}),
+    };
+  },
+};
+
 // ---------------------------------------------------------------- the battery
 
 const batteryTool: Tool = {
@@ -1566,7 +1940,9 @@ const appHelp: Tool = {
 // ---------------------------------------------------------------- the list
 
 /** Every tool, in the order a person would reach for them. */
-export const TOOLS: readonly Tool[] = [statusNow, outages, energy, powerDay, batteryTool, compareSystems, statsTool, faults, dayReport, performanceTrend, reportTool, appHelp];
+export const TOOLS: readonly Tool[] = [
+  statusNow, outages, inverterTool, energy, powerDay, chartTool, batteryTool, compareSystems, statsTool, faults, dayReport, performanceTrend, reportTool, appHelp,
+];
 
 export const toolByName = (name: unknown): Tool | undefined => TOOLS.find((t) => t.name === name);
 

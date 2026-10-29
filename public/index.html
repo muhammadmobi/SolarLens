@@ -566,6 +566,10 @@
   .minichart { margin: 8px 0 4px; }
   .minichart svg { width: 100%; height: 90px; display: block; }
   .minichart rect { fill: var(--solarman); }
+  .minichart path.s0 { stroke: var(--solarman); } .minichart path.s1 { stroke: var(--solis); }
+  .minichart line.zero { stroke: var(--faint); stroke-width: 1; stroke-dasharray: 4 3; }
+  .minichart i.k0, .minichart i.k1 { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin: 0 4px 2px 0; vertical-align: middle; }
+  .minichart i.k0 { background: var(--solarman); } .minichart i.k1 { background: var(--solis); margin-left: 6px; }
   .minichart figcaption { display: flex; justify-content: space-between; gap: 12px; margin-top: 4px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .answer .said, .askpage .said { margin: 0; font-size: 16.5px; line-height: 1.5; }
   .answer .by, .askpage .by { margin: 8px 0 0; font-size: 12.5px; color: var(--faint); }
@@ -3317,6 +3321,8 @@
     'How much did I export last week?',
     'How much did I make between 2pm and 4pm today?',
     'How steady was the power today?',
+    'Graph PV against load today',
+    'Which hours do I buy from the grid?',
     'Since when has a system been offline?',
     'Compare my systems per kWp last month',
     'Statistics for the last 30 days',
@@ -3408,14 +3414,21 @@
   }
 
   /**
-   * Bars for a result over time - energy per day, week, month or year; the
-   * weekly ratio; a day's power hour by hour - from its first figure. The drawing stretches to its box, so
-   * the first and last labels sit beneath it as text, where stretching cannot
-   * reach them.
+   * A chart for a result over time. A chart result says how it is drawn:
+   * lines, or bars for one measure day by day. Energy per day, week, month or
+   * year, the weekly ratio and a day's power hour by hour are bars of their
+   * first figure. The drawing stretches to its box, so the first and last
+   * labels sit beneath it as text, where stretching cannot reach them.
    */
   function miniChart(p) {
+    if (p.chart) return p.chart.kind === 'line' ? lineChart(p) : barChart(p, p.chart.columns[0]);
     if (!['energy', 'performance_trend', 'power_day'].includes(p.tool) || p.rows.length < 3) return '';
-    const col = p.rows[0].findIndex((v, k) => k > 0 && p.rows.some((r) => typeof r[k] === 'number'));
+    return barChart(p, p.rows[0].findIndex((v, k) => k > 0 && p.rows.some((r) => typeof r[k] === 'number')));
+  }
+
+  /** Bars for one column of a result, one a row. */
+  function barChart(p, col) {
+    if (p.rows.length < 3) return '';
     if (col < 1) return '';
     const values = p.rows.map((r) => (typeof r[col] === 'number' ? r[col] : 0));
     const W = 600, H = 100, T = 6;
@@ -3428,6 +3441,38 @@
     const first = p.rows[0][0], last = p.rows[p.rows.length - 1][0];
     return `<figure class="minichart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(`${p.columns[col]}, ${first} to ${last}`)}">${bars}</svg>
       <figcaption aria-hidden="true"><span>${esc(first)}</span><span>${esc(last)}</span></figcaption></figure>`;
+  }
+  /**
+   * Lines for a chart result: one or two measures over time on one scale, a
+   * dashed zero where the measure runs both ways (the grid, the battery), and
+   * beneath the drawing the first and last times, which line is which, and
+   * the range of the scale. A missing reading breaks the line rather than
+   * joining across it.
+   */
+  function lineChart(p) {
+    const cols = p.chart.columns.filter((c) => p.rows.some((r) => typeof r[c] === 'number'));
+    if (!cols.length || p.rows.length < 2) return '';
+    const vals = p.rows.flatMap((r) => cols.map((c) => r[c]).filter((v) => typeof v === 'number'));
+    const lo = Math.min(0, ...vals);
+    const hi = Math.max(...vals) > lo ? Math.max(...vals) : lo + 1;
+    const W = 600, H = 100, T = 6, B = 4;
+    const x = (i) => (i / (p.rows.length - 1)) * W;
+    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    const lines = cols.map((c, k) => {
+      let d = '';
+      let pen = false;
+      p.rows.forEach((r, i) => {
+        if (typeof r[c] !== 'number') { pen = false; return; }
+        d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(r[c]).toFixed(1)} `;
+        pen = true;
+      });
+      return `<path class="s${k}" d="${d.trim()}" fill="none" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+    }).join('');
+    const zero = lo < 0 ? `<line class="zero" x1="0" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" vector-effect="non-scaling-stroke"/>` : '';
+    const first = p.rows[0][0], last = p.rows[p.rows.length - 1][0];
+    const key = cols.map((c, k) => `<i class="k${k}"></i>${esc(p.columns[c])}`).join(' ');
+    return `<figure class="minichart"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(`${cols.map((c) => p.columns[c]).join(' and ')}, ${first} to ${last}`)}">${zero}${lines}</svg>
+      <figcaption aria-hidden="true"><span>${esc(first)}</span><span>${key} · ${esc(cellText(lo))} to ${esc(cellText(hi))}</span><span>${esc(last)}</span></figcaption></figure>`;
   }
   const cellText = (v) => (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v ?? '—'));
 
@@ -3474,8 +3519,9 @@
     const period = main?.period?.label ?? '';
     const table = (p) => (p.rows.length ? `<table><thead><tr>${p.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
       <tbody>${p.rows.map((row) => `<tr>${row.map((v) => `<td>${esc(cellText(v))}</td>`).join('')}</tr>`).join('')}</tbody></table>` : '');
+    // Each part with its chart, where it has one: the same drawing the page shows, coloured by the page's own styles below.
     const part = (p, level) => `<h${level}>${esc(p.title)}${p.period ? ` <small>${esc(p.period.label)}</small>` : ''}</h${level}>
-      <p>${esc(p.summary)}</p>${table(p)}${p.notes?.length ? `<ul class="notes">${p.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
+      <p>${esc(p.summary)}</p>${miniChart(p)}${table(p)}${p.notes?.length ? `<ul class="notes">${p.notes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
     const fresh = results.find((r) => r.freshness?.newest)?.freshness;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SolarLens - ${esc(t.kind === 'report' ? `report, ${period}` : t.question)}</title>
@@ -3486,6 +3532,12 @@
   .words p { margin: 0 0 10px; } table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e2e4de; } th { font-size: 12px; color: #5d6360; }
   .notes { color: #5d6360; font-size: 13px; }
+  .minichart { margin: 10px 0 6px; } .minichart svg { width: 100%; height: 120px; display: block; }
+  .minichart rect { fill: #2f6fde; } .minichart path.s0 { stroke: #2f6fde; } .minichart path.s1 { stroke: #db6b1c; }
+  .minichart line.zero { stroke: #9aa1a8; stroke-width: 1; stroke-dasharray: 4 3; }
+  .minichart figcaption { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: #5d6360; }
+  .minichart i { display: inline-block; width: 12px; height: 3px; margin: 0 4px 2px 0; vertical-align: middle; }
+  .minichart i.k0 { background: #2f6fde; } .minichart i.k1 { background: #db6b1c; margin-left: 6px; }
   @media print { body { margin: 0; } h2, h3 { break-after: avoid; } table { break-inside: auto; } tr { break-inside: avoid; } }
 </style></head><body>
 <h1>${esc(t.kind === 'report' ? `SolarLens report${period ? `: ${period}` : ''}` : t.question)}</h1>

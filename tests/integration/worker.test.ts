@@ -204,7 +204,7 @@ describe('signing in, in workerd', () => {
     expect(answer).toMatchObject({ tool: 'status_now', worded: 'solarlens' });
     expect(answer.result.facts.systems).toBe(2);
     const tools = (await (await fetch(url('/api/tools'), { headers: owner })).json()) as { tools: unknown[] };
-    expect(tools.tools).toHaveLength(12);
+    expect(tools.tools).toHaveLength(14);
     expect((await fetch(url('/api/ask'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"tool":"status_now"}' })).status).toBe(401);
     // On a private dashboard a stranger's conversation is refused like a read.
     expect((await fetch(url('/api/chat'), { method: 'POST', headers: { 'content-type': 'application/json' },

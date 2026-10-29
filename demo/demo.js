@@ -381,9 +381,44 @@
   }
 
   /**
+   * A graph in the demo: today's power made by the three systems, each one's
+   * average in the hour added together, against the hybrid's house load - the
+   * Worker's chart result, which the page draws as it draws a real one.
+   */
+  function demoChart(now) {
+    const tz = plantZone(now);
+    const iso = plantDate(now, tz).toISOString().slice(0, 10);
+    const hours = new Map();
+    for (const p of sample(now)['/api/series'].points) {
+      const h = Math.floor(((((p.ts + tz) % 86400) + 86400) % 86400) / 3600);
+      const at = hours.get(h) ?? { power: new Map(), load: [] };
+      at.power.set(p.inverter_id, [...(at.power.get(p.inverter_id) ?? []), p.ac_power_w]);
+      if (p.load_power_w != null) at.load.push(p.load_power_w);
+      hours.set(h, at);
+    }
+    const mean = (xs) => xs.reduce((a, x) => a + x, 0) / xs.length;
+    const kw = (w) => Math.round(w / 10) / 100;
+    const rows = [...hours.keys()].sort((a, b) => a - b).map((h) => [
+      `${String(h).padStart(2, '0')}:00`,
+      kw([...hours.get(h).power.values()].reduce((a, xs) => a + mean(xs), 0)),
+      hours.get(h).load.length ? kw(mean(hours.get(h).load)) : null,
+    ]);
+    const top = rows.reduce((a, r) => (r[1] > a[1] ? r : a), rows[0] ?? ['06:00', 0, null]);
+    const said = `In the demo, every graph is this one: today's power made by the three made-up systems against the hybrid's house load, hour by hour - highest ${top[1]} kW at ${top[0]}. Deployed, the assistant draws the measure and the time you ask for.`;
+    return {
+      tool: 'chart', title: 'Power made and house load, hour by hour', period: { from: iso, to: iso, label: `today (${iso})` },
+      columns: ['Time', 'Power made (kW)', 'House load (kW)'], rows,
+      facts: { points: rows.length, power_highest: top[1], power_highest_at: top[0] },
+      notes: ['A demo answer, from made-up figures.'], summary: said, freshness: { newest: now - 60, offline: [] },
+      chart: { kind: 'line', columns: [1, 2] },
+    };
+  }
+
+  /**
    * The assistant in the demo, where there is no model: a report, a word on
-   * using the app, or the last seven days - each from the sample's own
-   * made-up figures, said to be the demo's, and in the shape the Worker answers.
+   * using the app, a graph of today, or the last seven days - each from the
+   * sample's own made-up figures, said to be the demo's, and in the shape the
+   * Worker answers.
    */
   function demoChat(body, now) {
     const messages = Array.isArray(body.messages) ? body.messages : [];
@@ -399,6 +434,10 @@
         rows: [['Alerts on ntfy, Telegram, Discord or a webhook', 'Settings → Alerts elsewhere → Add a place.', '#/settings']],
         facts: {}, notes: ['A demo answer.'], summary: said, freshness: { newest: null, offline: [] },
       }], [{ tool: 'app_help', args: { question } }]);
+    }
+    if (/\b(graph|chart|plot|draw|visuali[sz]e|which hours?|what time|peak)\b/.test(question)) {
+      const chart = demoChart(now);
+      return reply('figures', chart.summary, [chart], [{ tool: 'chart', args: { metric: 'power', versus: 'load', range: 'today', every: 'hour' } }]);
     }
     if (/\breport\b|\bsummar/.test(question)) {
       const energy = week.result;

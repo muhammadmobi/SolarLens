@@ -98,7 +98,7 @@ describe('arguments', () => {
     expect(s.properties.from.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
     expect((jsonSchemaOf(toolByName('performance_trend')!) as { properties: Record<string, unknown> }).properties.weeks)
       .toMatchObject({ type: 'integer', minimum: 8, maximum: 26 });
-    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'energy', 'power_day', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
+    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'inverter', 'energy', 'power_day', 'chart', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
   });
 });
 
@@ -744,6 +744,223 @@ describe('the new answers at their edges', () => {
   });
 });
 
+describe('chart', () => {
+  /** One reading at a time of a day, on the clock the systems keep here (UTC). */
+  const reading = (id: string, day: string, hhmm: string, w: number, load: number | null, grid: number | null, soc: number | null, batt: number | null) => h.env.DB
+    .prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, load_power_w, grid_power_w, battery_soc, battery_power_w, tz_offset_sec) VALUES (?1, ?2, 'test', ?3, ?4, ?5, ?6, ?7, 0)")
+    .bind(id, dayNumber(day) * DAY + Number(hhmm.slice(0, 2)) * 3600 + Number(hhmm.slice(3)) * 60, w, load, grid, soc, batt).run();
+
+  /** Sunday: both systems every 15 minutes from 10:00 to 11:45, and the garage's house, grid and battery. */
+  async function sunday() {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    for (const [hhmm, roof, garage, load, grid, soc, batt] of [
+      ['10:00', 2000, 1000, 500, -400, 60, 100], ['10:15', 2400, 1200, 500, -600, 62, 100], ['10:30', 2800, 1400, 700, -500, 64, 200], ['10:45', 3200, 1600, 700, -700, 66, 200],
+      ['11:00', 3000, 1500, 1800, 300, 66, -300], ['11:15', 2600, 1300, 1800, 200, 64, -300], ['11:30', 2200, 1100, 600, -300, 63, 20], ['11:45', 1800, 900, 600, -100, 63, -20],
+    ] as const) {
+      await reading(ROOF, '2026-09-27', hhmm, roof, null, null, null, null);
+      await reading(GARAGE, '2026-09-27', hhmm, garage, load, grid, soc, batt);
+    }
+  }
+
+  it('adds the systems together every hour, and sets a second measure beside the first', async () => {
+    await sunday();
+    const r = await run('chart', { metric: 'power', versus: 'load', from: '2026-09-27', to: '2026-09-27', every: 'hour' });
+    // 10:00-10:59: Roof 2600 on average, Garage 1300: 3.9 kW; the load 600 W. 11:00-11:59: 3.6 kW against 1.2 kW.
+    expect(r.columns).toEqual(['Time', 'Power made (kW)', 'House load (kW)']);
+    expect(r.rows).toEqual([['10:00', 3.9, 0.6], ['11:00', 3.6, 1.2]]);
+    expect(r.chart).toEqual({ kind: 'line', columns: [1, 2] });
+    expect(r.facts).toMatchObject({ power_average: 3.75, power_highest: 3.9, power_highest_at: '10:00', load_highest: 1.2, power_above_load_points: 2 });
+    expect(r.summary).toBe('The power made on Sun 27 Sep 2026: 3.75 kW on average; highest 3.9 kW at 10:00, lowest 3.6 kW at 11:00. '
+      + 'The house load on Sun 27 Sep 2026: 900 W on average; highest 1.2 kW at 11:00, lowest 600 W at 10:00. The power made was above the house load in 2 of 2 points.');
+    expect(r.notes).toContain('Roof has no readings of the house load in that time.');
+    noIds(r);
+  });
+
+  it('says the grid and the battery by their direction, idle battery drift left out', async () => {
+    await sunday();
+    const grid = await run('chart', { metric: 'grid', from: '2026-09-27', to: '2026-09-27', system: 'Garage' });
+    // Every 15 minutes: selling at 10:00-10:45 and 11:30-11:45, buying at 11:00 and 11:15.
+    expect(grid.summary).toBe('The grid power on Sun 27 Sep 2026: buying in 2 of 8 points, at most 300 W at 11:00; selling in 6, at most 700 W at 10:45.');
+    expect(grid.notes).toContain('Grid power is above zero while buying from the grid, and below zero while selling to it.');
+    const battery = await run('chart', { metric: 'battery', from: '2026-09-27', to: '2026-09-27', system: 'Garage' });
+    // 20 W either way is drift: neither charging nor discharging.
+    expect(battery.facts).toMatchObject({ battery_charging_points: 4, battery_discharging_points: 2 });
+  });
+
+  it('draws the average day hour by hour across days, naming the hours each way', async () => {
+    await sunday();
+    await addSystem(h.env.DB, { id: 'solarman:station:gamma', name: 'Shed', kwp: 2 });
+    const r = await run('chart', { metric: 'grid', profile: 'hour_of_day', from: '2026-09-26', to: '2026-09-27', system: 'Garage' });
+    expect(r.title).toBe('Grid power, on an average day, Garage');
+    expect(r.rows).toEqual([['10:00', -0.55], ['11:00', 0.03]]);
+    expect(r.summary).toBe('On an average day over 26 – 27 Sep 2026, you buy from the grid at 11:00 (most at 11:00, 25 W), and sell to it at 10:00 (most at 10:00, 550 W).');
+    // With no period, the average day is of the last seven.
+    expect((await run('chart', { metric: 'grid', profile: 'hour_of_day', system: 'Garage' })).period?.label).toBe('the last 7 days (22 – 28 Sep 2026)');
+    // Over one day, the same asked for is that day hour by hour.
+    const one = await run('chart', { metric: 'load', profile: 'hour_of_day', from: '2026-09-27', to: '2026-09-27', system: 'Garage' });
+    expect(one.title).toBe('House load, hour by hour, Garage');
+    expect(one.summary.startsWith('The house load on Sun 27 Sep 2026: 900 W on average')).toBe(true);
+  });
+
+  it("averages a battery's charge rather than adding it, takes the highest when asked, and bars a chart of days", async () => {
+    await sunday();
+    const soc = await run('chart', { metric: 'soc', stat: 'highest', from: '2026-09-27', to: '2026-09-27', every: 'hour' });
+    expect(soc.rows).toEqual([['10:00', 66], ['11:00', 66]]);
+    expect(soc.notes).toContain("Each point adds the systems together, but for a battery's charge, which is their average.");
+    const days = await run('chart', { metric: 'power', from: '2026-09-21', to: '2026-09-27', system: 'Roof' });
+    expect(days.chart).toEqual({ kind: 'line', columns: [1] });
+    // A week is hour by hour, each time on its day.
+    expect(days.summary).toBe('The power made over 21 – 27 Sep 2026: 2.5 kW on average; highest 2.6 kW on 27 Sep 2026 at 10:00, lowest 2.4 kW on 27 Sep 2026 at 11:00.');
+    const weeks = await run('chart', { metric: 'power', from: '2026-07-01', to: '2026-09-27', every: 'day', system: 'Roof' });
+    expect(weeks.chart).toEqual({ kind: 'bar', columns: [1] });
+    // The day's average: Roof's eight readings, 20 kW over 8.
+    expect(weeks.rows).toEqual([['Sun 27 Sep 2026', 2.5]]);
+    expect(weeks.title).toBe('Power made, day by day, Roof');
+  });
+
+  it('steps by the week, Monday to Sunday, takes the lowest, and says a way a measure never went', async () => {
+    await sunday();
+    const weeks = await run('chart', { metric: 'power', every: 'week', stat: 'lowest', from: '2026-09-21', to: '2026-09-27', system: 'Roof' });
+    expect(weeks.title).toBe('Lowest power made, week by week, Roof');
+    expect(weeks.rows).toEqual([['week of 21 Sep 2026', 1.8]]);
+    expect(weeks.summary).toBe('The lowest power made each week over 21 – 27 Sep 2026: 1.8 kW on average; highest 1.8 kW in the week of 21 Sep 2026, lowest 1.8 kW in the week of 21 Sep 2026.');
+    expect(weeks.notes).toContain('Times are on the clock where the panels are. Each point is the lowest reading in it.');
+    // With no period named, a week at a time covers the last twelve weeks, and a day at a time the last 30 days.
+    expect((await run('chart', { metric: 'power', every: 'week', system: 'Roof' })).period?.label).toBe('7 Jul – 28 Sep 2026');
+    const daily = await run('chart', { metric: 'power', every: 'day', stat: 'highest', system: 'Roof' });
+    expect(daily.period?.label).toBe('the last 30 days (30 Aug – 28 Sep 2026)');
+    expect(daily.summary).toBe('The highest power made each day over the last 30 days (30 Aug – 28 Sep 2026): 3.2 kW on average; highest 3.2 kW on Sun 27 Sep 2026, lowest 3.2 kW on Sun 27 Sep 2026.');
+    // Power made at night is nothing, and its lowest says only that: left out.
+    await reading(ROOF, '2026-09-27', '05:00', 0, null, null, null, null);
+    expect((await run('chart', { metric: 'power', every: 'hour', from: '2026-09-27', to: '2026-09-27', system: 'Roof' })).summary)
+      .toBe('The power made on Sun 27 Sep 2026: 1.67 kW on average; highest 2.6 kW at 10:00.');
+    // Saturday: the garage selling all morning, never buying.
+    for (const [hhmm, grid] of [['10:00', -400], ['10:30', -600], ['11:00', -600], ['11:30', -200]] as const) {
+      await reading(GARAGE, '2026-09-26', hhmm, 1000, 300, grid, null, null);
+    }
+    expect((await run('chart', { metric: 'grid', every: 'hour', from: '2026-09-26', to: '2026-09-26', system: 'Garage' })).summary)
+      .toBe('The grid power on Sat 26 Sep 2026: buying in 0 of 2 points; selling in 2, at most 500 W at 10:00.');
+    // On the average day, the hours one after another are one span.
+    expect((await run('chart', { metric: 'grid', profile: 'hour_of_day', from: '2026-09-25', to: '2026-09-26', system: 'Garage' })).summary)
+      .toBe('On an average day over 25 – 26 Sep 2026, you buy from the grid at no hour, and sell to it at 10:00–12:00 (most at 10:00, 500 W).');
+    expect((await run('chart', { metric: 'battery', profile: 'hour_of_day', from: '2026-09-26', to: '2026-09-27', system: 'Garage' })).summary)
+      .toBe('On an average day over 26 – 27 Sep 2026, the battery charges at 10:00 (most at 10:00, 150 W), and discharges at 11:00 (most at 11:00, 150 W).');
+    // A measure that runs one way only: its highest and lowest hours.
+    expect((await run('chart', { metric: 'load', profile: 'hour_of_day', from: '2026-09-26', to: '2026-09-27', system: 'Garage' })).summary)
+      .toBe('On an average day over 26 – 27 Sep 2026, the house load is highest at 11:00 (900 W) and lowest at 10:00 (500 W), 700 W on average.');
+  });
+
+  it('leaves out a total a system would leave short, and says so, while a system with no readings at all adds nothing', async () => {
+    await sunday();
+    // Roof reads the grid once, at 10:05, and at 11:00 has readings without it - as SolisCloud's history rows are.
+    await reading(ROOF, '2026-09-27', '10:05', 2100, null, -1000, null, null);
+    // Before dawn only the garage reads anything: Roof is asleep, and adds nothing.
+    await reading(GARAGE, '2026-09-27', '05:00', 0, 300, 300, 55, null);
+    const r = await run('chart', { metric: 'grid', every: 'hour', from: '2026-09-27', to: '2026-09-27' });
+    expect(r.rows).toEqual([['05:00', 0.3], ['10:00', -1.55], ['11:00', null]]);
+    expect(r.summary).toBe('The grid power on Sun 27 Sep 2026: buying in 1 of 2 points, at most 300 W at 05:00; selling in 1, at most 1.55 kW at 10:00.');
+    expect(r.notes).toContain('Roof has readings but none of the grid power at 11:00: the total there is left out, rather than shown short.');
+    expect(r.facts.grid_points_left_out).toBe(1);
+  });
+
+  it('names every system without a measure, charts a measure asked beside itself once, and a second with no points beside none', async () => {
+    await sunday();
+    await addSystem(h.env.DB, { id: 'solarman:station:gamma', name: 'Shed', kwp: 2 });
+    const load = await run('chart', { metric: 'load', versus: 'load', from: '2026-09-27', to: '2026-09-27' });
+    expect(load.columns).toEqual(['Time', 'House load (kW)']);
+    expect(load.notes).toContain('Roof and Shed have no readings of the house load in that time.');
+    const roof = await run('chart', { metric: 'power', versus: 'soc', from: '2026-09-27', to: '2026-09-27', system: 'Roof' });
+    expect(roof.rows[0]).toEqual(['10:00', 2, null]);
+    expect(roof.summary).not.toContain('was above');
+    const quarter = await run('chart', { metric: 'battery', every: '15min', from: '2026-09-27', to: '2026-09-27', system: 'Roof' });
+    expect(quarter.title).toBe('Battery power, every 15 minutes, Roof');
+    expect(quarter.summary).toBe('There are no readings of the battery power on Sun 27 Sep 2026.');
+  });
+
+  it('refuses more than three months, or more points than a chart can show, and says when there is nothing', async () => {
+    await sunday();
+    await expect(run('chart', { from: '2026-05-01', to: '2026-09-27' })).rejects.toThrow('three months at most');
+    await expect(run('chart', { from: '2026-08-01', to: '2026-09-27', every: '15min' })).rejects.toThrow('too many points');
+    expect((await run('chart', { metric: 'soc', from: '2026-09-20', to: '2026-09-20' })).summary).toBe('There are no readings of the battery charge on Sun 20 Sep 2026.');
+  });
+});
+
+describe('inverter', () => {
+  /** Roof's inverter, read five minutes ago: two strings (the second far weaker), three phases, and no battery; Garage's with a battery, read long ago. */
+  async function devices(stringTwo = 400) {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    await h.env.DB.prepare("UPDATE inverters SET plant_id = 'plant-' || name").run();
+    const put = (id: string, provider: string, plant: string, seen: number, strings: unknown, phases: unknown, battery: unknown, extra: Record<string, number | null>) => h.env.DB
+      .prepare(`INSERT INTO devices (id, provider, plant_id, kind, status, last_seen, strings, ac_phases, battery, frequency_hz, power_factor, temp_c, dc_bus_v, updated_at)
+                VALUES (?1, ?2, ?3, 'inverter', 'online', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?4)`)
+      .bind(id, provider, plant, seen, JSON.stringify(strings), JSON.stringify(phases), battery ? JSON.stringify(battery) : null,
+        extra.frequency_hz, extra.power_factor, extra.temp_c, extra.dc_bus_v).run();
+    await put('dev-roof', 'solarman', 'plant-Roof', NOW - 300,
+      [{ index: 1, voltageV: 380.2, currentA: 5.1, powerW: 1940 }, { index: 2, voltageV: 370.4, currentA: 1.1, powerW: stringTwo }],
+      [{ index: 1, voltageV: 231, currentA: 3.1 }, { index: 2, voltageV: 233, currentA: 3 }, { index: 3, voltageV: 232, currentA: 3.2 }],
+      null, { frequency_hz: 50.02, power_factor: 0.99, temp_c: 44.5, dc_bus_v: 612 });
+    await put('dev-garage', 'solarman', 'plant-Garage', NOW - 3 * DAY, [{ index: 1, voltageV: 0.5, currentA: 0, powerW: 0 }], [{ index: 1, voltageV: 233, currentA: 0.2 }],
+      { voltageV: 27.21, currentA: -0.82, tempC: 30.2, status: 'Static', bmsSocPct: 100, chemistry: 'lithium' }, { frequency_hz: 49.93, power_factor: 0, temp_c: 46.9, dc_bus_v: null });
+  }
+
+  it("gives every reading the inverter shows, names a weak string, and keeps a stale record's time", async () => {
+    await devices();
+    const r = await run('inverter', {});
+    expect(r.rows).toContainEqual(['Roof', 'PV2', 370.4, 1.1, 400]);
+    expect(r.rows).toContainEqual(['Roof', 'Phase L3', 232, 3.2, null]);
+    expect(r.summary).toContain("Roof's inverter, now: PV1 380.2 V, 5.1 A, 1940 W; PV2 370.4 V, 1.1 A, 400 W; the grid L1 231 V, L2 233 V, L3 232 V at 50.02 Hz, power factor 0.99; "
+      + 'the inverter at 44.5 °C; the DC bus at 612 V. PV2 is making far less than PV1 (400 W against 1940 W): shade, dirt, or a fault on that string.');
+    expect(r.summary).toContain("Garage's inverter, as last read, Fri 25 Sep 2026 09:00: PV1 0.5 V, 0 A, 0 W; the grid 233 V at 49.93 Hz; the inverter at 46.9 °C. "
+      + 'Its battery: 27.2 V, -0.82 A (discharging), 30.2 °C; the BMS says 100%.');
+    expect(r.facts).toMatchObject({ s1_weak_strings: 'PV2', s1_frequency_hz: 50.02, s2_bms_soc_pct: 100 });
+    expect(r.sections?.[0].rows).toContainEqual(['Garage', 'Chemistry', 'lithium']);
+    noIds(r);
+  });
+
+  it('answers only the part asked about, and says whether the strings are even', async () => {
+    await devices(1900);
+    expect((await run('inverter', { part: 'temperature', system: 'Roof' })).summary).toBe("Roof's inverter, now: the inverter at 44.5 °C.");
+    expect((await run('inverter', { part: 'strings', system: 'Roof' })).summary).toContain('The strings are even: none is making far less than the others.');
+    expect((await run('inverter', { part: 'battery' })).summary).toBe("Roof reports no battery readings of its own. Garage's battery, as last read, Fri 25 Sep 2026 09:00: "
+      + '27.2 V, -0.82 A (discharging), 30.2 °C; the BMS says 100%.');
+    expect((await run('inverter', { part: 'grid', system: 'Garage' })).summary).toBe("Garage's inverter, as last read, Fri 25 Sep 2026 09:00: the grid 233 V at 49.93 Hz.");
+  });
+
+  it('reads a record with parts missing, a single phase, a battery charging, and more than one weak string', async () => {
+    await devices();
+    await h.env.DB.prepare("UPDATE devices SET strings = ?1 WHERE id = 'dev-roof'").bind(JSON.stringify([
+      { index: 1, voltageV: 380, currentA: 5, powerW: 1900 }, { index: 2, voltageV: 300, currentA: 1, powerW: 300 }, { index: 3, voltageV: 310, powerW: 250 }])).run();
+    await h.env.DB.prepare("UPDATE devices SET strings = NULL, ac_phases = ?1, battery = ?2, frequency_hz = NULL, temp_c = NULL, last_seen = NULL WHERE id = 'dev-garage'")
+      .bind(JSON.stringify([{ index: 1, voltageV: 229.6 }]), JSON.stringify({ voltageV: 53.1, currentA: 12.5 })).run();
+    const r = await run('inverter', {});
+    expect(r.summary).toContain('PV2 and PV3 are making far less than PV1 (300 W, 250 W against 1900 W): shade, dirt, or a fault on those strings.');
+    expect(r.summary).toContain("Garage's inverter, as last read: the grid 229.6 V. Its battery: 53.1 V, 12.5 A (charging).");
+    expect(r.rows).toContainEqual(['Roof', 'PV3', 310, null, 250]);
+    expect(r.rows).toContainEqual(['Garage', 'Grid (AC)', 229.6, null, null]);
+    expect(r.facts).toMatchObject({ s1_weak_strings: 'PV2, PV3', s2_strings: 0, s2_frequency_hz: null, s2_read_at: null, s2_battery_voltage_v: 53.1, s2_bms_soc_pct: null });
+    expect((await run('inverter', { part: 'temperature', system: 'Garage' })).summary).toBe("Garage's inverter, as last read: no temperature readings.");
+  });
+
+  it('says when the strings cannot be compared: old readings, or none producing', async () => {
+    await devices();
+    await h.env.DB.prepare("UPDATE devices SET strings = ?1 WHERE id = 'dev-garage'")
+      .bind(JSON.stringify([{ index: 1, voltageV: 300, currentA: 2, powerW: 600 }, { index: 2, voltageV: 300, currentA: 0.2, powerW: 60 }])).run();
+    expect((await run('inverter', { part: 'strings', system: 'Garage' })).summary).toBe("Garage's inverter, as last read, Fri 25 Sep 2026 09:00: "
+      + 'PV1 300 V, 2 A, 600 W; PV2 300 V, 0.2 A, 60 W. Those are old readings, so they say nothing of the strings now.');
+    await h.env.DB.prepare("UPDATE devices SET strings = ?1 WHERE id = 'dev-roof'")
+      .bind(JSON.stringify([{ index: 1, voltageV: 12, currentA: 0, powerW: 0 }, { index: 2, voltageV: 11, currentA: 0, powerW: 0 }])).run();
+    expect((await run('inverter', { part: 'strings', system: 'Roof' })).summary).toBe("Roof's inverter, now: PV1 12 V, 0 A, 0 W; PV2 11 V, 0 A, 0 W. "
+      + 'No string is producing at the moment, so they cannot be compared.');
+  });
+
+  it('says so when a system has no inverter record', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    expect((await run('inverter', {})).summary).toBe('Roof has no inverter record: its vendor has not sent one.');
+  });
+});
+
 describe('app_help', () => {
   it("answers how to do something in the app from the guide, with where it is", async () => {
     const r = await run('app_help', { question: 'How do I get alerts on Telegram?' });
@@ -751,6 +968,8 @@ describe('app_help', () => {
     expect(r.summary).toBe(r.rows[0][1]);
     expect((await run('app_help', { question: 'turn on phone notif' })).rows[0][0]).toBe('Notifications on a phone');
     expect((await run('app_help', { question: 'why is my garage offline?' })).rows[0][0]).toBe('A system reads offline');
+    expect((await run('app_help', { question: 'how do I get a graph of the grid power?' })).rows[0][0]).toBe('Graphs and charts');
+    expect((await run('app_help', { question: 'where do I see the PV1 voltage?' })).rows[0][0]).toBe('PV strings and voltages');
     const nothing = await run('app_help', { question: 'blue elephants' });
     expect(nothing.notes).toEqual(['Nothing in the guide matched the question; this is what the assistant can do.']);
     expect(nothing.rows[0][0]).toBe('The assistant, and reports');
