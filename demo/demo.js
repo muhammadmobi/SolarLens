@@ -76,6 +76,17 @@
     return pts;
   }
 
+  /**
+   * What a house with a battery draws at an instant, in watts: a base of 350,
+   * breakfast from 07:00 and the evening from 18:00. For the Analysis tab's
+   * load against generation.
+   */
+  function houseLoad(day, t) {
+    const h = (t - day) / 3600;
+    const bump = (at, width, w) => w * Math.exp(-(((h - at) / width) ** 2));
+    return Math.round(350 + bump(7.5, 0.8, 700) + bump(13, 0.6, 450) + bump(19.5, 1.5, 1100));
+  }
+
   const kwhOf = (pts) => pts.reduce((a, p) => a + (p.w * 300) / 3600 / 1000, 0);
 
   /**
@@ -111,7 +122,7 @@
       const pts = curves[i];
       const w = pts.length ? pts[pts.length - 1].w : 0;
       const today = kwhOf(pts);
-      const load = s.battery ? 420 + Math.round(rnd() * 380) : null;
+      const load = s.battery ? houseLoad(day, now) : null;
       const bat = s.battery ? (w > (load ?? 0) ? Math.min(1800, w - load) : -Math.min(900, load - w)) : null;
       return {
         id: s.id, provider: s.provider, serial: s.sn, name: s.name, plant_name: s.name,
@@ -149,7 +160,7 @@
     const points = [];
     SYSTEMS.forEach((s, i) => {
       for (const p of curves[i]) {
-        points.push({ inverter_id: s.id, ts: p.ts, ac_power_w: p.w, today_kwh: null, battery_soc: s.battery ? soc(p.ts) : null, grid_power_w: null, tz_offset_sec: tz });
+        points.push({ inverter_id: s.id, ts: p.ts, ac_power_w: p.w, today_kwh: null, battery_soc: s.battery ? soc(p.ts) : null, grid_power_w: null, load_power_w: s.battery ? houseLoad(day, p.ts) : null, tz_offset_sec: tz });
       }
     });
     points.sort((a, b) => a.ts - b.ts);
@@ -268,6 +279,8 @@
       '/api/weather': { now, days: 2, from: now - 2 * 86400, hours: weatherHours },
       // Invented prices, so the money figures have something to show.
       '/api/settings/tariff': { tariff: { currency: 'EUR', importPrice: 0.28, exportPrice: 0.08, netMetering: false, co2KgPerKwh: 0.35 } },
+      // Two of the invented systems are on the house, one on an outbuilding.
+      '/api/settings/groups': { groups: { s1: 'House', s2: 'House', s3: 'Outbuildings' } },
       '/api/locations': { now, locations: SYSTEMS.map((s) => ({ id: s.id, lat: PLACES[s.id][0], lng: PLACES[s.id][1] })) },
       '/auth/status': { configured: true, password: true, passkeys: 1, required: false, role: 'owner', device: 'demo-this' },
       '/auth/settings': {
@@ -306,8 +319,8 @@
     }
     if (path === '/api/push/key') return json({ error: 'notifications are not part of the demo' }, 404);
     if (method !== 'GET') {
-      // The tariff form expects the tariff back; it gets the demo's own, unchanged.
-      if (path === '/api/settings/tariff') return json(sample(Math.floor(Date.now() / 1000))['/api/settings/tariff']);
+      // The tariff and groups forms expect what was kept back; they get the demo's own, unchanged.
+      if (path === '/api/settings/tariff' || path === '/api/settings/groups') return json(sample(Math.floor(Date.now() / 1000))[path]);
       return json({ ok: true, required: false, signedOut: 1, id: 'demo', url: `${location.origin}${location.pathname}#/`, password: true });
     }
     const answers = sample(Math.floor(Date.now() / 1000));

@@ -744,7 +744,7 @@ test.describe('Energy flow on the overview', () => {
     await stubApi(page);
     await page.goto('/');
     // Compare is there because the fixtures hold two systems.
-    await expect(page.locator('nav#nav a:visible')).toHaveText([/Overview/, /Power/, /Compare/, /Historical Data/, /Alerts/, /Devices/]);
+    await expect(page.locator('nav#nav a:visible')).toHaveText([/Overview/, /Power/, /Analysis/, /Compare/, /Historical Data/, /Alerts/, /Devices/]);
     await page.goto('/#/flow');
     await expect(page.locator('.ovsys')).toHaveCount(2);
   });

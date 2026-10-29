@@ -158,7 +158,7 @@ describe('the demo matches what the Worker sends', () => {
   });
 
   it('answers every read the dashboard makes', () => {
-    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/auth/status', '/auth/settings']) {
+    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/api/settings/groups', '/auth/status', '/auth/settings']) {
       expect(demo, path).toHaveProperty([path]);
     }
   });
@@ -194,6 +194,13 @@ describe('the demo matches what the Worker sends', () => {
   it('its tariff is one the Worker would keep, unchanged', () => {
     const t = (demo['/api/settings/tariff'] as { tariff: unknown }).tariff;
     expect(parseTariff(t)).toEqual({ tariff: t });
+  });
+
+  it('its groups name systems it has', () => {
+    const ids = new Set(rowsOf(demo['/api/latest'], 'inverters').map((i) => i.id));
+    const groups = (demo['/api/settings/groups'] as { groups: Record<string, string> }).groups;
+    expect(Object.keys(groups).length).toBeGreaterThan(0);
+    for (const id of Object.keys(groups)) expect(ids.has(id), id).toBe(true);
   });
 
   it('its status and health answers have the Worker\'s shape', () => {

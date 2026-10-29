@@ -530,6 +530,34 @@
   /* Above the cards once there are three or more: every system on one line,
      so the question "is everything all right?" has one place to look. */
   .ovstrip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  /* Favourites and groups: the filter row, a heading per group, the star. */
+  .ovfilter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .filterbtn { font: inherit; font-size: 13px; font-weight: 650; color: var(--muted); background: var(--surface-2);
+               border: 1px solid var(--line); border-radius: 999px; padding: 6px 13px; cursor: pointer; }
+  .filterbtn small { font-weight: 700; color: var(--faint); margin-left: 3px; }
+  .filterbtn:hover { border-color: var(--muted); }
+  .filterbtn.on { background: var(--ink); color: var(--surface); border-color: transparent; }
+  .filterbtn.on small { color: inherit; opacity: .75; }
+  .filterbtn:focus-visible, .favbtn:focus-visible { outline: 2px solid var(--solarman); outline-offset: 2px; }
+  .ovgroup + .ovgroup { margin-top: 22px; }
+  .grouphead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; font-size: 17px; font-weight: 800;
+               letter-spacing: -0.01em; margin: 0 0 12px; }
+  .grouphead small { font-size: 12.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .favmark { color: var(--warn); }
+  .sysbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .favbtn { font: inherit; font-size: 13px; font-weight: 650; color: var(--muted); background: var(--surface-2);
+            border: 1px solid var(--line); border-radius: 999px; padding: 6px 13px; cursor: pointer; }
+  .favbtn.on { color: var(--warn); border-color: currentColor; }
+  /* The Analysis tab. */
+  .anlegend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); margin: 14px 0 4px; }
+  .anlegend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
+  .anlegend i.line { height: 2px; border-radius: 0; background: var(--ink); vertical-align: 4px; }
+  .anfigs { margin-top: 14px; }
+  .combined.anchart { height: auto; }
+  tr.besthour td { font-weight: 700; }
+  /* A figure and its unit on one line; the table scrolls sideways instead. */
+  .anhours td, .anpeaks td:not(:first-child) { white-space: nowrap; }
+  .anpeaks .sysname { font-weight: 700; color: var(--accent-ink); }
   .ovstrip a {
     display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px;
     background: var(--surface); border: 1px solid var(--line); color: var(--ink); text-decoration: none;
@@ -802,6 +830,7 @@
     <nav id="nav">
       <a href="#/">Overview</a>
       <a href="#/power">Power</a>
+      <a href="#/analysis">Analysis</a>
       <a href="#/compare" id="comparetab" hidden>Compare</a>
       <a href="#/map" id="maptab" hidden>Map</a>
       <a href="#/history">Historical Data</a>
@@ -836,6 +865,8 @@
     charts           sparklines, one system's day curve, the shared chart
     energy flow      the solar / house / grid / battery diagram
     power            the Power tab
+    analysis         the Analysis tab: one day hour by hour, made against used, and the peaks
+    favourites and groups    the reader's starred systems, and the owner's groups on the Overview
     overview         the Overview tab, and its strip when there are three systems or more
     compare          the Compare tab: every system side by side, per kWp
     the site map     the owner's Map tab: where each system is
@@ -893,10 +924,18 @@
   const savedHidden = (() => {
     try { return new Set(JSON.parse(localStorage.getItem('sl-hidden') || '[]')); } catch { return new Set(); }
   })();
+  // The systems this reader has starred, by name. Per browser, like the
+  // switched-off lines: a favourite is one person's, and needs no sign-in. By
+  // name rather than by the s1, s2 the Worker sends, since those are places in
+  // a sorted list and a system added later could move one.
+  function savedFavourites() {
+    try { return new Set(JSON.parse(localStorage.getItem('sl-favourites') || '[]')); } catch { return new Set(); }
+  }
   // Everything the views draw from, filled by refresh() and the load*()
   // functions: the newest reading per system, today's samples, the hardware,
   // the poll log, and which chart lines the reader has switched off.
-  const state = { latest: null, series: null, devices: [], deviceHistory: null, health: null, error: null, hidden: savedHidden };
+  const state = { latest: null, series: null, devices: [], deviceHistory: null, health: null, error: null, hidden: savedHidden,
+    favs: savedFavourites(), groups: {}, analysisDays: {} };
 
   /**
    * Each system's colour, for its chart line, its card and its name.
@@ -1722,6 +1761,220 @@
     bindRawFilters();
   }
 
+  // ---------- analysis ----------
+  /**
+   * The Analysis tab: one day, hour by hour - what the panels made against
+   * what the house used, the peaks, and how much of the sun's output the house
+   * used itself. Today comes from the samples already loaded; an earlier day of
+   * the last week is fetched from /api/series when it is first asked for, and
+   * kept for the visit, since a past day does not change.
+   *
+   * Hours are each plant's own: "13:00" is one o'clock where the panels are,
+   * so two systems in different zones add up by the sun, not by the clock.
+   * Energy is worked out from the power samples - the mean of each pair of
+   * neighbours, times the time between them - and a gap of more than twenty
+   * minutes is not bridged, since nobody knows what happened in it. So an
+   * hour's figure can differ a little from what the vendor's counter says.
+   */
+  const ANALYSIS_DAYS = 7;
+  const ANALYSIS_GAP_S = 20 * 60;
+
+  /** The plant's own day number, `back` days before today where it stands. */
+  const plantDayBack = (inv, back) => plantDay(Math.floor(Date.now() / 1000), inv.tz_offset_sec) - back;
+
+  /**
+   * One system's day in 24 hourly slots: kWh made, kWh used, and kWh of the
+   * sun's used at home (the smaller of the two, sample by sample), with the
+   * peak of each. `pts` is that system's samples for the day, oldest first.
+   */
+  function hourlyOf(inv, pts) {
+    const hours = Array.from({ length: 24 }, () => ({ made: 0, used: 0, own: 0, metered: false }));
+    let peakMade = null, peakUsed = null;
+    for (let i = 0; i < pts.length; i++) {
+      const b = pts[i];
+      const off = b.tz_offset_sec ?? inv.tz_offset_sec;
+      if (b.ac_power_w != null && (!peakMade || b.ac_power_w > peakMade.w)) peakMade = { w: b.ac_power_w, ts: b.ts, off };
+      if (b.load_power_w != null && (!peakUsed || b.load_power_w > peakUsed.w)) peakUsed = { w: b.load_power_w, ts: b.ts, off };
+      if (!i) continue;
+      const a = pts[i - 1], dt = b.ts - a.ts;
+      if (dt <= 0 || dt > ANALYSIS_GAP_S) continue;
+      const slot = hours[plantHour(a.ts + dt / 2, a.tz_offset_sec ?? inv.tz_offset_sec)];
+      const made = (((a.ac_power_w ?? 0) + (b.ac_power_w ?? 0)) / 2) * dt / 3.6e6;
+      slot.made += made;
+      if (a.load_power_w != null && b.load_power_w != null) {
+        const used = ((a.load_power_w + b.load_power_w) / 2) * dt / 3.6e6;
+        slot.used += used;
+        slot.own += Math.min(made, used);
+        slot.metered = true;
+      }
+    }
+    const sum = (k) => hours.reduce((a, h) => a + h[k], 0);
+    return { inv, hours, peakMade, peakUsed, metered: hours.some((h) => h.metered), made: sum('made'), used: sum('used'), own: sum('own') };
+  }
+
+  /** Fetch an earlier day for every system at once, and draw again when it lands. */
+  async function loadAnalysisDay(back, invs) {
+    const key = `${back}@${startOfToday()}`;
+    if (state.analysisDays[key]) return;
+    state.analysisDays[key] = { loading: true };
+    // Each plant's midnight for that day, and the next; an hour either side
+    // covers a clock change there.
+    const starts = invs.map((i) => { const d = plantDayBack(i, back); return i.tz_offset_sec == null ? startOfToday() - back * 86400 : d * 86400 - i.tz_offset_sec; });
+    const from = Math.min(...starts) - 3600, to = Math.max(...starts) + 86400 + 3600;
+    try {
+      state.analysisDays[key] = await api(`/api/series?from=${from}&to=${to}`);
+    } catch (e) {
+      state.analysisDays[key] = { error: e.message };
+    }
+    if (location.hash === '#/analysis') renderAnalysis();
+  }
+
+  /** A round step for an axis: 1, 2, 2.5 or 5 times a power of ten, giving about four gridlines. */
+  function niceStep(max) {
+    const raw = max / 4, p = 10 ** Math.floor(Math.log10(raw));
+    return [1, 2, 2.5, 5, 10].map((m) => m * p).find((v) => v >= raw);
+  }
+
+  /**
+   * Twenty-four bars of what was made - one system's in its colour, or every
+   * system's stacked, each in its own - and the house's use as a line across
+   * them. `per` is hourlyOf's answer for each system shown.
+   */
+  function analysisChart(per, hours, showUsed, label) {
+    // A phone gets a narrower drawing rather than the wide one shrunk: the
+    // labels stay a readable size, and the chart fills the width it has.
+    const narrow = window.innerWidth < 640;
+    const W = narrow ? 420 : 1000, H = narrow ? 260 : 250, L = 46, R = 12, T = 30, B = 28;
+    const top = Math.max(0.1, ...hours.map((h) => Math.max(h.made, showUsed ? h.used : 0)));
+    const step = niceStep(top), max = step * Math.ceil(top / step);
+    const slot = (W - L - R) / 24;
+    const y = (v) => T + (1 - v / max) * (H - T - B);
+    const tick = (v) => String(Number(v.toFixed(2)));
+    let out = '';
+    for (let v = 0; v <= max + step / 1e6; v += step) {
+      const yy = y(v);
+      out += `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" vector-effect="non-scaling-stroke"/>`;
+      out += `<text class="axis" x="${L - 8}" y="${(yy + 4).toFixed(1)}" text-anchor="end">${tick(v)}</text>`;
+    }
+    hours.forEach((h, i) => {
+      const x = L + i * slot;
+      let base = 0;
+      for (const p of per) {
+        const v = p.hours[i].made;
+        if (v <= 0) continue;
+        out += `<rect class="daybar" x="${(x + slot * 0.18).toFixed(1)}" y="${y(base + v).toFixed(1)}" width="${(slot * 0.64).toFixed(1)}" height="${Math.max(1, y(base) - y(base + v)).toFixed(1)}" fill="${colorOf(p.inv)}"><title>${String(i).padStart(2, '0')}:00 · ${esc(p.inv.name)} made ${v.toFixed(2)} kWh</title></rect>`;
+        base += v;
+      }
+      if (i % (narrow ? 6 : 3) === 0) out += `<text class="axis" x="${(x + slot / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${String(i).padStart(2, '0')}:00</text>`;
+    });
+    if (showUsed) {
+      const d = hours.map((h, i) => (h.metered ? `${i && hours[i - 1].metered ? 'L' : 'M'}${(L + (i + 0.5) * slot).toFixed(1)},${y(h.used).toFixed(1)}` : '')).join(' ');
+      out += `<path class="usedline" d="${d}" fill="none" stroke="var(--ink)" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"><title>Used by the house</title></path>`;
+    }
+    out += `<text class="axis unit" x="6" y="14">kWh per hour</text>`;
+    return `<svg class="combined anchart" id="anchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${out}</svg>`;
+  }
+
+  function renderAnalysis() {
+    const invs = state.latest?.inverters ?? [];
+    if (!invs.length) { $('view').innerHTML = '<div class="card"><div class="empty">No systems yet.</div></div>'; return; }
+    const back = Math.min(ANALYSIS_DAYS - 1, Math.max(0, state.analysisBack ?? 0));
+    const pick = invs.some((i) => i.id === state.analysisSystem) ? state.analysisSystem : 'all';
+    const shown = pick === 'all' ? invs : invs.filter((i) => i.id === pick);
+
+    // The pickers: which system, and which of the last seven days.
+    const first = shown[0];
+    const dayLabel = (k) => k === 0 ? 'Today' : k === 1 ? 'Yesterday'
+      : new Date(plantDayBack(first, k) * 86400 * 1000).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
+    const pickers = `${invs.length > 1 ? `<div class="rangepick syspick" role="group" aria-label="Which system">${[['all', 'All systems'], ...invs.map((i) => [i.id, i.name])]
+      .map(([id, label]) => `<button type="button" class="sysbtn${id === pick ? ' on' : ''}" data-ansys="${esc(id)}" aria-pressed="${id === pick}">${esc(label)}</button>`).join('')}</div>` : ''}
+      <div class="rangepick" role="group" aria-label="Which day">${Array.from({ length: ANALYSIS_DAYS }, (_, k) =>
+        `<button type="button" class="rangebtn${k === back ? ' on' : ''}" data-anday="${k}" aria-pressed="${k === back}">${esc(dayLabel(k))}</button>`).join('')}</div>`;
+    const bind = () => {
+      for (const b of document.querySelectorAll('[data-ansys]')) b.onclick = () => { state.analysisSystem = b.dataset.ansys; renderAnalysis(); };
+      for (const b of document.querySelectorAll('[data-anday]')) b.onclick = () => { state.analysisBack = Number(b.dataset.anday); renderAnalysis(); };
+    };
+
+    let points = state.series?.points ?? [];
+    if (back > 0) {
+      const got = state.analysisDays[`${back}@${startOfToday()}`];
+      if (!got || got.loading || got.error) {
+        if (!got) loadAnalysisDay(back, invs);
+        $('view').innerHTML = `<section class="card"><h2>Analysis</h2><div class="body">${pickers}
+          <div class="empty">${got?.error ? `Could not load that day: ${esc(got.error)}` : 'Loading…'}</div></div></section>`;
+        bind();
+        return;
+      }
+      points = got.points ?? [];
+    }
+
+    // Each system's own day, cut at its own midnight, then summed hour by hour.
+    const per = shown.map((inv) => {
+      const want = plantDayBack(inv, back);
+      const off = inv.tz_offset_sec;
+      return hourlyOf(inv, points.filter((p) => p.inverter_id === inv.id && plantDay(p.ts, p.tz_offset_sec ?? off) === want));
+    });
+    const metered = per.filter((p) => p.metered);
+    const hours = Array.from({ length: 24 }, (_, h) => ({
+      made: per.reduce((a, p) => a + p.hours[h].made, 0),
+      used: metered.reduce((a, p) => a + p.hours[h].used, 0),
+      own: metered.reduce((a, p) => a + p.hours[h].own, 0),
+      metered: metered.some((p) => p.hours[h].metered),
+    }));
+    const made = per.reduce((a, p) => a + p.made, 0);
+    const madeMetered = metered.reduce((a, p) => a + p.made, 0);
+    const used = metered.reduce((a, p) => a + p.used, 0);
+    const own = metered.reduce((a, p) => a + p.own, 0);
+    const best = hours.reduce((b, h, i) => (h.made > (hours[b]?.made ?? 0) ? i : b), 0);
+    const kwh2 = (v) => `${v.toFixed(v >= 100 ? 0 : 2)} kWh`;
+    const pct = (a, b) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
+    const at = (p) => (p ? `${esc(fmtWs(p.w))} <span class="faint">at ${esc(hhmm(p.ts, p.off))}</span>` : '—');
+    const one = per.length === 1 ? per[0] : null;
+    const who = one ? one.inv.name : 'All systems';
+
+    if (!made && !used) {
+      $('view').innerHTML = `<section class="card"><h2>Analysis</h2><div class="body">${pickers}
+        <div class="empty">No samples for ${esc(dayLabel(back).toLowerCase())}${one ? ` from ${esc(who)}` : ''}.</div></div></section>`;
+      bind();
+      return;
+    }
+
+    const figures = [
+      ['Made', kwh2(made)],
+      metered.length ? ['Used by the house', kwh2(used)] : null,
+      metered.length ? ['Of the sun\'s, used at home', `${kwh2(own)} · ${pct(own, madeMetered)} of what was made`] : null,
+      metered.length ? ['The house\'s use, from the sun', pct(own, used)] : null,
+      ['Best hour', `${String(best).padStart(2, '0')}:00–${String(best + 1).padStart(2, '0')}:00 · ${kwh2(hours[best].made)}`],
+      one ? ['Peak output', at(one.peakMade)] : null,
+      one && one.metered ? ['Peak draw', at(one.peakUsed)] : null,
+    ].filter(Boolean);
+
+    const peaks = per.length > 1 ? `<div class="tablewrap" tabindex="0" role="region" aria-label="Peaks, system by system, scrolls sideways"><table class="devices anpeaks">
+      <thead><tr><th>System</th><th>Made</th><th>Peak output</th><th>Peak draw</th></tr></thead>
+      <tbody>${per.map((p) => `<tr><td><span class="sysname" style="--accent:${colorOf(p.inv)};--accent-ink:${inkOf(p.inv)}">${esc(p.inv.name)}</span></td>
+        <td>${kwh2(p.made)}</td><td>${at(p.peakMade)}</td><td>${p.metered ? at(p.peakUsed) : '<span class="faint">not metered</span>'}</td></tr>`).join('')}</tbody></table></div>` : '';
+
+    const rows = hours.map((h, i) => ({ ...h, i })).filter((h) => h.made > 0.0005 || h.used > 0.0005);
+    const showUsed = metered.length > 0;
+    const table = `<div class="tablewrap" tabindex="0" role="region" aria-label="Hour by hour, scrolls sideways"><table class="devices anhours">
+      <thead><tr><th>Hour</th><th>Made</th>${showUsed ? '<th>Used</th><th>From the sun</th><th>Spare</th><th>From elsewhere</th>' : ''}</tr></thead>
+      <tbody>${rows.map((h) => `<tr${h.i === best ? ' class="besthour"' : ''}><td class="mono">${String(h.i).padStart(2, '0')}:00</td><td>${kwh2(h.made)}</td>${showUsed
+        ? `<td>${h.metered ? kwh2(h.used) : '—'}</td><td>${h.metered ? kwh2(h.own) : '—'}</td><td>${h.metered ? kwh2(Math.max(0, h.made - h.own)) : '—'}</td><td>${h.metered ? kwh2(Math.max(0, h.used - h.own)) : '—'}</td>` : ''}</tr>`).join('')}</tbody>
+    </table></div>`;
+
+    const unmetered = per.filter((p) => !p.metered).map((p) => p.inv.name);
+    $('view').innerHTML = `<section class="card"><h2>Analysis · ${esc(who)} · ${esc(dayLabel(back))}</h2><div class="body">${pickers}
+        <div class="anlegend">${per.map((p) => `<span><i style="background:${colorOf(p.inv)}"></i>${one ? 'Made' : `${esc(p.inv.name)}, made`}</span>`).join('')}${showUsed ? '<span><i class="line"></i>Used by the house</span>' : ''}</div>
+        ${analysisChart(per, hours, showUsed, `${who}, ${dayLabel(back)}: ${kwh2(made)} made${showUsed ? `, ${kwh2(used)} used` : ''}, most in the hour from ${String(best).padStart(2, '0')}:00`)}
+        <dl class="kv anfigs">${figures.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
+        <p class="cardnote">Worked out from the power samples, hour by hour at each system's own clock, so a figure can differ a little from the vendor's own counter.
+          "From elsewhere" is what the house drew from the grid or a battery.${unmetered.length ? ` ${esc(unmetered.join(', '))} ${unmetered.length === 1 ? 'reports' : 'report'} no house load, so ${unmetered.length === 1 ? 'it counts' : 'they count'} towards what was made only.` : ''}</p>
+      </div></section>
+      ${peaks ? `<section class="card"><h2>Peaks, system by system</h2>${peaks}</section>` : ''}
+      <section class="card"><h2>Hour by hour</h2>${table}</section>`;
+    bind();
+  }
+
   // ---------- overview ----------
 
   /**
@@ -1986,7 +2239,11 @@
    * figures and its curve - sized to fit a laptop screen without scrolling.
    */
   function renderOverview() {
-    const invs = state.latest?.inverters ?? [];
+    const everyone = state.latest?.inverters ?? [];
+    const filter = overviewFilter(everyone);
+    const invs = favouritesFirst(filter === 'all' ? everyone
+      : filter === 'fav' ? everyone.filter(isFavourite)
+        : everyone.filter((i) => groupOf(i) === filter.slice(2)));
     const byInv = {};
     for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
     if (!invs.length) {
@@ -1994,7 +2251,7 @@
       return;
     }
 
-    const cols = invs.map((inv, i) => {
+    const col = (inv, i) => {
       const st = statusOf(inv);
       const pts = todayOf(inv, byInv[inv.id]);
       const m = parse(inv.metrics) ?? {};
@@ -2006,7 +2263,7 @@
       return `<section class="ovsys" style="--accent:${colorOf(inv)};--accent-ink:${inkOf(inv)}">
         <a class="ovmain" href="#/system/${encodeURIComponent(inv.id)}" title="Open ${esc(inv.name)}">
           <div class="ovhead">
-            <span class="ovname">${esc(inv.name)}</span>
+            <span class="ovname">${isFavourite(inv) ? '<span class="favmark" title="A favourite">★</span> ' : ''}${esc(inv.name)}</span>
             <span class="ovchip">${inv.capacity_w ? `${esc(fmtWs(inv.capacity_w))} · ` : ''}${esc(providerName(inv.provider))}</span>
             <span class="ovwhen">
               <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
@@ -2025,9 +2282,32 @@
           ${systemChart(inv, pts, 'ov' + i, 300, { bare: true })}
         </a>
       </section>`;
-    }).join('');
+    };
 
-    $('view').innerHTML = `${invs.length >= 3 ? summaryStrip(invs) : ''}<div class="ovgrid">${cols}</div>`;
+    // Everything on one grid, or - once the owner has made groups, and no
+    // filter has picked one out - a heading and a grid per group, with the
+    // systems in none last. Chart ids run on across the groups.
+    const groups = filter === 'all' ? groupNames() : [];
+    let n = 0;
+    const grid = (list) => `<div class="ovgrid">${list.map((inv) => col(inv, n++)).join('')}</div>`;
+    const body = groups.length
+      ? [...groups, null].map((g) => {
+        const list = invs.filter((i) => groupOf(i) === g);
+        if (!list.length) return '';
+        const now = list.filter((i) => i.ts).reduce((a, i) => a + (i.ac_power_w || 0), 0);
+        const today = list.reduce((a, i) => a + (i.today_kwh || 0), 0);
+        return `<section class="ovgroup" aria-label="${esc(g ?? 'Not in a group')}"><h2 class="grouphead">${esc(g ?? 'Not in a group')}
+          <small>${list.length} system${list.length === 1 ? '' : 's'} · ${esc(fmtWs(now))} now · ${esc(fmtKwh(today))} today</small></h2>${grid(list)}</section>`;
+      }).join('')
+      : grid(invs);
+    $('view').innerHTML = `${filterBar(everyone, filter)}${invs.length >= 3 ? summaryStrip(invs) : ''}${body}`;
+    for (const b of document.querySelectorAll('.filterbtn')) {
+      b.onclick = () => {
+        state.ovFilter = b.dataset.filter;
+        try { localStorage.setItem('sl-ovfilter', b.dataset.filter); } catch { /* remembered for this visit only */ }
+        renderOverview();
+      };
+    }
   }
 
   /**
@@ -2038,10 +2318,54 @@
     return `<nav class="ovstrip" aria-label="Every system at a glance">${invs.map((inv) => {
       const st = statusOf(inv);
       return `<a href="#/system/${encodeURIComponent(inv.id)}" style="--accent:${colorOf(inv)};--accent-ink:${inkOf(inv)}">
-        <span class="dot"></span><span class="nm">${esc(inv.name)}</span>
+        <span class="dot"></span><span class="nm">${isFavourite(inv) ? '★ ' : ''}${esc(inv.name)}</span>
         ${st.offline ? '<span class="off">offline</span>' : `<span>${esc(fmtWs(inv.ac_power_w))}</span>`}
         <span class="faint">${esc(fmtKwh(inv.today_kwh))} today</span></a>`;
     }).join('')}</nav>`;
+  }
+
+  // ---------- favourites and groups ----------
+  /**
+   * Two ways to sort a long list of systems. A favourite is starred by the
+   * reader, on the system's page, and kept in this browser: favourites come
+   * first on the Overview, and have a filter of their own. A group ("Home",
+   * "Farm") is the owner's, set in Settings and kept by the Worker, so
+   * everyone sees the same headings (GET /api/settings/groups).
+   */
+  const isFavourite = (inv) => state.favs.has(inv.name);
+  const favouritesFirst = (invs) => [...invs.filter(isFavourite), ...invs.filter((i) => !isFavourite(i))];
+  const groupOf = (inv) => state.groups?.[inv.id] ?? null;
+  /** The owner's groups that have a system in them, A to Z. */
+  const groupNames = () => [...new Set((state.latest?.inverters ?? []).map(groupOf).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+  function toggleFavourite(inv) {
+    if (isFavourite(inv)) state.favs.delete(inv.name); else state.favs.add(inv.name);
+    try { localStorage.setItem('sl-favourites', JSON.stringify([...state.favs])); } catch { /* remembered for this visit only */ }
+  }
+
+  /**
+   * Which systems the Overview shows: 'all', 'fav', or 'g:<group>'. A filter
+   * that no longer picks anything - the last favourite unstarred, a group
+   * emptied - falls back to all of them rather than showing an empty page.
+   */
+  function overviewFilter(invs) {
+    let f = state.ovFilter;
+    if (f === undefined) { try { f = localStorage.getItem('sl-ovfilter'); } catch { f = null; } }
+    if (f === 'fav' && invs.some(isFavourite)) return f;
+    if (f && f.startsWith('g:') && invs.some((i) => groupOf(i) === f.slice(2))) return f;
+    return 'all';
+  }
+
+  /** The filter buttons, once there is something to filter by. */
+  function filterBar(invs, current) {
+    const groups = groupNames();
+    const favs = invs.filter(isFavourite).length;
+    if (!groups.length && (invs.length < 3 || !favs)) return '';
+    const btn = (key, label) => `<button type="button" class="filterbtn${key === current ? ' on' : ''}" data-filter="${esc(key)}"
+      aria-pressed="${key === current}">${label}</button>`;
+    return `<div class="ovfilter" role="group" aria-label="Which systems to show">${btn('all', `All systems <small>${invs.length}</small>`)}${
+      favs ? btn('fav', `★ Favourites <small>${favs}</small>`) : ''}${
+      groups.map((g) => btn(`g:${g}`, `${esc(g)} <small>${invs.filter((i) => groupOf(i) === g).length}</small>`)).join('')}</div>`;
   }
 
   // ---------- the site map ----------
@@ -3606,7 +3930,11 @@
     const inv = (state.latest?.inverters ?? []).find((i) => i.id === id);
     if (!inv) { $('view').innerHTML = `<a class="back" href="#/">← Overview</a><div class="card"><div class="empty">Unknown system.</div></div>`; return; }
     const b = detailBlocks(inv);
-    $('view').innerHTML = `<a class="back" href="#/">← Overview</a>${b.header}${b.flow}${b.blocks}${b.raw}`;
+    const fav = isFavourite(inv);
+    $('view').innerHTML = `<div class="sysbar"><a class="back" href="#/">← Overview</a>
+      <button type="button" class="favbtn${fav ? ' on' : ''}" id="favbtn" aria-pressed="${fav}"
+        title="Favourites come first on the Overview, in this browser">${fav ? '★ A favourite' : '☆ Add to favourites'}</button></div>${b.header}${b.flow}${b.blocks}${b.raw}`;
+    $('favbtn').onclick = () => { toggleFavourite(inv); renderSystem(id); };
     bindRawFilters();
   }
 
@@ -3842,6 +4170,16 @@
         </form>
       </div></section>
 
+      <section class="card"><h2>Groups</h2><div class="body">
+        <p class="cardnote">Sort the systems into groups - "Home", "Farm" - and the Overview shows each group under its own heading, with its own total. Everyone who can see the dashboard sees them. Leave a name blank for a system in no group.</p>
+        <form class="authform" id="groups-form">
+          ${(state.latest?.inverters ?? []).map((inv) => `<label>${esc(inv.name)}
+            <input data-group-of="${esc(inv.id)}" list="group-names" maxlength="40" value="${esc(groupOf(inv) ?? '')}" placeholder="No group"></label>`).join('') || '<p class="cardnote">No systems yet.</p>'}
+          <datalist id="group-names">${groupNames().map((g) => `<option value="${esc(g)}"></option>`).join('')}</datalist>
+          ${state.latest?.inverters?.length ? '<div class="formrow"><button type="submit" class="authbtn">Save the groups</button></div>' : ''}
+        </form>
+      </div></section>
+
       <section class="card"><h2>Passkeys</h2><div class="body">
         <p class="cardnote">Sign in with a fingerprint, a face or the device PIN. Nothing that could sign you in is stored on the server.</p>
         <ul class="authlist">${passkeys}</ul>
@@ -3884,6 +4222,11 @@
 
     $('req').onchange = act(async () => redo((await authPost('/auth/settings/required', { on: $('req').checked })).required
       ? 'The dashboard is private now.' : 'The dashboard is open to anyone with its address again.'));
+    $('groups-form').onsubmit = act(async () => {
+      const groups = Object.fromEntries([...view.querySelectorAll('[data-group-of]')].map((i) => [i.dataset.groupOf, i.value.trim()]));
+      state.groups = (await apiSend('PUT', '/api/settings/groups', { groups })).groups;
+      redo('Groups saved. The Overview shows each under its own heading.');
+    });
     $('t-net').onchange = () => { $('t-exp-row').hidden = $('t-net').checked; };
     $('tariff-form').onsubmit = act(async () => {
       const net = $('t-net').checked;
@@ -3955,6 +4298,8 @@
       ['Whether a system is making what the weather allowed', `the system's page - Against the weather; and the dashed line on its day curve, on ${tab('#/', 'Overview')} and ${tab('#/power', 'Power')}`],
       ['What the sun has saved, and the CO₂ it has avoided', `each system's page - Money and carbon; and ${tab('#/history', 'Historical Data')}, by day, month or year. The owner sets the prices under ${tab('#/settings', 'Settings')}`],
       ['Which system is doing best, for its size', `${tab('#/compare', 'Compare')} - kWh per kWp, today and this month (with two systems or more)`],
+      ['A day hour by hour: made against used, and the peaks', `${tab('#/analysis', 'Analysis')} - any of the last seven days, one system or all`],
+      ['Put the systems you watch first, or sort them into groups', `the star on a system's page (this browser only); groups are set by the owner under ${tab('#/settings', 'Settings')}`],
       ['See every system on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
       ['See one system on its own, in full', `${tab('#/', 'Overview')} - tap the system`],
       ['Daily, monthly or yearly totals', `${tab('#/history', 'Historical Data')} - Day, Month or Year at the top`],
@@ -4093,6 +4438,7 @@
     // old bookmark should still land somewhere sensible.
     if (hash === '#/flow') { location.replace('#/'); return overviewRoute(); }
     if (hash === '#/power') return renderPower();
+    if (hash === '#/analysis') return renderAnalysis();
     if (hash === '#/compare') return renderCompare();
     if (hash === '#/map') return renderMap();
     overviewRoute();
@@ -4200,7 +4546,8 @@
    */
   function overviewRoute() {
     const n = state.latest?.inverters?.length ?? 0;
-    document.body.classList.toggle('ovfit', n <= 2);
+    // Group headings and filters need the page to scroll like any other.
+    document.body.classList.toggle('ovfit', n <= 2 && !groupNames().length);
     renderOverview();
   }
 
@@ -4215,7 +4562,7 @@
     if (document.hidden && !force) return;
     try {
       const now = Math.floor(Date.now() / 1000);
-      const [lat, ser, devs, health, expected, locs, tariff] = await Promise.all([
+      const [lat, ser, devs, health, expected, locs, tariff, groups] = await Promise.all([
         api('/api/latest'),
         api(`/api/series?to=${now}&tz=${new Date().getTimezoneOffset()}`),
         api('/api/devices').catch(() => ({ devices: [] })),
@@ -4226,6 +4573,8 @@
         api('/api/locations').catch(() => null),
         // The owner's prices, for money saved; null until they are set.
         api('/api/settings/tariff').catch(() => null),
+        // The owner's groups, which lay the Overview out; none until they are set.
+        api('/api/settings/groups').catch(() => null),
       ]);
       // An offline inverter is not still producing whatever it managed just
       // before it dropped - nothing is flowing that anyone can see - so its
@@ -4239,7 +4588,7 @@
         i.grid_power_w = i.load_power_w = 0;
         if (i.battery_power_w != null) i.battery_power_w = 0;
       }
-      state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.expected = expected; state.locations = locs?.locations ?? []; state.tariff = tariff?.tariff ?? null; state.error = null;
+      state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.expected = expected; state.locations = locs?.locations ?? []; state.tariff = tariff?.tariff ?? null; state.groups = groups?.groups ?? {}; state.error = null;
 
       const withData = lat.inverters.filter((i) => i.ts);
       // Offline systems now contribute a real zero rather than a last-known

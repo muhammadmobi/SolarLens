@@ -133,8 +133,9 @@ export function series() {
   for (let h = 6; h <= 18; h++) {
     const ts = t0 + h * 3600;
     const bell = Math.max(0, Math.sin(((h - 6) / 12) * Math.PI));
-    points.push({ inverter_id: SOLIS, ts, ac_power_w: Math.round(10_000 * bell), today_kwh: null, battery_soc: null, grid_power_w: null });
-    points.push({ inverter_id: HYBRID, ts, ac_power_w: Math.round(3_000 * bell), today_kwh: null, battery_soc: null, grid_power_w: null });
+    points.push({ inverter_id: SOLIS, ts, ac_power_w: Math.round(10_000 * bell), today_kwh: null, battery_soc: null, grid_power_w: null, load_power_w: null });
+    // The hybrid's house draws a steady 400 W, and 1.2 kW at 18:00.
+    points.push({ inverter_id: HYBRID, ts, ac_power_w: Math.round(3_000 * bell), today_kwh: null, battery_soc: null, grid_power_w: null, load_power_w: h === 18 ? 1200 : 400 });
   }
   return points;
 }
