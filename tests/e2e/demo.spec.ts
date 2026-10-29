@@ -37,7 +37,7 @@ test('draws every view from the sample data, and asks no server for any of it', 
   await expect(page.locator('.ovsys')).toHaveCount(3);
   await expect(page.locator('nav.ovstrip a')).toHaveCount(3);
   for (const [hash, ready] of [
-    ['#/power', '#legend .legitem'], ['#/compare', 'table.cmp tbody tr'], ['#/history', '#view table'],
+    ['#/power', '#legend .legitem'], ['#/analysis', '#anchart rect.daybar'], ['#/compare', 'table.cmp tbody tr'], ['#/history', '#view table'],
     ['#/alerts', 'details.syssec'], ['#/devices', '.loggers section.logger'], ['#/settings', '.settings'],
     ['#/guide', '.guide'], ['#/system/s2', '.blocks'],
   ] as const) {

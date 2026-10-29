@@ -15,7 +15,7 @@
  *   POST /api/ingest/*, each request carrying INGEST_TOKEN. The login does not
  *   touch them.
  * - The owner writing: signing a phone up for notifications, setting the
- *   tariff (/api/settings/tariff), or forcing a poll. Those need the owner signed in, or API_TOKEN as a header - except
+ *   tariff or the systems' groups (/api/settings/*), or forcing a poll. Those need the owner signed in, or API_TOKEN as a header - except
  *   turning a phone's notifications off, which needs only that phone's own
  *   push address (see the middleware below).
  * - The sign-in routes under /auth (./auth/routes), and share links at /s/.
@@ -36,7 +36,7 @@ import { REFRESH_COOKIE, SESSION_COOKIE, type Caller, deviceLabel, identify, own
 import { timingSafeEqual } from './auth/crypto';
 import { locationOf, locations, refreshWeather, upsertLocation, weatherSince } from './weather';
 import { expectedToday } from './expected';
-import { getTariff, parseTariff, setTariff } from './settings';
+import { getGroups, getTariff, parseGroups, parseTariff, setGroups, setTariff } from './settings';
 import { daily, deviceNetworks, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
 import { tzNameOf, tzOffsetSec } from './providers/units';
@@ -378,6 +378,33 @@ app.put('/api/settings/tariff', async (c) => {
 app.delete('/api/settings/tariff', async (c) => {
   await setTariff(c.env.DB, null);
   return c.json({ tariff: null });
+});
+
+/**
+ * The groups the owner sorts the systems into, by alias: `{ groups: { s1: 'Home' } }`.
+ * Read by anyone who may read the dashboard, since the Overview is laid out by
+ * them. A group kept for a system that has since gone is simply not served.
+ */
+app.get('/api/settings/groups', async (c) => {
+  const [groups, ids] = await Promise.all([getGroups(c.env.DB), inverterIds(c.env.DB)]);
+  const alias = aliasFor(ids);
+  const known = new Set(ids);
+  c.header('Cache-Control', CACHE);
+  return c.json({ groups: Object.fromEntries(Object.entries(groups).filter(([id]) => known.has(id)).map(([id, name]) => [alias(id), name])) });
+});
+
+/**
+ * Set every system's group at once, by alias; a system left out, or sent with
+ * a blank name, is in no group. The owner only, as every write under /api/.
+ */
+app.put('/api/settings/groups', async (c) => {
+  const ids = await inverterIds(c.env.DB);
+  const alias = aliasFor(ids);
+  const byAlias = new Map(ids.map((id) => [alias(id), id]));
+  const parsed = parseGroups(await c.req.json().catch(() => null), (a) => byAlias.get(a) ?? null);
+  if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+  await setGroups(c.env.DB, parsed.groups);
+  return c.json({ groups: Object.fromEntries(Object.entries(parsed.groups).map(([id, name]) => [alias(id), name])) });
 });
 
 /**

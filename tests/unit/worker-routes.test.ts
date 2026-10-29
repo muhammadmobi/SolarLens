@@ -163,6 +163,15 @@ describe('/api/series', () => {
     h.close();
   });
 
+  it('carries what the house drew, for the Analysis tab', async () => {
+    const h = createHarness();
+    await upsertInverter(h.env.DB, testInverter() as never);
+    await insertReading(h.env.DB, testReading({ ts: 1_700_000_000, acPowerW: 500, loadPowerW: 320 }) as never);
+    const body = (await (await h.fetch('/api/series?from=1700000000&to=1700001000')).json()) as { points: { ac_power_w: number; load_power_w: number }[] };
+    expect(body.points[0]).toMatchObject({ ac_power_w: 500, load_power_w: 320 });
+    h.close();
+  });
+
   it('refuses a window that is not numbers, or is longer than a month', async () => {
     const h = createHarness();
     expect((await h.fetch('/api/series?to=not-a-time')).status).toBe(400);

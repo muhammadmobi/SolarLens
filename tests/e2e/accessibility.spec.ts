@@ -104,6 +104,7 @@ async function seriousViolations(page: Page) {
 const views = [
   ['Overview', '#/'],
   ['Power', '#/power'],
+  ['Analysis', '#/analysis'],
   ['Historical Data', '#/history'],
   ['Alerts', '#/alerts'],
   ['Devices', '#/devices'],

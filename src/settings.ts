@@ -11,6 +11,12 @@
  * already has, so this file only keeps the numbers and holds them to sense:
  * a price is a number from 0 to 1000 in the owner's own currency, the currency
  * a three-letter code, the carbon figure 0 to 2 kg per kWh.
+ *
+ * Second, the groups the owner sorts the systems into ("Home", "Farm"), which
+ * the Overview shows each under its own heading. They are kept against each
+ * system's real id and served under its alias: an alias is a position in a
+ * sorted list, so a system added later could move it, and a group kept by
+ * alias would then follow the wrong system.
  */
 import { nowSec } from './db';
 
@@ -45,6 +51,54 @@ export function parseTariff(body: unknown): { tariff: Tariff } | { error: string
   const co2KgPerKwh = within(b.co2KgPerKwh, 2);
   if (co2KgPerKwh === null) return { error: 'The CO₂ for a kWh from the grid is a number of kg from 0 to 2.' };
   return { tariff: { currency, importPrice, exportPrice, netMetering: b.netMetering === true, co2KgPerKwh } };
+}
+
+/** The most groups there may be, and the longest a group's name may be. */
+export const MAX_GROUPS = 20;
+export const GROUP_NAME_MAX = 40;
+
+/**
+ * Groups from what the Settings form sent - `{ s1: 'Home', s2: '' }`, by alias -
+ * as a map from each system's real id to its group, or the reason it is not
+ * one. A blank name takes a system out of every group. `idOf` turns an alias
+ * back into the id it stands for, or null for an alias no system has.
+ */
+export function parseGroups(body: unknown, idOf: (alias: string) => string | null): { groups: Record<string, string> } | { error: string } {
+  const raw = body && typeof body === 'object' ? (body as { groups?: unknown }).groups : undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'Send the groups as { "groups": { "s1": "Home" } }.' };
+  const groups: Record<string, string> = {};
+  for (const [alias, value] of Object.entries(raw as Record<string, unknown>)) {
+    const id = idOf(alias);
+    if (!id) return { error: `There is no system ${alias.slice(0, 12)}.` };
+    if (value !== null && typeof value !== 'string') return { error: 'A group name is text.' };
+    // Control characters and runs of spaces would only make two names that
+    // look the same different groups.
+    const name = (value ?? '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
+    if (name.length > GROUP_NAME_MAX) return { error: `A group name is at most ${GROUP_NAME_MAX} characters.` };
+    if (name) groups[id] = name;
+  }
+  if (new Set(Object.values(groups)).size > MAX_GROUPS) return { error: `There can be at most ${MAX_GROUPS} groups.` };
+  return { groups };
+}
+
+/** Each system's group, by real id; a system in none is not in the map. */
+export async function getGroups(db: D1Database): Promise<Record<string, string>> {
+  const row = await db.prepare("SELECT v FROM app_settings WHERE k = 'groups'").first<{ v: string }>();
+  if (!row) return {};
+  try {
+    const v = JSON.parse(row.v) as unknown;
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, string>) : {};
+  } catch { return {}; }
+}
+
+export async function setGroups(db: D1Database, groups: Record<string, string>, at = nowSec()): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO app_settings (k, v, updated_at) VALUES ('groups', ?1, ?2)
+       ON CONFLICT(k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at`,
+    )
+    .bind(JSON.stringify(groups), at)
+    .run();
 }
 
 export async function getTariff(db: D1Database): Promise<Tariff | null> {

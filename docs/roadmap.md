@@ -159,6 +159,14 @@ guessed. With no tariff set, no money is shown anywhere.
 A power analysis view (hour by hour, load against generation, peaks), and
 favourites and grouping for the systems list.
 
+**As built:** the Analysis tab covers any of the last seven days, one system
+or all, from the samples the Worker already keeps - `/api/series` gained each
+sample's house load, and nothing else changed on the server. Energy is the
+mean of neighbouring samples times the gap, and a gap over twenty minutes is
+not bridged. Favourites are the reader's, kept in the browser; groups are the
+owner's, kept by the Worker against real ids, since an alias is a position in a
+sorted list and a system added later could move it.
+
 ### 10. Outside the app
 
 Webhooks to ntfy, Telegram or Discord, a weekly summary, and a Home Assistant

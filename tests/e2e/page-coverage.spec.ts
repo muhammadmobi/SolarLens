@@ -65,7 +65,7 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
   ];
   const points = Array.from({ length: 40 }, (_, i) => [
     { inverter_id: 's1', ts: NOW - i * 300, ac_power_w: 8000 - i * 50 },
-    { inverter_id: 's2', ts: NOW - i * 300, ac_power_w: 1200 - i * 10 },
+    { inverter_id: 's2', ts: NOW - i * 300, ac_power_w: 1200 - i * 10, load_power_w: 600 + i * 5 },
   ]).flat();
 
   // Signed in as the owner for most of the walk; signed out, on a private
@@ -86,6 +86,9 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     ? r.fulfill(json({ ok: true, required: true, signedOut: 1, url: 'https://dashboard.example/s/x.y', id: 'sh2' }))
     : r.fallback()));
   await page.route('**/api/series**', (r) => r.fulfill(json({ from: NOW - 12_000, to: NOW, points })));
+  // A tariff and groups, so the money figures and the Overview's headings are walked too.
+  await page.route('**/api/settings/tariff', (r) => r.fulfill(json({ tariff: { currency: 'EUR', importPrice: 0.3, exportPrice: 0.1, netMetering: false, co2KgPerKwh: 0.4 } })));
+  await page.route('**/api/settings/groups', (r) => r.fulfill(json({ groups: { s1: 'Roof' } })));
   await page.route('**/api/devices', (r) => r.fulfill(json({
     now: NOW,
     devices: [
@@ -162,7 +165,7 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
 
   // Walk the dashboard the way a person would: every view, both systems, the
   // ranges, a system's own page, its raw telemetry, and the theme switch.
-  for (const hash of ['#/power', '#/history', '#/alerts', '#/devices', '#/system/s1', '#/system/s2', '#/tv', '#/guide', '#/']) {
+  for (const hash of ['#/power', '#/analysis', '#/compare', '#/history', '#/alerts', '#/devices', '#/system/s1', '#/system/s2', '#/tv', '#/guide', '#/']) {
     await page.goto(`/${hash}`);
     await expect(page.locator('#view')).not.toBeEmpty();
     await page.waitForTimeout(120);
@@ -188,8 +191,21 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     }
   }
 
+  // The Overview's filters, a favourite starred and unstarred, and the
+  // Analysis tab for one system and for an earlier day.
+  await page.goto('/#/');
+  await page.locator('.filterbtn').nth(1).click({ timeout: 2000 }).catch(() => {});
+  await page.locator('.filterbtn').first().click({ timeout: 2000 }).catch(() => {});
+  await page.goto('/#/analysis');
+  for (const sel of ['[data-ansys="s2"]', '[data-anday="1"]', '[data-anday="0"]', '[data-ansys="all"]']) {
+    await page.locator(sel).click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(150);
+  }
+
   await page.goto('/#/system/s2');
   await expect(page.locator('#view')).not.toBeEmpty();
+  await page.locator('#favbtn').click({ timeout: 2000 }).catch(() => {});
+  await page.locator('#favbtn').click({ timeout: 2000 }).catch(() => {});
   const panels = page.locator('#view details');
   for (let i = 0; i < Math.min(await panels.count(), 6); i++) {
     await panels.nth(i).locator('summary').click({ timeout: 2000 }).catch(() => {});
@@ -217,6 +233,11 @@ test('the end-to-end suite runs most of the dashboard script', async ({ page, br
     await page.locator(sel).first().click({ timeout: 2000 }).catch(() => {});
     await page.waitForTimeout(120);
   }
+  await page.getByRole('button', { name: 'Save the tariff' }).click().catch(() => {});
+  await page.waitForTimeout(150);
+  await page.getByRole('button', { name: 'Save the groups' }).click().catch(() => {});
+  await page.waitForTimeout(150);
+  await page.locator('#t-net').check().catch(() => {});
   await page.locator('#pw-cur').fill('a current password');
   await page.locator('#pw-new').fill('a new long password');
   await page.getByRole('button', { name: 'Change password' }).click().catch(() => {});

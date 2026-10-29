@@ -141,7 +141,7 @@ stays open for monitoring.
 | `src/auth/webauthn.ts` | Passkeys: the CBOR, the keys and the two ceremonies, verified with WebCrypto. |
 | `src/auth/crypto.ts` | Tokens, hashes, HMAC and the password, all WebCrypto. |
 | `src/weather.ts` | Each system's position (from the vendor's plant record, owner-only) and its hourly weather from Open-Meteo, fetched by the cron. |
-| `src/settings.ts` | The owner's settings in `app_settings`: for now the tariff, checked (`parseTariff`) before it is kept. The page does the money sums (`valueOf` in `public/index.html`). |
+| `src/settings.ts` | The owner's settings in `app_settings`: the tariff and the systems' groups, each checked (`parseTariff`, `parseGroups`) before it is kept. Groups are stored by real id and served by alias. The page does the money sums (`valueOf` in `public/index.html`). |
 | `src/expected.ts` | What each system should make of its sun: its performance ratio learned from its recent sunny days, and today's expected output. |
 | `src/public-view.ts` | **The one file deciding what leaves the Worker.** Aliases ids, masks serials, and sends the raw payload only as its alert fields and a cleaned `telemetry` copy. |
 | `src/relays.ts` | Validates a relay's report on itself into a narrow shape. |
@@ -181,7 +181,7 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC. A logger's `logger` (link, signal bars, uptime, make date) is public |
 | `device_network` | datalogger | Its operator and cell, or MAC address. Owner only, never served - and a table of its own, because a Worker rolled back to 2.10 would serve any new column on `devices` |
 | `plant_location` | system | Its position. Owner-only; sent to Open-Meteo only rounded to about a kilometre |
-| `app_settings` | setting | The owner's tariff, as JSON; read by anyone who may read the dashboard, written by the owner |
+| `app_settings` | setting | The owner's tariff and groups, as JSON; read by anyone who may read the dashboard, written by the owner |
 | `weather_hourly` | system and hour | Sunlight, temperature and cloud from Open-Meteo; kept 400 days |
 | `device_samples` | change in a device's status or signal | The link history on the Devices tab. Written on a change, or hourly while nothing changes; kept 90 days |
 | `alarms` | vendor fault | Severity, raised, cleared, readable name |

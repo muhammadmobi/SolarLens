@@ -18,6 +18,21 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **An Analysis tab**: any of the last seven days, one system or all of them,
+  hour by hour - what the panels made (stacked by system) against what the
+  house used, the best hour, the peak output and the peak draw, how much of
+  the sun's output the house used itself and how much of the house's use the
+  sun covered, and a table of every hour. Worked out from the power samples at
+  each plant's own clock; an earlier day is fetched once when asked for.
+  `/api/series` now carries each sample's house load (`load_power_w`).
+
+- **Favourites and groups.** A star on a system's page puts it first on the
+  Overview, in that browser. The owner sorts the systems into groups in
+  Settings ("House", "Outbuildings"), and the Overview shows each group under a
+  heading with its own total, with a filter for favourites and for each group.
+  Groups are kept against each system's real id, so a system added later
+  cannot inherit one. `GET` and `PUT /api/settings/groups`.
+
 - **Money saved and CO₂ avoided.** A *Tariff* card in Settings, filled in by the
   owner when ready: the currency, what a kWh bought costs, what one sold
   earns, net metering, and how much CO₂ a kWh from the grid stands for. From
