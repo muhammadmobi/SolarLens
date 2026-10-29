@@ -20,6 +20,8 @@ on:
 
 permissions:
   contents: read
+  # The relay note at the end asks which commit the last successful deploy ran.
+  actions: read
 
 # One deploy at a time, and never cancel one half-way.
 # One deploy at a time, and never cancel one half-way.
@@ -64,8 +66,9 @@ jobs:
           # The exact commit that passed its checks, not whatever main says by
           # the time a person gets round to approving.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          # Two commits, so the relay note below can see what this merge changed.
-          fetch-depth: 2
+          # All of history and the tags, so the relay note below can compare
+          # with whatever was live before, however many commits back it is.
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
@@ -138,22 +141,51 @@ jobs:
             echo "The run is marked failed on purpose - the logs above say which check failed."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The relay laptops run their own copy of the relay code, so the summary
+      # says when a deploy changed it. It compares with what was live before
+      # this deploy, not with the commit before this one: "Rebase and merge"
+      # brings a pull request's commits to main in one push, and the 3.0.0
+      # merge was twenty-seven of them, with the relay's setup changed in an
+      # early one that HEAD^..HEAD never saw. The version remembered above is a
+      # Worker version, which names no commit, so the commit comes from the last
+      # Deploy run that succeeded, with the last release tag behind it. GitHub
+      # records a run that Checks started against main as it stood when Checks
+      # finished - the commit it deployed, unless a second merge landed while
+      # those checks ran.
       - name: Say whether the relay computers need updating
         if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          changed=$(git diff --name-only HEAD^ HEAD || true)
+          live=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy.yml/runs?status=success&per_page=10" \
+            --jq "[.workflow_runs[] | select(.id != $GITHUB_RUN_ID)][0].head_sha // empty" 2>/dev/null || true)
+          if [ -n "$live" ] && git cat-file -e "$live^{commit}" 2>/dev/null; then
+            echo "Comparing with $live, the commit of the last successful deploy"
+          else
+            live=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)
+            echo "Could not read the commit of the last successful deploy; comparing with the last release tag instead: ${live:-there is none}"
+          fi
+          changed=''
+          if [ -n "$live" ]; then changed=$(git diff --name-only "$live" HEAD || true); fi
           {
             echo "### Deployed"
             echo
             echo "Commit \`${{ github.event.workflow_run.head_sha || github.sha }}\` is live, and the smoke test passed."
+            if [ -z "$live" ]; then
+              echo
+              echo "Could not tell what was live before it, so this run cannot say whether the relay computers need updating."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
-          if echo "$changed" | grep -qE '^(agent/|scripts/(setup-relay|renew-solis-login|relay-hidden)\.|.*\.cmd$)'; then
+          # What runs on the relay laptops, and all the list below names: one
+          # merge can bring dozens of other scripts, which the laptops never run.
+          relay='^(agent/|scripts/(setup-relay|renew-solis-login|relay-hidden)\.|.*\.cmd$)'
+          if echo "$changed" | grep -qE "$relay"; then
             {
               echo
               echo "**The relay computers need updating.** This change touches the code that runs on them:"
               echo
               echo '```'
-              echo "$changed" | grep -E '^(agent/|scripts/|.*\.cmd$)' || true
+              echo "$changed" | grep -E "$relay" || true
               echo '```'
               echo
               echo "On each relay laptop, double-click \`setup-solarlens-relay.cmd\`, or \`renew-solis-login.cmd\` in the SolarLens folder."

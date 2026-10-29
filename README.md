@@ -1246,7 +1246,8 @@ reviewer, and nothing deploys until someone approves the run on GitHub.
 6. **If any of that fails, the previous version is put back automatically** and
    the run is marked failed, with the reason in its log.
 7. **The run's summary says whether the relay computers need updating**, when
-   the merge touched `agent/`, the relay scripts or a `.cmd`.
+   anything since the last successful deploy touched `agent/`, the relay
+   scripts or a `.cmd` - every commit a merge brought, not only its last.
 
 `.github/workflows/pages.yml` publishes the demo to GitHub Pages when `public/` or `demo/`
 changes - see [The demo on GitHub Pages](#the-demo-on-github-pages).
