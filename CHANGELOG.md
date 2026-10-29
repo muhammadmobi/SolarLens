@@ -18,6 +18,18 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **Money saved and CO₂ avoided.** A *Tariff* card in Settings, filled in by the
+  owner when ready: the currency, what a kWh bought costs, what one sold
+  earns, net metering, and how much CO₂ a kWh from the grid stands for. From
+  it, each system's page has a *Money and carbon* card (today, this month,
+  this year, lifetime), and Historical Data a *Saved* and a *CO₂ avoided*
+  column, by day, month or year, with the totals. A kWh used at home is worth
+  one bought; one exported earns the export price, or with net metering the
+  import price. A period whose export the vendor does not give is marked as an
+  upper bound. No tariff, no money anywhere: nothing is guessed. SolisCloud's
+  month and year exports are now read for it. `GET`, `PUT` and
+  `DELETE /api/settings/tariff`, and migration 0017.
+
 - **Output measured against the weather.** Each system's position is read
   from its vendor's plant record and kept for the owner alone, and every hour
   the Worker asks Open-Meteo - at the position rounded to about a kilometre -

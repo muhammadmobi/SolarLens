@@ -14,8 +14,8 @@
  * - The relay laptops, which push what SolisCloud's portal shows them to
  *   POST /api/ingest/*, each request carrying INGEST_TOKEN. The login does not
  *   touch them.
- * - The owner writing: signing a phone up for notifications, or forcing a
- *   poll. Those need the owner signed in, or API_TOKEN as a header - except
+ * - The owner writing: signing a phone up for notifications, setting the
+ *   tariff (/api/settings/tariff), or forcing a poll. Those need the owner signed in, or API_TOKEN as a header - except
  *   turning a phone's notifications off, which needs only that phone's own
  *   push address (see the middleware below).
  * - The sign-in routes under /auth (./auth/routes), and share links at /s/.
@@ -36,6 +36,7 @@ import { REFRESH_COOKIE, SESSION_COOKIE, type Caller, deviceLabel, identify, own
 import { timingSafeEqual } from './auth/crypto';
 import { locationOf, locations, refreshWeather, upsertLocation, weatherSince } from './weather';
 import { expectedToday } from './expected';
+import { getTariff, parseTariff, setTariff } from './settings';
 import { daily, deviceNetworks, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
 import { tzNameOf, tzOffsetSec } from './providers/units';
@@ -351,6 +352,32 @@ app.get('/api/locations', async (c) => {
   const alias = aliasFor(ids);
   c.header('Cache-Control', CACHE);
   return c.json({ now: nowSec(), locations: rows.map((r) => ({ id: alias(r.inverter_id), lat: r.lat, lng: r.lng })) });
+});
+
+/**
+ * The tariff the owner set in Settings, from which the page works out what the
+ * sun has saved and the CO2 it has avoided (./settings). Read by anyone who
+ * may read the dashboard, since the savings are shown to them too: prices and
+ * a carbon figure say nothing about who or where the owner is beyond a
+ * currency. `tariff` is null until the owner fills it in.
+ */
+app.get('/api/settings/tariff', async (c) => {
+  c.header('Cache-Control', CACHE);
+  return c.json({ tariff: await getTariff(c.env.DB) });
+});
+
+/** Set the tariff: the owner only, as every write under /api/ (the middleware above). */
+app.put('/api/settings/tariff', async (c) => {
+  const parsed = parseTariff(await c.req.json().catch(() => null));
+  if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+  await setTariff(c.env.DB, parsed.tariff);
+  return c.json({ tariff: parsed.tariff });
+});
+
+/** Forget the tariff, and with it every money figure on the page. */
+app.delete('/api/settings/tariff', async (c) => {
+  await setTariff(c.env.DB, null);
+  return c.json({ tariff: null });
 });
 
 /**

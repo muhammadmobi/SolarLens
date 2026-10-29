@@ -266,6 +266,8 @@
       '/api/status': { now, feeds: feeds.map((f) => ({ provider: f.provider, ok: f.ok, ts: f.ts })) },
       '/api/expected': { now, systems: expected },
       '/api/weather': { now, days: 2, from: now - 2 * 86400, hours: weatherHours },
+      // Invented prices, so the money figures have something to show.
+      '/api/settings/tariff': { tariff: { currency: 'EUR', importPrice: 0.28, exportPrice: 0.08, netMetering: false, co2KgPerKwh: 0.35 } },
       '/api/locations': { now, locations: SYSTEMS.map((s) => ({ id: s.id, lat: PLACES[s.id][0], lng: PLACES[s.id][1] })) },
       '/auth/status': { configured: true, password: true, passkeys: 1, required: false, role: 'owner', device: 'demo-this' },
       '/auth/settings': {
@@ -304,6 +306,8 @@
     }
     if (path === '/api/push/key') return json({ error: 'notifications are not part of the demo' }, 404);
     if (method !== 'GET') {
+      // The tariff form expects the tariff back; it gets the demo's own, unchanged.
+      if (path === '/api/settings/tariff') return json(sample(Math.floor(Date.now() / 1000))['/api/settings/tariff']);
       return json({ ok: true, required: false, signedOut: 1, id: 'demo', url: `${location.origin}${location.pathname}#/`, password: true });
     }
     const answers = sample(Math.floor(Date.now() / 1000));

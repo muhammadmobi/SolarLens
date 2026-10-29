@@ -138,18 +138,18 @@ test.describe('Settings, for the owner', () => {
     await page.goto('/#/settings');
     const box = page.locator('#req');
     await expect(box).not.toBeChecked();
-    await expect(page.locator('.switchrow')).toContainText('Off: anyone with the address');
+    await expect(page.locator('.switchrow', { has: page.locator('#req') })).toContainText('Off: anyone with the address');
     await box.check();
     await expect(page.locator('.authnote')).toHaveText('The dashboard is private now.');
     expect(world.required).toBe(true);
-    await expect(page.locator('.switchrow')).toContainText('On: only you');
+    await expect(page.locator('.switchrow', { has: page.locator('#req') })).toContainText('On: only you');
   });
 
   test('will not lock the owner out before there is a way to sign in', async ({ page }) => {
     await stub(page, { signedIn: 'owner', required: false, password: false });
     await page.goto('/#/settings');
     await expect(page.locator('#req')).toBeDisabled();
-    await expect(page.locator('.switchrow')).toContainText('Add a passkey or set a password first');
+    await expect(page.locator('.switchrow', { has: page.locator('#req') })).toContainText('Add a passkey or set a password first');
   });
 
   test('lists every signed-in device, and signs one out', async ({ page }) => {

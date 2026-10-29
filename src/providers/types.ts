@@ -162,6 +162,9 @@ export interface Metrics {
   gridExportTodayKwh: number | null;
   gridImportTotalKwh: number | null;
   gridExportTotalKwh: number | null;
+  /** This month's and this year's export, where the vendor gives them: what money saved needs. */
+  gridExportMonthKwh: number | null;
+  gridExportYearKwh: number | null;
   battChargeTodayKwh: number | null;
   battDischargeTodayKwh: number | null;
   battChargeTotalKwh: number | null;
@@ -186,6 +189,7 @@ export function emptyMetrics(): Metrics {
     loadTodayKwh: null, loadTotalKwh: null,
     gridImportTodayKwh: null, gridExportTodayKwh: null,
     gridImportTotalKwh: null, gridExportTotalKwh: null,
+    gridExportMonthKwh: null, gridExportYearKwh: null,
     battChargeTodayKwh: null, battDischargeTodayKwh: null,
     battChargeTotalKwh: null, battDischargeTotalKwh: null,
     selfUseTodayKwh: null, fullLoadHours: null,
