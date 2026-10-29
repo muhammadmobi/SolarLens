@@ -257,7 +257,11 @@ the new tools, and a report's parts as text. Tried on the owner's real data
 before release, it gained two more: `power_day` for part of a day and how
 steady the power was, and `outages` for since when a system has been quiet and
 when it last made power - with a reader that takes times of day, a system by
-one word of its name, and typing slips in the words it routes on.
+one word of its name, and typing slips in the words it routes on. Then a
+spread of everyday questions, asked of the same data, filled the gaps left: a
+`battery` tool, the money saved and the share used at home, days above an
+amount, an inverter's temperature, why a system went quiet - its datalogger,
+or the relay and its login - and a plain "no forecast" for tomorrow.
 
 ## Order
 

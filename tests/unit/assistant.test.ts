@@ -164,6 +164,19 @@ describe('the questions an owner asks of a day, as typed', () => {
     expect(ask('how much did I buy from the grid last week?')).toEqual([{ tool: 'energy', args: { measure: 'imported', range: 'last_week' } }]);
   });
 
+  it('reads the battery, the money, the share used at home, the temperature, a count of days, the relay and what is still to come', () => {
+    expect(ask('what is my battery percentage now')).toEqual([{ tool: 'battery', args: {} }]);
+    expect(ask('how much did the battery charge yesterday')).toEqual([{ tool: 'battery', args: { range: 'yesterday' } }]);
+    expect(ask('how much money did I save this month')).toEqual([{ tool: 'energy', args: { measure: 'saved', range: 'this_month' } }]);
+    expect(ask('what percent of my solar did i use myself')).toEqual([{ tool: 'energy', args: { measure: 'self' } }]);
+    expect(ask('what was the inverter temperature yesterday on the orchard')).toEqual([{ tool: 'status_now', args: { system: 'Orchard Hybrid' } }]);
+    expect(ask('how many days did riverside make more than 50 kwh')).toEqual([{ tool: 'stats', args: { above: 50, system: 'Riverside Ongrid' } }]);
+    expect(ask('how many days under 10 kwh last month')).toEqual([{ tool: 'stats', args: { below: 10, range: 'last_month' } }]);
+    expect(ask('is orchard online')).toEqual([{ tool: 'outages', args: { system: 'Orchard Hybrid' } }]);
+    expect(ask('when does the riverside login expire')).toEqual([{ tool: 'outages', args: { system: 'Riverside Ongrid' } }]);
+    expect(ask('how much will I make tomorrow')).toEqual([]);
+  });
+
   it("keeps a day's hours through a follow-up, and moves the day or the system", () => {
     const before = [{ tool: 'power_day', args: { date: 'today', start: '14:00', end: '16:00' } }] as Call[];
     expect(ask('and yesterday?', before)).toEqual([{ tool: 'power_day', args: { date: 'yesterday', start: '14:00', end: '16:00' } }]);
@@ -304,6 +317,14 @@ describe('a turn', () => {
       { role: 'user', content: 'and the month before?' },
     ], false);
     expect(r).toMatchObject({ understood: 'solarlens', worded: 'solarlens', calls: [{ tool: 'energy', args: { measure: 'exported', from: '2026-07-01', to: '2026-07-31' } }] });
+  });
+
+  it('says it has no forecast when asked about what is to come, rather than giving a figure about something else', async () => {
+    h = createHarness();
+    await seed(h.env.DB);
+    const r = await turn([{ role: 'user', content: 'how much will I make tomorrow?' }], false);
+    expect(r).toMatchObject({ kind: 'chat', calls: [], results: [] });
+    expect(r.answer.startsWith('SolarLens has no forecast: it reports what your systems have made')).toBe(true);
   });
 });
 

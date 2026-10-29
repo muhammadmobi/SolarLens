@@ -38,6 +38,7 @@ const TITLES: Record<string, string> = {
   outages: 'Outages, and the last power',
   energy: 'Energy over a period',
   power_day: "A day's power, hour by hour",
+  battery: 'The battery',
   compare_systems: 'Systems compared per kWp',
   faults: 'Faults',
   day_report: 'Why a day was low',
