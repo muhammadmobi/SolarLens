@@ -150,6 +150,8 @@ stays open for monitoring.
 | `src/tools.ts` | The read-only tools every question goes through - Ask SolarLens, the agents, and the MCP server of phase 12: status now, energy, systems compared, faults, a day explained, the performance trend. Arguments checked before anything runs; every figure computed and labelled here. |
 | `src/ai.ts` | The one place that talks to Workers AI: the model, the daily cap (per UTC day, in kv), JSON replies. |
 | `src/ask.ts` | Ask SolarLens: the model chooses a tool, the tool computes, the model words it, and `numbersAgree` holds the words to the figures. |
+| `src/mcp.ts` | The MCP server at `/mcp`: JSON-RPC over Streamable HTTP, answering `initialize`, `ping`, `tools/list` and `tools/call` from `src/tools.ts`. Stateless: no event stream, no session. |
+| `src/oauth.ts` | OAuth for the MCP server: discovery documents, dynamic registration, the approval page (drawn here, not in `public/`), codes, rotating tokens, revocation, and the connected apps for Settings. |
 | `src/agents.ts` | The weekly health check (flags a system slowly making less; the alert is in `src/push.ts`) and the weekly report, run once a week from the cron. |
 | `src/sensors.ts` | `/api/sensors`, what Home Assistant reads: flat, fixed units, the page's own offline rule. |
 | `src/push.ts` | Phone notifications (Web Push): signing with `VAPID_KEY`, who is signed up, what is worth announcing, and the told-once state. |
@@ -188,6 +190,7 @@ D1, migrations in `migrations/` applied in order. Additive only - see section 12
 | `devices` | inverter, logger, battery or meter | Serial, firmware, signal strength, per-string DC. A logger's `logger` (link, signal bars, uptime, make date) is public |
 | `device_network` | datalogger | Its operator and cell, or MAC address. Owner only, never served - and a table of its own, because a Worker rolled back to 2.10 would serve any new column on `devices` |
 | `plant_location` | system | Its position. Owner-only; sent to Open-Meteo only rounded to about a kilometre |
+| `oauth_clients` · `oauth_codes` · `oauth_grants` · `oauth_access` | registered app · approval · connected app · access token | The MCP server's OAuth; only hashes of codes and tokens. A grant is a connected app, revoked from Settings |
 | `agent_reports` | report a week | The weekly report and each system's health check; `flagged` when a system is slowly making less, which the alerts read. Kept a year |
 | `channels` | place alerts are posted to | ntfy, Telegram, Discord or a webhook. The token or address in `secret`, AES-GCM encrypted under a key derived from `API_TOKEN`; only a `label` is ever served, and only to the owner. At most five |
 | `app_settings` | setting | The owner's tariff and groups, as JSON; read by anyone who may read the dashboard, written by the owner |
@@ -326,7 +329,7 @@ decides it:
 |---|---|---|
 | Cloudflare account login | The owner's password manager | Only the owner can recover it |
 | Cloudflare API token, for deploying | GitHub → environment `production` → `CLOUDFLARE_API_TOKEN` | Roll it in Cloudflare and update the secret; it is shown once |
-| `API_TOKEN` (the owner's key: sign-in setup code, session signing, password pepper, write gate) | Cloudflare secret + local `.dev.vars` | `scripts/rotate-tokens.ps1 -Api`. Devices and passkeys keep working; **the password must be set again** (Settings → Forgot your password?, with the new token as the setup code), and **each place under Alerts elsewhere added again**, since its token was encrypted with a key derived from this one |
+| `API_TOKEN` (the owner's key: sign-in setup code, session signing, password pepper, write gate) | Cloudflare secret + local `.dev.vars` | `scripts/rotate-tokens.ps1 -Api`. Devices and passkeys keep working; **the password must be set again** (Settings → Forgot your password?, with the new token as the setup code), and **each place under Alerts elsewhere added again**, since its token was encrypted with a key derived from this one. Apps connected to the MCP server are not affected |
 | The owner's password and passkeys | The owner; the database holds a keyed hash and public keys only | *Forgot your password?* with the setup code; a passkey needs only its own device |
 | `INGEST_TOKEN` (lets a relay push) | Cloudflare secret + `.dev.vars` on each relay laptop | `scripts/rotate-tokens.ps1 -Ingest`, then re-run the installer on each laptop |
 | SolarMan session tokens | `.dev.vars`, refreshed automatically | Re-capture from the portal; `README.md` has the steps |

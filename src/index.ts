@@ -20,7 +20,9 @@
  * - Home Assistant, reading /api/sensors on a timer - with a share link as a
  *   bearer token when the dashboard is private.
  * - Ask SolarLens (/api/ask), for anyone signed in - the owner, or someone
- *   with a share link - since each question spends the day's model calls. Those need the owner signed in, or API_TOKEN as a header - except
+ *   with a share link - since each question spends the day's model calls.
+ * - AI apps outside SolarLens, through the MCP server at /mcp (./mcp), each
+ *   with an OAuth token from an approval the owner gave once (./oauth). Those need the owner signed in, or API_TOKEN as a header - except
  *   turning a phone's notifications off, which needs only that phone's own
  *   push address (see the middleware below).
  * - The sign-in routes under /auth (./auth/routes), and share links at /s/.
@@ -34,6 +36,7 @@
  * then decides whether anything is worth a phone notification.
  */
 import { Hono, type Context, type Next } from 'hono';
+import { cors } from 'hono/cors';
 import { getCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { auth, applyCookies, openShareLink, type AuthVars } from './auth/routes';
@@ -48,6 +51,11 @@ import { aiModel, callsUsed, dailyCalls, hasAi } from './ai';
 import { ask } from './ask';
 import { latestReports, runWeeklyAgents } from './agents';
 import { TOOLS, jsonSchemaOf, runTool } from './tools';
+import {
+  appForToken, approve, authorizationServer, checkAuthorization, connectedApps, consentPage, deny, errorPage,
+  protectedResource, register, registration, revokeGrant, revokeToken, signInPage, token,
+} from './oauth';
+import { handleMcp } from './mcp';
 import { sensors } from './sensors';
 import { daily, deviceNetworks, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
@@ -167,7 +175,7 @@ const identifyCaller = async (c: Context<{ Bindings: Env; Variables: AuthVars }>
   c.set('caller', caller);
   return next();
 };
-for (const path of ['/api/*', '/auth', '/auth/*', '/s/*']) app.use(path, identifyCaller);
+for (const path of ['/api/*', '/auth', '/auth/*', '/s/*', '/oauth/authorize']) app.use(path, identifyCaller);
 
 /**
  * /auth?t=<API_TOKEN>: the 2.x way to unlock a device, kept as a back door
@@ -500,6 +508,138 @@ app.get('/api/tools/:name', async (c) => {
 app.get('/api/agents', async (c) => {
   c.header('Cache-Control', CACHE);
   return c.json(await latestReports(c.env.DB));
+});
+
+// ---------- the MCP server, and the OAuth that guards it (./mcp, ./oauth) ----------
+
+/**
+ * Open to scripts on any site, as an MCP client or an app's OAuth library may
+ * be one: these answer only to a bearer token or a PKCE verifier, never to a
+ * cookie, so another site gains nothing it could not do from anywhere. The
+ * approval page is not among them: it answers only the owner's own browser.
+ */
+const openCors = cors({
+  origin: '*',
+  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Authorization', 'Content-Type', 'Mcp-Session-Id', 'MCP-Protocol-Version', 'Last-Event-ID'],
+  exposeHeaders: ['WWW-Authenticate', 'Mcp-Session-Id'],
+  maxAge: 86400,
+});
+for (const path of ['/mcp', '/.well-known/*', '/oauth/token', '/oauth/register', '/oauth/revoke']) app.use(path, openCors);
+
+const originOf = (c: Context) => new URL(c.req.url).origin;
+
+/** Where the MCP server's tokens come from (RFC 9728), at the root and at the resource's own path. */
+for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
+  app.get(path, (c) => c.json(protectedResource(originOf(c))));
+}
+/** The authorization server's endpoints (RFC 8414); some clients look for them under the resource's path too. */
+for (const path of ['/.well-known/oauth-authorization-server', '/.well-known/oauth-authorization-server/mcp']) {
+  app.get(path, (c) => c.json(authorizationServer(originOf(c))));
+}
+
+/** An app registers itself (RFC 7591): a public client, with PKCE and no secret. */
+app.post('/oauth/register', async (c) => {
+  const out = await register(c.env.DB, await c.req.json().catch(() => null));
+  c.header('Cache-Control', 'no-store');
+  if ('error' in out) return c.json({ error: out.error, error_description: out.description }, 400);
+  return c.json(registration(out.client), 201);
+});
+
+/**
+ * The approval page. A link naming an unknown app or an address it did not
+ * register is answered here, never sent on; anything else wrong goes back to
+ * the app, as OAuth says. The owner, signed in on this browser, is asked;
+ * anyone else is asked to sign in first, and brought back here after.
+ */
+app.get('/oauth/authorize', async (c) => {
+  const params = c.req.query();
+  const checked = await checkAuthorization(c.env.DB, params, originOf(c));
+  c.header('Cache-Control', 'no-store');
+  if ('page' in checked) return c.html(errorPage(checked.page), 400);
+  if ('redirect' in checked) return c.redirect(checked.redirect, 302);
+  const caller = c.get('caller');
+  if (caller.role !== 'owner' || (caller.via !== 'session' && caller.via !== 'refresh')) {
+    return c.html(signInPage(`/oauth/authorize?${new URL(c.req.url).searchParams}`, caller.role === 'viewer'));
+  }
+  return c.html(consentPage(checked.ok, params));
+});
+
+/**
+ * The owner's choice, posted by the approval page: from a signed-in browser
+ * only - its session cookie never leaves this site, and a script elsewhere
+ * cannot post JSON here without a CORS answer it never gets. The request is
+ * checked again, whole, before a code is made.
+ */
+app.post('/oauth/authorize', async (c) => {
+  const origin = originOf(c);
+  const from = c.req.header('Origin');
+  if (from && from !== origin) return c.json({ error: 'forbidden' }, 403);
+  const caller = c.get('caller');
+  if (caller.role !== 'owner' || (caller.via !== 'session' && caller.via !== 'refresh')) {
+    return c.json({ error: 'Only the owner, signed in on this browser, can connect an app.' }, 401);
+  }
+  const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body) return c.json({ error: 'The request is not JSON.' }, 400);
+  const params = Object.fromEntries(Object.entries(body).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+  const checked = await checkAuthorization(c.env.DB, params, origin);
+  c.header('Cache-Control', 'no-store');
+  if ('page' in checked) return c.json({ error: checked.page }, 400);
+  if ('redirect' in checked) return c.json({ redirect: checked.redirect });
+  return c.json({ redirect: body.allow === true ? await approve(c.env.DB, checked.ok, origin) : deny(checked.ok, origin) });
+});
+
+/** A token endpoint's fields: a form, as OAuth sends them, or JSON, which some clients do. */
+async function formOf(c: Context): Promise<Record<string, string | undefined>> {
+  const text = await c.req.text().catch(() => '');
+  if ((c.req.header('content-type') ?? '').includes('application/json')) {
+    try {
+      const j = JSON.parse(text) as Record<string, unknown>;
+      return Object.fromEntries(Object.entries(j).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+    } catch { return {}; }
+  }
+  return Object.fromEntries(new URLSearchParams(text));
+}
+
+/** The code and its PKCE verifier for tokens, or a refresh token for the next pair. Never cached. */
+app.post('/oauth/token', async (c) => {
+  const out = await token(c.env.DB, await formOf(c), originOf(c));
+  c.header('Cache-Control', 'no-store');
+  c.header('Pragma', 'no-cache');
+  return c.json(out.body, out.status as 200);
+});
+
+/** An app disconnects itself (RFC 7009). Always 200: the answer never says which tokens exist. */
+app.post('/oauth/revoke', async (c) => {
+  await revokeToken(c.env.DB, (await formOf(c)).token);
+  return c.body(null, 200);
+});
+
+/**
+ * The MCP server. An access token from an approved app, or 401 with the way to
+ * get one (RFC 9728) - which is how an MCP client finds the approval page on
+ * its own. The owner's cookie is not enough: an app is always an app.
+ */
+app.all('/mcp', async (c) => {
+  const given = bearer(c.req.header('Authorization'));
+  const connected = given ? await appForToken(c.env.DB, given) : null;
+  if (!connected) {
+    c.header('WWW-Authenticate', `Bearer resource_metadata="${originOf(c)}/.well-known/oauth-protected-resource/mcp"${given ? ', error="invalid_token"' : ''}`);
+    return c.json({ error: given ? 'invalid_token' : 'unauthorized', error_description: 'Connect this app to SolarLens first: it will be asked to sign in.' }, 401);
+  }
+  return handleMcp(c.env, c.req.raw);
+});
+
+/** The apps connected to the MCP server, for the owner's Settings, and its address. */
+app.get('/api/settings/apps', async (c) => {
+  if (c.get('caller').role !== 'owner') return c.json({ error: 'owner only' }, 401);
+  c.header('Cache-Control', CACHE);
+  return c.json({ apps: await connectedApps(c.env.DB), mcp: `${originOf(c)}/mcp` });
+});
+
+/** Disconnect one: its tokens stop at once. */
+app.delete('/api/settings/apps/:id', async (c) => {
+  return (await revokeGrant(c.env.DB, c.req.param('id'))) ? c.json({ ok: true }) : c.json({ error: 'There is no such app connected.' }, 404);
 });
 
 // ---------- the places alerts are posted to (./channels) ----------

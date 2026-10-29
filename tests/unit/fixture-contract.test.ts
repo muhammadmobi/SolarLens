@@ -160,7 +160,7 @@ describe('the demo matches what the Worker sends', () => {
   });
 
   it('answers every read the dashboard makes', () => {
-    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/api/settings/groups', '/api/settings/channels', '/api/ask/status', '/api/agents', '/auth/status', '/auth/settings']) {
+    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/api/settings/groups', '/api/settings/channels', '/api/ask/status', '/api/agents', '/api/settings/apps', '/auth/status', '/auth/settings']) {
       expect(demo, path).toHaveProperty([path]);
     }
   });
@@ -218,6 +218,16 @@ describe('the demo matches what the Worker sends', () => {
     for (const hc of mine.health) expect(fields(hc)).toEqual(fields(real.health[0]));
     const ids = new Set(rowsOf(demo['/api/latest'], 'inverters').map((i) => i.id));
     for (const hc of mine.health) expect(ids.has(hc.system)).toBe(true);
+  });
+
+  it('its connected apps have the fields the Worker shows the owner', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await h.env.DB.prepare("INSERT INTO oauth_clients (id, name, redirect_uris, created_at) VALUES ('c', 'An app', '[\"https://app.example.org/cb\"]', ?1)").bind(now).run();
+    await h.env.DB.prepare("INSERT INTO oauth_grants (id, client_id, scope, refresh_hash, rotated_at, created_at, last_used_at, expires_at) VALUES ('g', 'c', 'solarlens:read', 'x', ?1, ?1, ?1, ?2)").bind(now, now + 86400).run();
+    const real = (await (await h.fetch('/api/settings/apps', { headers: bearer('api-token-for-tests') })).json()) as { apps: Record<string, unknown>[]; mcp: string };
+    const mine = demo['/api/settings/apps'] as { apps: Record<string, unknown>[]; mcp: string };
+    expect(fields(mine)).toEqual(fields(real));
+    for (const a of mine.apps) expect(fields(a)).toEqual(fields(real.apps[0]));
   });
 
   it('its groups name systems it has', () => {

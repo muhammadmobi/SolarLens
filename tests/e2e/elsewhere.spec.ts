@@ -202,8 +202,8 @@ test.describe('Home Assistant', () => {
     // A battery sensor for the system that has one, and only for it.
     expect(text).toContain('value_template: "{{ value_json.systems.s2.battery_soc }}"');
     expect(text).not.toContain('systems.s1.battery_soc');
-    await page.getByRole('button', { name: 'Copy' }).click();
-    await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
+    await page.getByRole('button', { name: 'Copy the Home Assistant configuration' }).click();
+    await expect(page.locator('#ha-copy')).toHaveText('Copied');
     // The system clipboard may write each line break its own way (CR LF on Windows).
     expect((await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n')).toBe(text);
   });

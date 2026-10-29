@@ -4234,9 +4234,21 @@
   /** A passkey prompt the person closed is not an error worth a paragraph. */
   const passkeyError = (e) => (e && e.name === 'NotAllowedError' ? 'The passkey prompt was closed or timed out.' : e.message);
 
-  /** Signed in: forget the refusal and draw whatever was asked for. */
+  /**
+   * Where an app's approval page (/oauth/authorize) sent a signed-out owner
+   * to sign in from, to go back to once they have: only ever that page, on this
+   * site - never another address a link might carry.
+   */
+  const approvalNext = () => {
+    const next = new URLSearchParams(location.search).get('next');
+    return next && next.startsWith('/oauth/authorize?') ? next : null;
+  };
+
+  /** Signed in: forget the refusal and draw whatever was asked for - or go back to an app's approval. */
   function signedIn() {
     state.error = null;
+    const next = approvalNext();
+    if (next) { location.assign(next); return; }
     if (location.hash === '#/signin') location.hash = '#/';
     refresh();
   }
@@ -4342,6 +4354,8 @@
     }
     // The places alerts are posted to: the owner's alone, like this page.
     const chans = await authGet('/api/settings/channels').catch(() => null);
+    // The AI apps connected to the MCP server, and its address.
+    const apps = await authGet('/api/settings/apps').catch(() => null);
     if (location.hash !== '#/settings') return;
     const canLock = s.password || s.passkeys.length;
     const devices = s.devices.map((d) => `<tr>
@@ -4362,6 +4376,7 @@
 
     view.innerHTML = `<div class="stack settings">
       ${note ? `<p class="authnote" role="status">${esc(note)}</p>` : ''}
+      ${approvalNext() ? `<p class="authnote">You are signed in. <a href="${esc(approvalNext())}">Go back to connecting the app</a>.</p>` : ''}
       <section class="card"><h2>Who can see this dashboard</h2><div class="body">
         <label class="switchrow"><input type="checkbox" id="req" ${s.required ? 'checked' : ''} ${canLock || s.required ? '' : 'disabled'}>
           <span><strong>Require sign-in to view</strong>
@@ -4401,6 +4416,7 @@
 
       ${channelsCard(chans)}
       ${homeAssistantCard(s)}
+      ${appsCard(apps)}
 
       <section class="card"><h2>Passkeys</h2><div class="body">
         <p class="cardnote">Sign in with a fingerprint, a face or the device PIN. Nothing that could sign you in is stored on the server.</p>
@@ -4490,6 +4506,14 @@
       const token = made.url.slice(made.url.lastIndexOf('/s/') + 3);
       await renderSettings('Token made. It is in the configuration below, and shown only this once: copy it now.');
       if ($('ha-yaml')) $('ha-yaml').textContent = haYaml(token);
+    });
+    // Connected apps: copy the address; disconnect one.
+    if ($('mcp-copy')) $('mcp-copy').onclick = async () => {
+      try { await navigator.clipboard.writeText($('mcp-url').value); $('mcp-copy').textContent = 'Copied'; } catch { $('mcp-url').select(); }
+    };
+    for (const b of view.querySelectorAll('[data-unapp]')) b.onclick = act(async () => {
+      await apiSend('DELETE', `/api/settings/apps/${encodeURIComponent(b.dataset.unapp)}`);
+      redo('Disconnected. It can no longer read anything here.');
     });
     $('ha-copy').onclick = async () => {
       try { await navigator.clipboard.writeText($('ha-yaml').textContent); $('ha-copy').textContent = 'Copied'; } catch {
@@ -4664,8 +4688,27 @@
       ${s.required ? `<p class="cardnote">The dashboard is private, so Home Assistant needs a token of its own: a share link that can only read. It is listed under Share to view, where taking it back stops it.</p>
         <button type="button" class="authbtn" id="ha-token">Make a token for Home Assistant</button>` : ''}
       <pre class="yaml" id="ha-yaml" tabindex="0" aria-label="Home Assistant configuration">${esc(haYaml(s.required ? null : undefined))}</pre>
-      <div class="formrow"><button type="button" class="rangebtn" id="ha-copy">Copy</button></div>
+      <div class="formrow"><button type="button" class="rangebtn" id="ha-copy" aria-label="Copy the Home Assistant configuration">Copy</button></div>
       <p class="cardnote">For alerts in Home Assistant as well, add a Webhook under Alerts elsewhere, with the address of an automation's webhook trigger.</p>
+    </div></section>`;
+  }
+
+  /**
+   * Connected apps: the AI apps - Claude, an IDE, anything that speaks MCP -
+   * the owner has let read SolarLens through its MCP server (src/mcp.ts), and
+   * the address to give a new one. An app asks to be connected on its own, and
+   * the owner approves it once, on SolarLens's own page (src/oauth.ts).
+   */
+  function appsCard(apps) {
+    if (!apps) return '';
+    const items = (apps.apps ?? []).map((a) => `<li><span><strong>${esc(a.name)}</strong>
+        <small class="faint">${a.redirect_to ? `answers to ${esc(a.redirect_to)} · ` : ''}connected ${esc(fmtDate(a.connected_at))} · last used ${esc(ago(a.last_used_at))}</small></span>
+        <button type="button" class="rangebtn" data-unapp="${esc(a.id)}">Disconnect</button></li>`).join('');
+    return `<section class="card"><h2>Connected apps</h2><div class="body">
+      <p class="cardnote">AI apps - Claude, an IDE, anything that speaks MCP - can ask SolarLens the same read-only questions as the Ask tab. Give the app this address; it sends you to a page here to approve it, once, and stays connected until you disconnect it.</p>
+      <div class="sharelink"><input readonly id="mcp-url" value="${esc(apps.mcp)}" aria-label="The MCP server's address"><button type="button" class="authbtn" id="mcp-copy" aria-label="Copy the MCP address">Copy</button></div>
+      <ul class="authlist">${items || '<li><span class="faint">No app connected.</span></li>'}</ul>
+      <p class="cardnote">An app can read and nothing more. docs/mcp.md in the repository says how to add SolarLens to Claude and to other apps.</p>
     </div></section>`;
   }
 
@@ -4699,6 +4742,7 @@
       ['A day hour by hour: made against used, and the peaks', `${tab('#/analysis', 'Analysis')} - any of the last seven days, one system or all`],
       ['Put the systems you watch first, or sort them into groups', `the star on a system's page (this browser only); groups are set by the owner under ${tab('#/settings', 'Settings')}`],
       ['Get alerts on ntfy, Telegram or Discord, and a summary every Monday', `${tab('#/settings', 'Settings')} - Alerts elsewhere`],
+      ['Ask SolarLens from Claude or another AI app', `${tab('#/settings', 'Settings')} - Connected apps: the MCP address, and each app you have connected`],
       ['Show SolarLens in Home Assistant', `${tab('#/settings', 'Settings')} - Home Assistant`],
       ['See every system on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
       ['See one system on its own, in full', `${tab('#/', 'Overview')} - tap the system`],

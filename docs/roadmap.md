@@ -216,6 +216,16 @@ available whether the laptops are on or off; with the relays off, SolisCloud
 figures simply stop at the last reading. It is protected by OAuth tied to the
 owner's login: an app is approved once, and stays connected.
 
+**As built:** the six tools of `src/tools.ts`, unchanged, over MCP's Streamable
+HTTP in its simplest form - JSON answers, no event stream, no session - so the
+Worker stays stateless. SolarLens is its own authorization server: the MCP
+spec's discovery documents, dynamic registration of public clients, PKCE with
+S256, and an approval page the Worker draws, which only the owner signed in on
+that browser can answer - not a share link, not `API_TOKEN`. Refresh tokens
+rotate and last a year from their last use; a copied one, or a code used twice,
+disconnects the app. Settings lists the apps connected and disconnects one at a
+tap.
+
 ## Order
 
 - **1 first**: its fixture contract keeps the test data honest for every later phase.

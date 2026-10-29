@@ -9,6 +9,7 @@
  * run against a Worker rather than trusted.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, inject, it } from 'vitest';
 import { authenticator } from '../helpers/passkey';
@@ -175,6 +176,57 @@ describe('signing in, in workerd', () => {
     const tools = (await (await fetch(url('/api/tools'), { headers: owner })).json()) as { tools: unknown[] };
     expect(tools.tools).toHaveLength(6);
     expect((await fetch(url('/api/ask'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"tool":"status_now"}' })).status).toBe(401);
+  });
+
+  it('connects an AI app over OAuth - registered, approved by the owner, PKCE - and answers it over MCP', async () => {
+    const redirect = 'https://app.example.org/oauth/callback';
+    const registered = await fetch(url('/oauth/register'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_name: 'Made-up Assistant', redirect_uris: [redirect] }),
+    });
+    expect(registered.status).toBe(201);
+    const { client_id } = (await registered.json()) as { client_id: string };
+
+    // PKCE, as the app makes it: a verifier, and its SHA-256 as the challenge.
+    const verifier = 'an-integration-pkce-verifier-that-is-long-enough-0123456789';
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+    const params = { response_type: 'code', client_id, redirect_uri: redirect, code_challenge: challenge, code_challenge_method: 'S256', state: 'st' };
+    const approval = await fetch(url(`/oauth/authorize?${new URLSearchParams(params)}`), { headers: { cookie: b.header() } });
+    expect(await approval.text()).toContain('Connect <strong>Made-up Assistant</strong> to SolarLens?');
+    const decided = await fetch(url('/oauth/authorize'), {
+      method: 'POST', headers: { 'content-type': 'application/json', cookie: b.header(), origin: new URL(base).origin },
+      body: JSON.stringify({ ...params, allow: true }),
+    });
+    const code = new URL(((await decided.json()) as { redirect: string }).redirect).searchParams.get('code')!;
+    const issued = await fetch(url('/oauth/token'), {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id, redirect_uri: redirect }).toString(),
+    });
+    expect(issued.status).toBe(200);
+    const tokens = (await issued.json()) as { access_token: string; refresh_token: string };
+
+    const rpc = async (token: string, body: unknown) => fetch(url('/mcp'), {
+      method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const init = (await (await rpc(tokens.access_token, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'it', version: '1' } } })).json()) as { result: { protocolVersion: string } };
+    expect(init.result.protocolVersion).toBe('2025-06-18');
+    expect((await rpc(tokens.access_token, { jsonrpc: '2.0', method: 'notifications/initialized' })).status).toBe(202);
+    const called = (await (await rpc(tokens.access_token, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'status_now', arguments: {} } })).json()) as { result: { structuredContent: { facts: Record<string, unknown> } } };
+    expect(called.result.structuredContent.facts.systems).toBe(2);
+
+    // Renewed, and then disconnected from Settings: the app is refused at once.
+    const renewed = (await (await fetch(url('/oauth/token'), {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id }).toString(),
+    })).json()) as { access_token: string };
+    expect((await rpc(renewed.access_token, { jsonrpc: '2.0', id: 3, method: 'ping' })).status).toBe(200);
+    const apps = (await (await fetch(url('/api/settings/apps'), { headers: { cookie: b.header() } })).json()) as { apps: { id: string; name: string }[] };
+    expect(apps.apps.map((a) => a.name)).toEqual(['Made-up Assistant']);
+    await fetch(url(`/api/settings/apps/${apps.apps[0].id}`), { method: 'DELETE', headers: { cookie: b.header() } });
+    const refused = await rpc(renewed.access_token, { jsonrpc: '2.0', id: 4, method: 'ping' });
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get('www-authenticate')).toContain('resource_metadata=');
   });
 });
 

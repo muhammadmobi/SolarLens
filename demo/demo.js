@@ -311,6 +311,11 @@
       '/api/weather': { now, days: 2, from: now - 2 * 86400, hours: weatherHours },
       // Invented prices, so the money figures have something to show.
       '/api/settings/tariff': { tariff: { currency: 'EUR', importPrice: 0.28, exportPrice: 0.08, netMetering: false, co2KgPerKwh: 0.35 } },
+      // One AI app connected to the MCP server, as Settings lists it.
+      '/api/settings/apps': {
+        apps: [{ id: 'demo-app', name: 'Claude', redirect_to: 'claude.ai', connected_at: now - 12 * 86400, last_used_at: now - 2 * 3600 }],
+        mcp: 'https://your-solarlens.example.com/mcp',
+      },
       // One place alerts go, as Settings lists it: a hint of where, never the topic itself.
       '/api/settings/channels': {
         channels: [{ id: 'demo-ntfy', kind: 'ntfy', name: 'Phone', label: 'ntfy.sh · topic …ab', alerts: true, weekly: true,

@@ -29,6 +29,7 @@ data, with no server behind it.
 - **Your systems, in your order.** Star the systems you watch and they come first; sort them into groups and the Overview shows each group under its own heading and total.
 - **What the sun has saved.** Set your tariff in Settings - what a kWh costs to buy, what one earns when sold, net metering or not, and the grid's CO₂ per kWh - and each system's page says what it has saved today, this month, this year and in its life, and History adds what each day, month or year was worth. Until you set it, no money is shown at all.
 - **Ask it in words.** "Which month produced the most this year?", "Why was yesterday low?" - a model on Workers AI chooses which figures answer it, SolarLens works out every number, and the answer comes with the table it came from. A sentence stating a number the figures do not hold is thrown out.
+- **Ask from Claude, or any AI app.** SolarLens is an MCP server at `/mcp`: approve an app once, on SolarLens's own page, and it can ask the same read-only questions - whether the relay laptops are on or off.
 - **It watches for slow decline.** Every Monday each system's output is set against the sunlight on its panels; a system making 8% less than it did - dirt, shade, a string down - is flagged and told like any alert, and a short report on the week goes out with the summary.
 - **Told where you already look.** The same alerts a phone gets, and a summary every Monday morning, posted to ntfy, Telegram, Discord or any webhook - each told once, with the tokens kept encrypted. No email.
 - **In Home Assistant.** Every figure as a sensor - power, energy, battery, online or not - with the configuration written for you, and a read-only token when the dashboard is private.
@@ -55,7 +56,7 @@ data, with no server behind it.
 3. [Quick start (≈10 minutes)](#quick-start-10-minutes)
 4. [Getting credentials](#getting-credentials) — [SolisCloud](#soliscloud-official-api-key) · [SolarMan](#solarman-official-business-api) · [SolarMan fallback](#solarman-browser-session-fallback)
 5. [SolisCloud relay agent](#soliscloud-relay-agent) — [one command on Windows](#one-command-on-windows) · [more than one machine](#running-it-on-more-than-one-machine) · [replacing a token](#replacing-a-token)
-6. [Notifications on your phone](#notifications-on-your-phone) · [Alerts elsewhere, and Home Assistant](#alerts-elsewhere-and-home-assistant) · [Ask SolarLens, and the agents](#ask-solarlens-and-the-agents) · [Signing in, and making it private](#signing-in-and-making-it-private) · [The demo on GitHub Pages](#the-demo-on-github-pages)
+6. [Notifications on your phone](#notifications-on-your-phone) · [Alerts elsewhere, and Home Assistant](#alerts-elsewhere-and-home-assistant) · [Ask SolarLens, and the agents](#ask-solarlens-and-the-agents) · [SolarLens as an MCP server](#solarlens-as-an-mcp-server) · [Signing in, and making it private](#signing-in-and-making-it-private) · [The demo on GitHub Pages](#the-demo-on-github-pages)
 7. [Configuration reference](#configuration-reference)
 8. [Local development](#local-development)
 9. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request) · [where the reports are](#where-the-reports-are)
@@ -540,6 +541,21 @@ faults, or a system that made less than its sunlight allowed.
 How it works, what the model sees, and how to set it up:
 [docs/ask-solarlens.md](docs/ask-solarlens.md).
 
+## SolarLens as an MCP server
+
+AI apps outside SolarLens - Claude, an IDE, anything that speaks the Model
+Context Protocol - can ask SolarLens the same questions as the Ask tab, through
+the MCP server at **`https://<your SolarLens>/mcp`** (Settings → Connected
+apps shows it). It offers the same six read-only tools, runs inside the Worker
+on Cloudflare, and answers whether the relay laptops are on or off.
+
+The first time an app connects, it opens SolarLens's approval page: sign in if
+asked, check where the answer will be sent, and **Allow**. The app then stays
+connected - its tokens renew themselves - until you disconnect it under
+Connected apps. Only the owner, signed in on that browser, can approve an app;
+an app can read and nothing more. OAuth 2.1 with PKCE and dynamic registration,
+as the MCP authorization spec asks: see [docs/mcp.md](docs/mcp.md).
+
 ## Signing in, and making it private
 
 SolarLens 3.0 has an owner login. It changes nothing until you use it: the
@@ -688,7 +704,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**694 unit tests**, **564 end-to-end tests** (282 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **12 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**725 unit tests**, **576 end-to-end tests** (288 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), **13 integration tests** against the real Worker (`npm run test:integration`) and **12 screenshot comparisons** (`npm run test:visual`), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -742,6 +758,8 @@ Thirty-one files, one concern each. Most are pure-function tests against fixture
 - **`auth.test.ts`** — the owner login through the Worker, with a cookie jar and a moving clock: setup with the setup code, the password and its lockout (per caller and for everyone), the session renewed silently when its hour is up and a device kept in across a year of occasional use, two tabs renewing at once without signing either out, a copied refresh token signing the device out, sign-out at once for one device or all others, the *require sign-in* switch and what stays open with it on (the relays, `/api/status`, the notification reader), share links that read and never write and are taken back with their viewers, passkeys through the routes, a logger's network handles for the owner only, and `private` caching.
 - **`webauthn.test.ts`** — passkey verification against real signatures: CBOR, DER and COSE, both ES256 and RS256, and each refusal an attacker would try - another challenge, another origin, another site, no touch, a replayed registration, a key that is not the passkey's, a counter that went backwards.
 - **`weather.test.ts`** — each system's position: read from both vendors' field names and range-checked, kept when a record carries none, served to the owner and nobody else, and absent from every public answer; the weather: asked for at the position rounded to about a kilometre, stamped at the end of each hour, only hours that have happened, three months the first time and an hour after, one failing position not stopping the rest; and the expected output: the ratio as the median of full sunny days, a typical one until three exist, today's curve and total.
+- **`oauth.test.ts`** — an app connected to the MCP server: discovery, and CORS where it belongs and not on the approval page; registration - public clients, redirects only to https, this computer or a native app's scheme, at most a hundred, the stale cleared; the approval page - a link it cannot trust answered on the page, anything else sent back to the app, anyone but the owner's own browser asked to sign in, the app's name kept as text and where its answer goes shown; tokens - PKCE, the wrong verifier, another app or address, a late code, a code used twice disconnecting the app, renewing for a year, a request crossing its own renewal let through and a copied refresh token disconnecting; revocation; the endpoint taking nothing but an app's token; and Connected apps in Settings.
+- **`mcp.test.ts`** — the MCP server: initialize and its protocol version, ping and notifications, the tools listed as read-only with their JSON Schema, a call answered as text and structured content, a bad question as a tool error, the JSON-RPC errors, batches, and no event stream or session.
 - **`tools.test.ts`** — the read-only tools: a period the way a person means it, on the plants' calendar; arguments checked, tidied and described as JSON Schema; energy per day, week, month and year, with the vendor's month totals before SolarLens began, the best and lowest period, exports and which system does not report them, and the money by the tariff; systems per kWp; faults; the state right now; why a day was low - a gap in the readings, less sun, a fault, a system short of its sunlight, or an ordinary day; and a system slowly making less for its sunlight - figures made up to be checked by hand.
 - **`ask.test.ts`** — Ask SolarLens with a scripted model: the choice made from today, the systems and the tools, and checked; the figures worded, and a sentence with a number of the model's own set aside; a chatty reply, a question about something else, a bad choice, no answer; the daily cap, per UTC day; nobody anonymous asking; and, with no model, a direct question still answered in the tool's own words.
 - **`agents.test.ts`** — the weekly agents: a system slowly making less flagged and one steady not; the report written from the figures, or by the model and held to them; once a week; the decline told once as an alert; and the report going out with the weekly summary.
@@ -771,7 +789,7 @@ Thirty-one files, one concern each. Most are pure-function tests against fixture
 
 ### End-to-end tests — `tests/e2e/`
 
-Eighteen spec files, **282 tests**, each run twice: **chrome** (Desktop Chrome) and
+Nineteen spec files, **288 tests**, each run twice: **chrome** (Desktop Chrome) and
 **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/`, and every
 `/api/*` route is answered from fixtures in the spec, so the suite needs no
 Worker, database or vendor. They assert what a person sees and what the page
@@ -784,6 +802,7 @@ sends:
 | `weather.spec.ts` | Against the weather and the site map: the expected line dashed behind the real curve, the *Against the weather* card, the alert when output falls far below what the sun allowed (and not for an offline system), the battery's estimated capacity on History, and the owner's map - hidden from anyone else, drawn by a stand-in for Leaflet, and a list of positions that survives the map failing to load |
 | `money.spec.ts` | Money saved and CO₂ avoided: nothing shown until a tariff is set; a kWh used at home valued at the import price and one sold at the export price, or with net metering the import price; a period with no export figure marked as an upper bound; the *Saved* and *CO₂ avoided* columns and their totals on History; and the owner's Settings form - what it sends, net metering, clearing, and the server's refusal in its own words |
 | `analysis.spec.ts` | The Analysis tab, favourites and groups: a day worked out hour by hour from flat samples whose every figure can be checked by hand - made, used, the sun's share used at home, the best hour, the peaks, the table and the chart; every system added up, with one that meters no load named; an earlier day fetched once, and a failure said; a star putting a system first in this browser; groups laying the Overview out under headings with a filter each, remembered, falling back when a group is gone, and set by the owner in Settings |
+| `apps.spec.ts` | Settings' Connected apps: the MCP address to copy, each app, disconnecting; and going back to an app's approval page after signing in - to exactly that page, never to an address a link names |
 | `ask.spec.ts` | The Ask tab: a question sent as typed and its answer shown with its figures, period, freshness and who worded it; an example in one tap; the Worker's refusal in its words; a reply kept as text, never markup; what someone who cannot ask is told; the weekly report and each system's health; and "Why?" beside a low day on Historical Data, answered from the figures alone for someone not signed in |
 | `elsewhere.spec.ts` | Settings' *Alerts elsewhere* and *Home Assistant*: each place with how its last post went and none of its secret; adding one sends exactly its kind's fields and says whether the test arrived; a refused change undoes its tick; a test, a removal and the summary on request; the most there can be; and the Home Assistant configuration with this dashboard's address, its systems and a battery sensor only where there is a battery - with a read-only token made on the spot when the dashboard is private |
 | `demo.spec.ts` | The GitHub Pages demo, built and served under a sub-path as Pages serves it: the banner says the data is made up, every view draws from the sample data, no request leaves for an `/api` or `/auth`, nothing reaches for the site's root, the day's curve is there at any hour, and axe finds nothing serious. (`screenshots.spec.ts` beside it takes the README's pictures, and is skipped unless `npm run screenshots` asks for it.) |
@@ -809,10 +828,10 @@ figure to `coverage/page-coverage.json` — uploaded on every run. Measured on
 the desktop walk-through only: both projects are Chromium and both would write
 the same file, so the figure kept would otherwise be whichever finished last.
 
-**71.3% of the dashboard script**, against a floor of 65% that fails the run if
+**71.5% of the dashboard script**, against a floor of 65% that fails the run if
 it drops. The figure moves as the page grows: 3.0's new views took it to 63%
 until the walk-through was taught to open them too - Analysis, Compare, the
-money figures, the tariff, the groups, Settings' alerts elsewhere and Home Assistant, and the Ask tab. The floor is set below the reading, not flush against it, so an
+money figures, the tariff, the groups, Settings' alerts elsewhere, Home Assistant and Connected apps, and the Ask tab. The floor is set below the reading, not flush against it, so an
 honest change does not fail on arithmetic. What is not covered is the dashboard answering situations the fixture
 does not create: a vendor error, TV mode's rotation, and the branches behind
 figures neither system reports.
@@ -1132,6 +1151,7 @@ Twenty-one tables in D1, made by the files in `migrations/`, applied in order:
 - **`vendor_periods`** — each vendor's own totals per `period` (`day` / `month` / `year`) and `key` (`2026-09`, `2026`): generation, load, grid both ways, battery both ways and full-load hours. These reach back to installation, which SolarLens's own readings cannot.
 - **`relays`** — each SolisCloud relay's report on itself: a random `id` (never a computer name, never served), an optional `name`, `state` (`ok` / `login-expired` / `error`), `login_expires_at` from the portal's own login cookie, and when it was first and last heard from.
 - **`kv`** — a small expiring key/value shelf (`k`, `v`, `expires_at`), used by the weather cache, the hourly and daily schedules, and to remember which notification events have already been told.
+- **`oauth_clients`**, **`oauth_codes`**, **`oauth_grants`**, **`oauth_access`** — the apps connected to the MCP server: each registration (its name and redirect addresses), each approval waiting to be swapped (single use, ten minutes, bound to its PKCE challenge), each connection (its rotating refresh token, the one before remembered) and its access tokens. Only hashes of codes and tokens.
 - **`agent_reports`** — what the agents found, one row a report a week: the weekly report (`body`, and whether the model or SolarLens `worded` it) and each system's health check (`flagged` when it is slowly making less, with the weekly ratios in `data`). Kept a year.
 - **`channels`** — each place alerts and the weekly summary are posted to: its `kind` (`ntfy` / `telegram` / `discord` / `webhook`), a `name`, a `label` that says where it posts with the secret parts left out, what it takes (`alerts`, `weekly`), the dashboard `origin` for the link in each message, and how its last post went (`last_ok_at`, `last_error`, `failures`). **`secret`** - the token, address or topic - is AES-GCM encrypted under a key derived from `API_TOKEN`, and never served. At most five.
 - **`push_subscriptions`** — each device signed up for notifications: its push `endpoint` (never served), the dashboard `origin` it subscribed from, a short `audience` hash, and its delivery record. At most ten. **`push_messages`** — what a woken device shows (`title`, `body`), for every device or for one; kept a week.
@@ -1176,6 +1196,12 @@ Conventions: power in **W**, energy in **kWh**, timestamps in **epoch seconds**;
 | `GET /api/ask/status` | open | whether asking works here (`available`), for this caller (`can_ask`), and the day's calls `used` of `limit` |
 | `GET /api/tools` · `GET /api/tools/<name>?<args>` | open | the read-only tools, with their arguments as JSON Schema; and one of them run, answered in its own words, with no model |
 | `GET /api/agents` | open | the newest weekly report, and each system's newest health check |
+| `POST /mcp` | an approved app's OAuth access token | the MCP server: the read-only tools over MCP's Streamable HTTP, JSON answers - see [docs/mcp.md](docs/mcp.md) |
+| `GET /.well-known/oauth-protected-resource` · `/.well-known/oauth-authorization-server` | open | where an app gets a token, and the endpoints (RFC 9728, RFC 8414) |
+| `POST /oauth/register` | open | an app registers itself: a public client, PKCE, no secret (RFC 7591) |
+| `GET`, `POST /oauth/authorize` | the owner's own browser | the approval page, and the owner's choice |
+| `POST /oauth/token` · `POST /oauth/revoke` | the app | a code and its PKCE verifier, or a refresh token, for tokens; an app disconnecting itself |
+| `GET /api/settings/apps` · `DELETE /api/settings/apps/<id>` | owner only | the apps connected, and the MCP address; disconnect one |
 | `GET /api/sensors` | open | every figure Home Assistant wants, flat and under names that do not move: the fleet's power, energy today and lifetime, and each system's by alias - see [docs/home-assistant.md](docs/home-assistant.md) |
 | `GET /api/summary?days=7` | open | the last 1-31 full days, system by system, against the days before - the weekly summary as data, and as `message` in words |
 | `GET /api/settings/channels` | owner only | the places alerts are posted to: what each takes, a hint of where, and how its last post went - never the secret |
@@ -1245,7 +1271,8 @@ solar-lens/
 │                              0016 each system's position, and its weather
 │                              0017 the owner's settings, starting with the tariff
 │                              0018 the places alerts are posted to
-│                              0019 what the agents found)
+│                              0019 what the agents found
+│                              0020 the apps connected to the MCP server)
 │                             (0001 base · 0002 metrics · 0003 devices · 0004 signal
 │                              0005 electrical · 0006 battery · 0007 kv cache
 │                              0008 read indexes on readings.ts and poll_log
@@ -1268,6 +1295,8 @@ solar-lens/
 │   ├── ai.ts                 Workers AI on a short lead: one model, a daily cap
 │   ├── ask.ts                Ask SolarLens: the model chooses and words, the Worker computes
 │   ├── agents.ts             the weekly health check and report
+│   ├── mcp.ts                the MCP server at /mcp: the tools, over MCP
+│   ├── oauth.ts              OAuth for it: registration, the approval page, tokens
 │   ├── auth/                 the owner login
 │   │   ├── sessions.ts       sessions, silent refresh and rotation, devices, share links, lockout
 │   │   ├── routes.ts         /auth/* and /s/<link>
@@ -1353,6 +1382,8 @@ solar-lens/
 │   ├── unit/tools.test.ts       the read-only tools, figure by figure
 │   ├── unit/ask.test.ts         the model's choice checked, its words held to the figures, the cap
 │   ├── unit/agents.test.ts      the health check, the weekly report, and the alert a decline makes
+│   ├── unit/oauth.test.ts       an app approved once: every OAuth step, and every refusal
+│   ├── unit/mcp.test.ts         the MCP server: the handshake, the tools, the errors
 │   ├── helpers/solar-days.ts    weeks of made-up days, sunlight and faults, quickly
 │   ├── integration/             the real Worker, in workerd, over HTTP
 │   ├── visual/                  each view of the demo, compared with its picture
@@ -1381,6 +1412,7 @@ solar-lens/
 │   ├── e2e/analysis.spec.ts     the Analysis tab, favourites and groups
 │   ├── e2e/elsewhere.spec.ts    Settings: alerts elsewhere, and Home Assistant
 │   ├── e2e/ask.spec.ts          the Ask tab, the report and health, and "Why?"
+│   ├── e2e/apps.spec.ts         Connected apps, and back to an app's approval after signing in
 │   ├── e2e/screenshots.spec.ts  the README's pictures; skipped unless asked for
 │   ├── e2e/guide.spec.ts        the guide page and its button
 │   ├── e2e/history-systems.spec.ts  Historical Data, one system or all
@@ -1396,6 +1428,7 @@ solar-lens/
 ├── docs/alerts-elsewhere.md  setting up ntfy, Telegram, Discord and webhooks
 ├── docs/home-assistant.md    SolarLens in Home Assistant, and alerts into it
 ├── docs/ask-solarlens.md     Ask SolarLens and the agents: how, what the model sees, the cap
+├── docs/mcp.md               SolarLens as an MCP server: connecting an app, and how it is protected
 ├── docs/api-notes.md         observed vendor field names and conventions
 ├── docs/feature-gaps.md      SolisCloud vs SolarMan vs SolarLens, feature by feature
 └── docs/roadmap.md           the plan for 3.0, phase by phase
@@ -1527,6 +1560,12 @@ Either way, what a read can carry is bounded:
   saved little.)
 - **A datalogger's network handles** - its operator and cell, or its MAC
   address - are served to the owner only, and are never on a public answer.
+- **An AI app reads through the MCP server only with the owner's approval**,
+  given once on SolarLens's own page by the owner signed in on that browser -
+  never by a share link or `API_TOKEN`. OAuth 2.1 with PKCE; codes single-use;
+  refresh tokens rotated, a copy caught; only hashes stored; its token opens
+  `/mcp` and nothing else, and can only read. Settings disconnects an app at
+  once.
 - **Asking a question is for anyone signed in** - the owner or a share link -
   and never an anonymous caller: it spends model calls from a daily cap. The
   model only chooses among read-only tools, whose arguments are checked before
