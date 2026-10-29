@@ -60,6 +60,33 @@ export function plantFilter(env: Env): (plantId: string) => boolean {
   return ids.length === 0 ? () => true : (id) => ids.includes(id);
 }
 
+/**
+ * Which of a vendor's plants this cron run reads, once there are many.
+ *
+ * Each plant costs several vendor calls a run - the snapshot, the device list,
+ * each inverter's detail - and the runs share one request budget with the
+ * queue's pacing between calls (./providers/queue). Up to four plants are all
+ * read every five minutes, as before. Past that, the plants are dealt into at
+ * most three groups and each run reads one group in turn, so every plant is
+ * still read at least every fifteen minutes - inside the 25 minutes after which
+ * the page calls a system offline. Past twelve plants a group grows rather than
+ * a plant waiting longer.
+ *
+ * `run` is the number of the five-minute slot, so consecutive runs take
+ * consecutive groups and every group gets its turn.
+ */
+export const PLANTS_PER_RUN = 4;
+export const MAX_GROUPS = 3;
+export function plantsThisRun<T extends { id: string }>(plants: T[], run: number): T[] {
+  if (plants.length <= PLANTS_PER_RUN) return plants;
+  const groups = Math.min(MAX_GROUPS, Math.ceil(plants.length / PLANTS_PER_RUN));
+  // Sorted, so a plant stays in its group from one run to the next even if
+  // the vendor lists them in a different order.
+  const sorted = [...plants].sort((a, b) => a.id.localeCompare(b.id));
+  const turn = ((run % groups) + groups) % groups;
+  return sorted.filter((_, i) => i % groups === turn);
+}
+
 export interface PollSummary {
   provider: string;
   ok: boolean;
@@ -73,12 +100,13 @@ export interface PollSummary {
  * written to the poll log rather than thrown, so one vendor being down never
  * stops the other being read.
  */
-async function pollProvider(env: Env, p: Provider): Promise<PollSummary> {
+async function pollProvider(env: Env, p: Provider, run: number): Promise<PollSummary> {
   const wanted = plantFilter(env);
   let inverters = 0;
   let newReadings = 0;
   try {
-    const plants = (await p.listPlants()).filter((plant) => wanted(plant.id));
+    const all = (await p.listPlants()).filter((plant) => wanted(plant.id));
+    const plants = plantsThisRun(all, run);
     for (const plant of plants) {
       const invs = await p.listInverters(plant.id);
       // Hardware inventory, where the provider exposes it. A failure here must
@@ -102,7 +130,8 @@ async function pollProvider(env: Env, p: Provider): Promise<PollSummary> {
     // Slow-moving extras, on their own schedules and never at the readings'
     // expense: a failure here is logged by omission, not by failing the poll.
     for (const plant of plants) await pollExtras(env, p, plant.id).catch(() => {});
-    await logPoll(env.DB, p.id, true, `plants=${plants.length} inverters=${inverters} new=${newReadings}`);
+    const of = plants.length < all.length ? ` of ${all.length}` : '';
+    await logPoll(env.DB, p.id, true, `plants=${plants.length}${of} inverters=${inverters} new=${newReadings}`);
     return { provider: p.id, ok: true, inverters, newReadings };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -179,11 +208,12 @@ export function yearsFromMonths(months: Period[]): Period[] {
 }
 
 /** Providers hit different hosts, so they run concurrently; each one's own queue paces its calls. */
-export async function pollAll(env: Env): Promise<PollSummary[]> {
+export async function pollAll(env: Env, at = Date.now()): Promise<PollSummary[]> {
   const providers = buildProviders(env);
   if (providers.length === 0) {
     await logPoll(env.DB, 'none', false, 'no provider credentials configured');
     return [];
   }
-  return Promise.all(providers.map((p) => pollProvider(env, p)));
+  const run = Math.floor(at / 300_000);
+  return Promise.all(providers.map((p) => pollProvider(env, p, run)));
 }

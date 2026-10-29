@@ -75,13 +75,16 @@ A single Cloudflare Worker does three jobs:
 
 1. **Poller** — on a cron tick it asks each configured provider for its plants, then for each plant's live snapshot, normalises the vendor payload into one `Reading`, and inserts it (idempotently) into D1.
 2. **API** — a few JSON endpoints over D1: latest reading per inverter, a time series for charts, poll health, and push endpoints for local agents.
-3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Five tabs, plus a per-system page they all link into:
+3. **Static UI** — a dependency-free, hash-routed HTML page served from the same Worker. Five tabs - six with two systems or more - plus a per-system page they all link into, and Settings behind the gear. Any number of systems: each has a colour of its own, used wherever it appears (its line, its card, its name), assigned by its place so it keeps it between visits:
    - **Overview** (`#/`) — one column per system, sized to fit a laptop screen without scrolling: the energy-flow diagram, then that system's figures as tiles, then its day curve. Producing now, house load, grid direction and battery charge live in the diagram and are not repeated as figures. Model and datalogger signal are not here at all — they never change, so they sit on Devices. Anything above the curve opens that system's detail page; the curve opens Power. Below 1080px wide the columns stack, and below 660px tall the page scrolls, because two systems will not fit on a phone and a very short window cannot hold a diagram, twelve figures and a readable curve at once.
    - **Power** (`#/power`) — the combined day curve (click a name in the legend to show or hide that line), then each system in a collapsible section carrying its full detail set: identity, datalogger, live power, counters, PV strings, per-phase AC, battery, diagnostics and raw telemetry - every measurement the vendor sent, with each id, serial, name and place left out.
+   - **Compare** (`#/compare`, with two systems or more) — every system side by side on one scale: kWh per kWp of panels today and this month as bars, then a table of size, output now (and as a share of size), today, this month, this year and lifetime, each per kWp. The same sun on the same tilt gives the same figure, so the system well below the others is the one to look at.
    - **Historical Data** (`#/history`) — day by day per system: produced, consumed, imported, exported, battery in and out, peak and sample count, with a bar per day. Columns appear only where that system measures the quantity, and the page says plainly that the record begins when SolarLens started collecting rather than when the array was installed.
    - **Alerts** (`#/alerts`) — everything either cloud says is wrong, one collapsible section per system. Nothing is invented: each row names the field it came from, so an empty section reads as "both vendors report normal" rather than "nobody looked". The tab carries a count badge.
    - **Devices** (`#/devices`) — a card per datalogger, then the hardware inventory. Each datalogger card holds everything its vendor reports about it - how it connects, signal and signal bars, upload interval, last contact, time since its last restart and in total, model, firmware, when it was made, first connected and warranty - and its last seven days: a strip of online, offline and not heard from, how often and how long it dropped, and its signal as a line on a fixed scale. Below, inverters and dataloggers with serial, model, firmware, rated power, signal strength and last contact.
    - **System detail** (`#/system/<id>`) — identity and hardware, datalogger and link, live power, energy counters, per-MPPT-string PV power, battery (hybrid only), diagnostics, and a searchable raw-telemetry table of the vendor's measurements.
+
+   With three systems or more the Overview adds a strip above the cards - every system's name, output now and today, and "offline" where it is - and scrolls rather than squeezing them onto one screen; one or two still fit one screen. TV mode shows three systems at a time and takes turns every twenty seconds past that, with the whole fleet in the total. A plant with more than one inverter shows each of them on its system page.
 
    There is no Energy flow tab: the diagrams lead the overview instead, and an old `#/flow` bookmark lands there.
 
@@ -547,7 +550,7 @@ Five intervals, easily confused:
 
 | What | How often | Set where |
 |---|---|---|
-| Worker polls the vendor clouds | 5 min | `triggers.crons` in `wrangler.jsonc` |
+| Worker polls the vendor clouds | 5 min; past four plants a vendor, each run reads a share and every plant is read at least every 15 min | `triggers.crons` in `wrangler.jsonc`; `PLANTS_PER_RUN`, `MAX_GROUPS` in `src/poll.ts` |
 | Relay agent pushes Solis readings | 5 min | `RELAY_INTERVAL_MIN` |
 | Alarm history is re-read (both vendors) | 1 hour | `EXTRAS` in `agent/solis-relay.mjs`; `HOUR` in `src/poll.ts` |
 | Vendor period totals are re-read (both vendors) | 1 day | `EXTRAS` in `agent/solis-relay.mjs`; `DAY` in `src/poll.ts` |
@@ -588,7 +591,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**526 unit tests** and **422 end-to-end tests** (211 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**532 unit tests** and **450 end-to-end tests** (225 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -652,7 +655,7 @@ Twenty-nine files, one concern each. Most are pure-function tests against fixtur
 - **`relays.test.ts`** — a relay's report on itself: what the Worker refuses, including a computer name offered as an id; the login expiry read from the portal's cookie; the random id a relay keeps; relays named by nickname or order, never by id; and the exit code that tells the renewal script to open a window for a login.
 - **`worker-routes.test.ts`** — the Worker itself, against a real database: the security headers on both an API response and the page; reads open and writes refused; `/auth`'s cookie; every ingest route's contract, including what each refuses; identifiers proved absent from what is served; and the cron entry point.
 - **`worker-edges.test.ts`** — what only happens when something is unusual: the generic ingest route, a Worker deployed with no `API_TOKEN`, the poll log's trimming and per-provider newest line, the token store, and the hardware fan-out that fetches each inverter's own page.
-- **`poll.test.ts`** — the cron fan-out: which providers get built from which secrets, `INCLUDE_PLANTS`, a provider that throws not costing the other one, a hardware list failing without costing the reading, and the extras' hourly and daily schedules including the first run's walk back through the years.
+- **`poll.test.ts`** — the cron fan-out: which providers get built from which secrets, `INCLUDE_PLANTS`, a large fleet dealt into groups one run at a time (every plant read at least every fifteen minutes, whatever order the vendor lists them in), a provider that throws not costing the other one, a hardware list failing without costing the reading, and the extras' hourly and daily schedules including the first run's walk back through the years.
 - **`readings.test.ts`** — turning a vendor reply into a reading: SolisCloud's inverter page with the grid sign flipped to the project's convention, and SolarMan's per-device registers layered over its station snapshot, including a register that is present but empty.
 - **`sparse.test.ts`** — what happens when a vendor sends almost nothing: nulls rather than zeros, an empty database answering every read, a device merged rather than overwritten by a thinner second view, and an id with no alias answered as `unknown` rather than echoed.
 - **`device-shapes.test.ts`** — the shapes a device record arrives in and the fallback each takes: serial, then device id, then nothing; the plant from the record when the caller did not say; every status code the portals use; per-phase AC when only the voltage or only the current is there; import and export preferred over a net wire figure; and metering decided on lifetime totals rather than on a number being present.
@@ -663,7 +666,7 @@ Twenty-nine files, one concern each. Most are pure-function tests against fixtur
 
 ### End-to-end tests — `tests/e2e/`
 
-Eleven spec files, **211 tests**, each run twice: **chrome** (Desktop Chrome) and
+Twelve spec files, **225 tests**, each run twice: **chrome** (Desktop Chrome) and
 **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/`, and every
 `/api/*` route is answered from fixtures in the spec, so the suite needs no
 Worker, database or vendor. They assert what a person sees and what the page
@@ -673,6 +676,7 @@ sends:
 |---|---|
 | `dashboard.spec.ts` | The bulk, 141 tests: the overview and its layout at both widths, the theme, the header figures, each system's page, charts, alerts, history, devices, each datalogger's card and week, relays, TV mode, freshness and the auth gate |
 | `accessibility.spec.ts` | axe-core's WCAG 2 A and AA rules on every view, a keyboard walk-through, and a full keyboard lap of each view showing focus |
+| `many-systems.spec.ts` | More than two systems: a colour per system (two on the same vendor differ; the palette comes round after eight), the Overview's strip and when it stops fitting one screen, Compare on a per-kWp scale and with an offline system, TV mode taking turns, and a plant with two inverters |
 | `signin.spec.ts` | Signing in and Settings: a private dashboard asks for a sign-in instead of showing an error and comes back without a reload; setup with the setup code; the switch, devices, share links and password in Settings; a visitor's and a stranger's Settings; and a real passkey - made and used by Chrome's virtual authenticator, checked with the Worker's own verifier |
 | `guide.spec.ts` | The guide: one tap from anywhere, opens with no data or a refused request, names the systems, links only to real pages |
 | `history-systems.spec.ts` | Historical Data's system switch: narrows charts, tables, count and CSV; remembered; falls back when a system is gone |
@@ -723,11 +727,11 @@ while charts keep the brighter ones.
 
 | Scope | Statements | Branches | Functions | Lines |
 |---|---|---|---|---|
-| **All of `src/`** — everything the Worker ships | **98.1%** | **92.0%** | **97.5%** | **99.4%** |
+| **All of `src/`** — everything the Worker ships | **98.1%** | **92.2%** | **97.5%** | **99.4%** |
 | &nbsp;&nbsp;`index.ts` — routes, who is asking, headers, cron | 97% | 92% | 89% | **100%** |
 | &nbsp;&nbsp;`auth/` — the owner login | 98% | 91% | 98% | 99% |
 | &nbsp;&nbsp;`db.ts` — every line of SQL | 99% | 92% | **100%** | **100%** |
-| &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 90% | 92% | **100%** |
+| &nbsp;&nbsp;`poll.ts` — the cron fan-out | 99% | 96% | 94% | **100%** |
 | &nbsp;&nbsp;`push.ts` — phone notifications | **100%** | 99% | **100%** | **100%** |
 | &nbsp;&nbsp;`public-view.ts` — what may leave the Worker | **100%** | 96% | **100%** | **100%** |
 | &nbsp;&nbsp;`relays.ts` — a relay's report, validated | **100%** | **100%** | **100%** | **100%** |
@@ -1158,6 +1162,7 @@ solar-lens/
 │   ├── unit/release-version.test.ts  the guide's release is the package's
 │   ├── e2e/push.spec.ts         turning notifications to a closed browser on and off
 │   ├── e2e/signin.spec.ts       signing in, Settings, and a real passkey
+│   ├── e2e/many-systems.spec.ts  more than two systems: colours, Compare, TV turns
 │   ├── e2e/guide.spec.ts        the guide page and its button
 │   ├── e2e/history-systems.spec.ts  Historical Data, one system or all
 │   ├── e2e/new-version.spec.ts  the reload notice after a release
@@ -1352,6 +1357,7 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] Notifications that reach a closed browser (Web Push)
 - [x] An owner login with passkeys, a private dashboard on the owner's say-so, signed-in devices and view-only share links (3.0)
 - [x] Everything each datalogger reports, and its link over the week (3.0)
+- [x] Any number of systems: a colour each, Compare per kWp, TV mode taking turns, polling spread across runs (3.0)
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed

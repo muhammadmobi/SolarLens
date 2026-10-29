@@ -42,7 +42,7 @@ npm ci
 npm run typecheck             # types for src/ and tests/
 npm run test:unit             # ~530 tests, a few seconds
 npm run test:unit:coverage    # the same, with the coverage thresholds applied
-npm run test:e2e              # ~420 tests, a few minutes, needs Chrome
+npm run test:e2e              # ~450 tests, a few minutes, needs Chrome
 ```
 
 All of that runs with no Cloudflare account, no database and no vendor
@@ -135,7 +135,7 @@ stays open for monitoring.
 |---|---|
 | `src/index.ts` | Every route, the auth middleware, the security headers, the cron entry point. Hono. |
 | `src/db.ts` | All SQL. Upserts, the latest-per-inverter query, series, daily rollups, the poll log, alarms, period totals, relays, a token store. |
-| `src/poll.ts` | The cron fan-out: which providers to call, in what order, what to do when one fails. |
+| `src/poll.ts` | The cron fan-out: which providers to call, in what order, what to do when one fails, and - past four plants a vendor - which share of them this run reads (`plantsThisRun`). |
 | `src/auth/sessions.ts` | Who is asking: the signed session, the silent refresh and its rotation, signed-in devices, share links, the lockout. Its header explains the design. |
 | `src/auth/routes.ts` | The sign-in routes under `/auth`, Settings, and share links at `/s/`. |
 | `src/auth/webauthn.ts` | Passkeys: the CBOR, the keys and the two ceremonies, verified with WebCrypto. |
