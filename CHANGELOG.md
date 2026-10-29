@@ -111,6 +111,15 @@ checkout of any tag says which release it is.
 - **The deploy's smoke test** reads freshness from `/api/status`, and on a
   private dashboard checks that a signed-out caller is asked to sign in.
 
+- **The installed app keeps no API answers offline.** Its service worker kept
+  every same-origin answer for when the network was gone; an answer now
+  depends on who is asking, so it keeps only the page and its icons, never an
+  `/api` or `/auth` answer or anything marked no-store. The old cache is
+  cleared on update.
+
+- **A passkey's counter moves atomically**, so two sign-ins racing with the
+  same count - a copied key used at the same moment - cannot both succeed.
+
 - **Replacing `API_TOKEN`** now keeps every signed-in device signed in, but the
   password must be set again, since it is keyed with the token.
 

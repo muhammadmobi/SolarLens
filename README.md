@@ -31,7 +31,7 @@ data, with no server behind it.
 - **Made for a wall, too.** TV mode at `#/tv` drops the header and tabs, sizes everything to the screen, keeps the display awake, and shows a clock so a frozen page is obvious from across a room.
 - **Each system on its own, or all together.** Historical Data shows every system one after the other, or - with the switch at the top - just one, with its chart, table and CSV.
 - **History that goes back to the start.** Days, months or years. Months and years use each vendor's own totals, which reach back to the day the plant was installed, and every row says whether its figure is the vendor's or SolarLens's own and how many of its days SolarLens saw.
-- **Installable.** Add it to a phone's home screen and it opens in its own window. The worker behind that goes to the network first and falls back to a cache only when there is none, so an installed copy can never show a stale reading as a live one.
+- **Installable.** Add it to a phone's home screen and it opens in its own window. The worker behind that goes to the network first and falls back to a cache only when there is none, so an installed copy can never show a stale reading as a live one. It keeps only the page and its icons, never an answer from the API, which since 3.0 depends on who is asking.
 - **Tested.** Unit tests for every normaliser and unit conversion; Playwright end-to-end tests for the dashboard on desktop and mobile.
 
 > Not affiliated with Ginlong/Solis or IGEN Tech/SolarMan. 

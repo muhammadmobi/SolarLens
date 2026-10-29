@@ -202,7 +202,16 @@ auth.post('/passkey/login', async (c) => {
   if (!row) return c.json({ error: 'This passkey is not one of this dashboard\'s. It may have been removed.' }, 401);
   try {
     const { signCount } = await verifyAssertion(b.response as never, challenge, rpOf(c), JSON.parse(row.public_key) as StoredKey, row.sign_count);
-    await c.env.DB.prepare('UPDATE auth_passkeys SET sign_count = ?2, last_used_at = ?3 WHERE id = ?1').bind(b.id, signCount, now()).run();
+    // The counter moves only from the value this check read. Two sign-ins
+    // racing with the same counter - which is what a copied key used at the
+    // same moment looks like - cannot both succeed: the second finds the count
+    // already moved, and is refused. A synced passkey that always reports zero
+    // has no counter to race on, and stays at zero.
+    const res = await c.env.DB
+      .prepare('UPDATE auth_passkeys SET sign_count = ?2, last_used_at = ?3 WHERE id = ?1 AND sign_count = ?4')
+      .bind(b.id, signCount, now(), row.sign_count)
+      .run();
+    if ((res.meta.changes ?? 0) === 0) throw new Error('it was used somewhere else at the same moment');
   } catch (e) {
     return c.json({ error: `That passkey did not verify: ${(e as Error).message}.` }, 401);
   }

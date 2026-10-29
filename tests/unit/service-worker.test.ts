@@ -152,3 +152,69 @@ describe('a tap on a notification', () => {
     expect(w.opened).toEqual(['/#/alerts']);
   });
 });
+
+/**
+ * What the worker keeps for when the network is gone: the page and its icons,
+ * and never an answer from /api or /auth. Those depend on who asked - the
+ * owner's include a logger's network handles - and a cache keyed by URL alone
+ * would hand them to whoever used the browser next, offline.
+ */
+describe('the offline cache', () => {
+  function loadFetch() {
+    const listeners = new Map<string, Listener>();
+    const store = new Map<string, Response>();
+    let online = true;
+    const self = {
+      location: { origin: 'https://dashboard.test' },
+      addEventListener: (type: string, fn: Listener) => listeners.set(type, fn),
+      skipWaiting: async () => {},
+      registration: { pushManager: { getSubscription: async () => null }, showNotification: async () => {} },
+      clients: { claim: async () => {}, matchAll: async () => [], openWindow: async () => null },
+    };
+    const caches = {
+      open: async () => ({
+        match: async (k: Request | string) => store.get(typeof k === 'string' ? k : k.url)?.clone(),
+        put: async (k: Request, r: Response) => { store.set(k.url, r); },
+        addAll: async () => {},
+      }),
+      match: async (k: Request | string) => store.get(typeof k === 'string' ? `https://dashboard.test${k}` : k.url)?.clone(),
+      keys: async () => [], delete: async () => true,
+    };
+    const fetch = async (req: Request) => {
+      if (!online) throw new Error('offline');
+      const noStore = req.url.includes('/api/') || req.url.includes('nostore');
+      return Object.defineProperty(new Response(`answer for ${req.url}`, { headers: noStore ? { 'cache-control': 'no-store' } : {} }), 'type', { value: 'basic' });
+    };
+    new Function('self', 'caches', 'fetch', 'crypto', 'TextEncoder', 'btoa', SOURCE)(self, caches, fetch, crypto, TextEncoder, btoa);
+    /** One GET through the worker: its answer, or undefined when it left the request to the browser. */
+    async function get(path: string, mode = 'cors') {
+      let answer: Promise<Response> | undefined;
+      listeners.get('fetch')!({ request: Object.defineProperty(new Request(`https://dashboard.test${path}`), 'mode', { value: mode }), respondWith: (p: Promise<Response>) => { answer = p; } });
+      const res = await answer;
+      await new Promise((r) => setTimeout(r, 0));   // let the cache write land
+      return res;
+    }
+    return { get, store, goOffline: () => { online = false; } };
+  }
+
+  it('never touches an /api or /auth answer', async () => {
+    const w = loadFetch();
+    for (const path of ['/api/devices', '/api/latest', '/auth/status', '/s/abc.def']) {
+      expect(await w.get(path), path).toBeUndefined();
+    }
+    expect([...w.store.keys()]).toEqual([]);
+  });
+
+  it('keeps the page, and offers it when the network is gone', async () => {
+    const w = loadFetch();
+    expect(await (await w.get('/icon.svg'))!.text()).toContain('/icon.svg');
+    w.goOffline();
+    expect(await (await w.get('/icon.svg'))!.text()).toContain('/icon.svg');
+  });
+
+  it('keeps nothing the server marked no-store', async () => {
+    const w = loadFetch();
+    await w.get('/nostore.txt');
+    expect(w.store.size).toBe(0);
+  });
+});

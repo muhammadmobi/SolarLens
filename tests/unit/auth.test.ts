@@ -585,6 +585,18 @@ describe('passkeys', () => {
     expect((await b.post('/auth/passkey/login', { id, response: await a.sign(late.challenge, origin, rpId) })).status).toBe(400);
   });
 
+  it('let only one of two sign-ins with the same counter through: the other is a copy', async () => {
+    const owner = await ownerSignedIn();
+    const { a, id } = await addPasskey(owner);
+    // Two browsers, two challenges, one key signing both with the same count -
+    // a copied authenticator used at the same moment as the real one.
+    const [x, y] = [browser(h, '203.0.113.93'), browser(h, '203.0.113.94')];
+    const [ox, oy] = await Promise.all([x, y].map(async (b) => (await (await b.post('/auth/passkey/options', { purpose: 'login' })).json()) as { challenge: string }));
+    const [sx, sy] = [await a.sign(ox.challenge, origin, rpId, { counter: 7 }), await a.sign(oy.challenge, origin, rpId, { counter: 7 })];
+    const results = await Promise.all([x.post('/auth/passkey/login', { id, response: sx }), y.post('/auth/passkey/login', { id, response: sy })]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 401]);
+  });
+
   it('refuse a passkey this dashboard does not know, or one that does not verify', async () => {
     const owner = await ownerSignedIn();
     const { id } = await addPasskey(owner);
