@@ -20,7 +20,7 @@ checkout of any tag says which release it is.
 
 - **SolarLens as an MCP server**, at `/mcp`: AI apps outside SolarLens -
   Claude, an IDE, anything that speaks the Model Context Protocol - ask the
-  same nine read-only questions as the assistant, from the same tools, whether
+  same eleven read-only questions as the assistant, from the same tools, whether
   the relay laptops are on or off, and so work as a chatbot over the owner's
   systems. Streamable HTTP with JSON answers; protocol
   versions 2025-06-18, 2025-03-26 and 2024-11-05. Protected by OAuth 2.1 tied to
@@ -36,8 +36,12 @@ checkout of any tag says which release it is.
   about energy made, used, bought and sold, statistics from whole days (the average and median
   day, the best and worst, the spread, capacity factor, low days), systems
   compared per kWp, faults, why a day was low, a slow decline, a full report on
-  any period, and how to do something in the app. A model chooses up to three
-  of nine read-only tools and fills in their arguments, which are checked like
+  any period, a day's power - between two times ("between 2pm and 4pm"), its
+  peak, how steady it was - whether a system is offline, since when and when it
+  last made power, and how to do something in the app. Read without a model,
+  a question may name a time of day, a system by one word of its name, and
+  carry typing slips in the words it is routed on. A model chooses up to three
+  of eleven read-only tools and fills in their arguments, which are checked like
   any input; the Worker computes every figure; the model words them, and words
   stating a number the figures do not hold are replaced by the tools' own. Each
   answer shows its tables, a chart where one helps, the period, how fresh the

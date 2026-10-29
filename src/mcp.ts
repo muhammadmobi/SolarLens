@@ -35,7 +35,9 @@ export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 /** What each tool is called in an app's list. */
 const TITLES: Record<string, string> = {
   status_now: 'Right now',
+  outages: 'Outages, and the last power',
   energy: 'Energy over a period',
+  power_day: "A day's power, hour by hour",
   compare_systems: 'Systems compared per kWp',
   faults: 'Faults',
   day_report: 'Why a day was low',

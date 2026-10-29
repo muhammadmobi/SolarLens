@@ -253,7 +253,11 @@ ask; only someone signed in spends a model call. The conversation lives in the
 browser tab, which sends the last four exchanges with each message; an answer
 downloads as a page with no script, every value escaped, that prints to a PDF.
 `/api/ask` stays, as the one-question door and for "Why?". The MCP server gets
-the three new tools, and a report's parts as text.
+the new tools, and a report's parts as text. Tried on the owner's real data
+before release, it gained two more: `power_day` for part of a day and how
+steady the power was, and `outages` for since when a system has been quiet and
+when it last made power - with a reader that takes times of day, a system by
+one word of its name, and typing slips in the words it routes on.
 
 ## Order
 
