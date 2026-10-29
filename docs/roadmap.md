@@ -275,7 +275,17 @@ reads a period's figures together and says what stands out, why and what to do -
 on the real data, a battery kept full every day while the nights were bought,
 an always-on load that was most of what the house used, and a datalogger
 offline - and the weekly report carries the week's, to every place alerts go.
-It reads each kind of record once, to stay inside the free plan's limits.
+It reads each kind of record once, to stay inside the free plan's limits. And
+since any question may be asked, not only the examples, a `figures` tool
+answers what no other tool does - any measure the records hold as a total, an
+average, the highest or lowest and when, the days above or below an amount, or
+the first or last time, by hour, weekday, day, week, month or year, and what
+each inverter has made since it was installed - `app_help` explains the words
+(kWp, performance ratio, SOC, MPPT and more), and `status_now` says what the
+house draws and which way the grid flows. The reader gained short forms, two
+periods set side by side, two or three questions in one message, a greeting's
+reply, and an answer for a question about the systems that no reading fits:
+how they are doing.
 
 ## Order
 

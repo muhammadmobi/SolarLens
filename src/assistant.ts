@@ -23,6 +23,7 @@
  */
 import { aiModel, callsUsed, chat, dailyCalls, hasAi, providerOf, takeCall, type ChatMessage, type Provider } from './ai';
 import { nowSec, type Env } from './db';
+import { findHelp } from './help';
 import {
   DEFAULT_RANGE, RANGES, TOOLS, dayNo, dayWords, isoDay, jsonSchemaOf, loadSystems, resolvePeriod, runTool, zoneOf,
   type Args, type Period, type Range, type Sys, type ToolResult,
@@ -95,30 +96,47 @@ const lastOfMonth = (y: number, m: number) => new Date(Date.UTC(y, m + 1, 0)).ge
  */
 const MENDABLE = [
   'generation', 'generated', 'generating', 'production', 'produced', 'producing', 'fluctuation', 'fluctuations', 'fluctuating',
-  'yesterday', 'statistics', 'comparison', 'consumption', 'inverter', 'afternoon', 'between',
+  'yesterday', 'statistics', 'comparison', 'consumption', 'inverter', 'afternoon', 'between', 'battery',
   'january', 'february', 'august', 'september', 'october', 'november', 'december',
 ];
 
-/** How many letters apart two words are - added, dropped or changed - or more than most when further. */
+/** Short forms written for speed, as whole words: "wk", "yday", "avg", "batt". */
+const SHORT: Record<string, string> = {
+  wk: 'week', wks: 'weeks', mth: 'month', mnth: 'month', mths: 'months', yr: 'year', yrs: 'years', tdy: 'today', tody: 'today', '2day': 'today',
+  yday: 'yesterday', yest: 'yesterday', tmrw: 'tomorrow', tmr: 'tomorrow', avg: 'average', prod: 'production', gen: 'generation', cons: 'consumption',
+  consump: 'consumption', elec: 'electricity', batt: 'battery', bat: 'battery', hrs: 'hours', hr: 'hour', ur: 'your', u: 'you', pls: 'please', plz: 'please',
+  exp: 'export', imp: 'import', temp: 'temperature', stats: 'statistics', info: 'information', b4: 'before',
+};
+
+/** How many letters apart two words are - added, dropped, changed, or two side by side swapped - or more than most when further. */
 function distance(a: string, b: string, most: number): number {
   if (Math.abs(a.length - b.length) > most) return most + 1;
+  let before: number[] = [];
   let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i++) {
     const cur = [i];
     let best = i;
     for (let j = 1; j <= b.length; j++) {
       cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      // "expotr" is "export" with two letters swapped: one slip, not two.
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) cur[j] = Math.min(cur[j], before[j - 2] + 1);
       best = Math.min(best, cur[j]);
     }
     if (best > most) return most + 1;
+    before = prev;
     prev = cur;
   }
   return prev[b.length];
 }
 
-/** A question as the reader takes it: lower case, "p.m." as "pm", and near misses of the words it routes on mended. */
+/**
+ * A question as the reader takes it: lower case, "p.m." as "pm", short forms written out, and near misses
+ * of the words it routes on mended.
+ */
 export function mend(text: string): string {
-  return text.toLowerCase().replace(/\b([ap])\.\s?m\b\.?/g, '$1m').replace(/[a-z]{5,}/g, (w) => {
+  return text.toLowerCase().replace(/\b([ap])\.\s?m\b\.?/g, '$1m')
+    .replace(/\b[a-z0-9]+\b/g, (w) => SHORT[w] ?? w)
+    .replace(/[a-z]{5,}/g, (w) => {
     if (MENDABLE.includes(w)) return w;
     const most = w.length >= 7 ? 2 : 1;
     let best = w;
@@ -190,24 +208,45 @@ const NOT_A_NAME = new Set(['system', 'systems', 'solar', 'plant', 'plants', 'pa
 
 /** The period a question names - a named one, a month by name, a date, a year - or null. */
 export function periodIn(text: string, today: string): Args | null {
+  return periodMatch(text, today)?.args ?? null;
+}
+
+/**
+ * Two periods set against each other - "this week than last week", "August compared with July" - the
+ * second as it is named; null when the question names only one, or compares nothing.
+ */
+export function secondPeriodIn(text: string, today: string): Args | null {
   const t = text.toLowerCase();
+  if (!/\b(than|compared? (to|with)|vs\.?|versus|against|or)\b/.test(t)) return null;
+  const first = periodMatch(t, today);
+  const second = first ? periodMatch(t.replace(first.words, ' '), today) : null;
+  return second && JSON.stringify(second.args) !== JSON.stringify(first!.args) ? second.args : null;
+}
+
+/** The period a question names, and the words that named it. */
+function periodMatch(text: string, today: string): { args: Args; words: string } | null {
+  const t = text.toLowerCase();
+  // Every period the question names, and where: the first named is the one meant - "august this year" is August -
+  // and at one place the longer reading, "3rd september" over "september", a date over its year.
+  const found: { at: number; args: Args; words: string }[] = [];
+  const add = (m: RegExpExecArray | null, args: Args) => { if (m) found.push({ at: m.index, args, words: m[0] }); };
   const named: [RegExp, Range][] = [
-    [/\btoday\b/, 'today'], [/\byesterday\b/, 'yesterday'], [/\bthis week\b/, 'this_week'],
-    [/\b(last|previous|past) week\b/, 'last_week'], [/\bthis month\b/, 'this_month'], [/\b(last|previous) month\b/, 'last_month'],
-    [/\bthis year\b|\bso far\b/, 'this_year'], [/\b(last|previous) year\b/, 'last_year'],
+    [/\btoday('?s)?\b/, 'today'], [/\byesterday('?s)?\b|\blast night\b/, 'yesterday'], [/\bthis week('?s)?\b/, 'this_week'],
+    [/\b(last|previous|past) week('?s)?\b/, 'last_week'], [/\bthis month('?s)?\b/, 'this_month'], [/\b(last|previous) month('?s)?\b/, 'last_month'],
+    [/\bthis year('?s)?\b|\bso far\b/, 'this_year'], [/\b(last|previous) year('?s)?\b/, 'last_year'],
     [/\b(last|past) (7|seven) days\b/, 'last_7_days'], [/\b(last|past) (30|thirty) days\b/, 'last_30_days'],
     [/\b(last|past) (12|twelve) months\b|\bpast year\b/, 'last_12_months'],
   ];
-  for (const [re, range] of named) if (re.test(t)) return { range };
+  for (const [re, range] of named) add(re.exec(t), { range });
   // "the last 3 days", "past 2 weeks": that many days, up to today.
   const back = /\b(last|past) (\d{1,3}) (days?|weeks?)\b/.exec(t);
   if (back) {
     const n = Number(back[2]) * (back[3].startsWith('week') ? 7 : 1);
     const end = Date.parse(`${today}T00:00:00Z`) / (86400 * 1000);
-    if (n >= 1 && n <= 3 * 366) return { from: isoDay(end - n + 1), to: today };
+    if (n >= 1 && n <= 3 * 366) add(back, { from: isoDay(end - n + 1), to: today });
   }
   const iso = /\b(\d{4}-\d{2}-\d{2})\b/.exec(t);
-  if (iso) return { from: iso[1], to: iso[1] };
+  if (iso) add(iso, { from: iso[1], to: iso[1] });
   const year = Number(today.slice(0, 4));
   for (let m = 0; m < 12; m++) {
     const name = `(?:${MONTHS[m]}|${MONTHS[m].slice(0, 3)})`;
@@ -218,12 +257,14 @@ export function periodIn(text: string, today: string): Args | null {
     if (!hit[1] && `${y}-${pad(m + 1)}-01` > today) y -= 1;       // a month still to come means last year's
     const day = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?${name}\\b|\\b${name}\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`).exec(t);
     const d = day ? Number(day[1] ?? day[2]) : 0;
-    if (d >= 1 && d <= lastOfMonth(y, m)) return { from: `${y}-${pad(m + 1)}-${pad(d)}`, to: `${y}-${pad(m + 1)}-${pad(d)}` };
-    return { from: `${y}-${pad(m + 1)}-01`, to: `${y}-${pad(m + 1)}-${pad(lastOfMonth(y, m))}` };
+    if (d >= 1 && d <= lastOfMonth(y, m)) add(day, { from: `${y}-${pad(m + 1)}-${pad(d)}`, to: `${y}-${pad(m + 1)}-${pad(d)}` });
+    else add(hit, { from: `${y}-${pad(m + 1)}-01`, to: `${y}-${pad(m + 1)}-${pad(lastOfMonth(y, m))}` });
   }
   const y = /\b(20\d{2})\b/.exec(t);
-  if (y) return { from: `${y[1]}-01-01`, to: `${y[1]}-12-31` };
-  return null;
+  if (y) add(y, { from: `${y[1]}-01-01`, to: `${y[1]}-12-31` });
+  if (!found.length) return null;
+  const first = found.sort((a, b) => a.at - b.at || b.words.length - a.words.length)[0];
+  return { args: first.args, words: first.words };
 }
 
 /**
@@ -252,7 +293,7 @@ function metricsIn(t: string): string[] {
     ['soc', /\b(soc|state of charge|battery (charge|level|percent\w*)|charge level)\b/],
     ['battery', /\b(batter(y|ies)|charging|discharging)\b/],
     ['grid', /\b(grid|import\w*|export\w*|buy\w*|bought|sell\w*|sold|feed[- ]?in)\b/],
-    ['load', /\b(load|consum\w*|usage|house|home use|demand)\b/],
+    ['load', /\b(load|consum\w*|usage|use[ds]?|using|house|home use|demand)\b/],
     ['power', /\b(power|pv|solar|generat\w*|produc\w*|output|made|yield)\b/],
   ];
   const found = words.map(([m, re]) => ({ m, at: t.search(re) })).filter((x) => x.at >= 0);
@@ -266,17 +307,136 @@ function metricsIn(t: string): string[] {
 /** A question about what is still to come, which no figure here can answer. */
 const FUTURE = /\b(tomorrow|next (week|month|year)|forecast\w*|predict\w*|will (i|it|we|my|the|they|\w+) (make|produce|generate|get|earn|save))\b/;
 
+/** What each inverter has made since it was installed - not "the most ever made in a day", which is a record. */
+const LIFETIME = /^(?!.*\b(most|best|record|highest|max\w*|biggest|lowest|least|worst|min\w*)\b).*\b(lifetime|all[- ]time|since (it was |they were |we )?install\w*|ever (made|produced|generated)|in (its|their) (whole )?life)\b/;
+/** A figure asked for as such: how many days, the first or last time, on each weekday, the record. */
+const FIGURE_ASKED = /\bhow (many (days|times|hours)|often)\b|\bnumber of (days|times)\b|\b(first|last) time\b|\bwhen (did|was|were)\b.*\b(first|last|go|went|exceed\w*|drop\w*|fell|fall|reach\w*|hit|pass\w*|cross\w*|above|below|over|under|more than|less than)\b|\b(weekdays?|day of (the )?week|weekends?|mondays|tuesdays|wednesdays|thursdays|fridays|saturdays|sundays)\b|\b(ever|all[- ]time|record)\b/;
+/** Words that say a question is about the systems at all: one no other reading fits still gets an answer. */
+const ABOUT_SOLAR = /\b(solar|panels?|inverters?|systems?|plants?|energy|power|kwh|kw|units?|batter(y|ies)|grid|load|consum\w*|produc\w*|generat\w*|output|sun|sunlight|weather|bill|money|sav\w*|export\w*|import\w*|strings?|pv|faults?|alarms?|errors?|relay|data ?logger|wi-?fi|efficien\w*|performance|electricity|house|home)\b/;
+
+/**
+ * A question for one figure, read as the figures tool takes it: the measure its words name - energy or
+ * power, the house, the grid, the battery - how (total, average, highest, lowest, how many days, the
+ * first or last time), by what, and any amount it names. "Units" are kWh, as on a bill. Null when it
+ * names no measure.
+ */
+export function figuresIn(t: string): Args | null {
+  const has = (re: RegExp) => re.test(t);
+  const energy = has(/\b(kwh|mwh|energy|units?)\b/);
+  const moment = !energy && has(/\d\s*(kw|w|watts?)\b|\b(kw|watts?|power|at once|at a time|moment)\b/);
+  const selling = has(/\b(sold|sell\w*|export\w*|feed[- ]?in|to the grid)\b/);
+  // A day's peak is a measure of its own when days are set against each other: each day's, the lowest, the average.
+  const dailyPeak = has(/\bpeaks?\b/) && has(/\b(days?|daily|each day|lowest|min\w*|least|smallest|worst|average|avg|mean|typical|usual)\b/);
+  let measure: string | null = null;
+  if (LIFETIME.test(t)) measure = 'lifetime_made';
+  else if (has(/\b(batter(y|ies)|soc|state of charge|charging|discharg\w*)\b/)) {
+    const daily = has(/\b(days?|daily|each day|per day|every day)\b/);
+    if (energy && has(/\b(took in|charged|stored|into)\b/)) measure = 'battery_in';
+    else if (energy && has(/\b(gave out|discharged|delivered|supplied|drained)\b/)) measure = 'battery_out';
+    else if (has(/\b(power|kw|watts?|charging|discharging|rate)\b/) && !has(/%|\b(percent\w*|level|full|empty|soc|state of charge)\b/)) measure = 'battery_power';
+    else if (daily && has(/\b(full|highest|max\w*|top)\b/)) measure = 'battery_high';
+    else if (daily && has(/\b(empty|flat|lowest|min\w*|low)\b/)) measure = 'battery_low';
+    else measure = 'battery_charge';
+  } else if (has(/\b(bought|buy\w*|import\w*|purchas\w*|from the grid)\b/)) measure = moment ? 'grid' : 'bought';
+  else if (selling) measure = moment ? 'grid' : 'sold';
+  else if (has(/\bgrid\b/)) measure = energy ? 'bought' : 'grid';
+  else if (has(/\b(use[ds]?|usage|consum\w*|load|demand|house|home)\b/)) measure = moment || has(/\b(load|demand)\b/) && !energy ? 'load' : 'used';
+  else if (dailyPeak) measure = 'peak_power';
+  else if (has(/\b(made|make|generat\w*|produc\w*|yield|output|solar|pv|power)\b/)) measure = moment ? 'power' : 'made';
+  if (!measure) return null;
+  // Selling is grid power below zero, and discharging is battery power below zero.
+  const outward = measure === 'grid' ? selling : measure === 'battery_power' && has(/\b(discharg\w*|gave out|giv\w* out|drain\w*)\b/);
+  // Of a day's peak, "peak" names the measure, not the highest.
+  const TOP = measure === 'peak_power' ? /\b(highest|max\w*|most|record|biggest|largest|greatest|best|top)\b/ : /\b(highest|max\w*|peak|most|record|biggest|largest|greatest|best|top)\b/;
+
+  let stat = has(/\bhow (many|often)\b|\bnumber of (days|times)\b/) ? 'count'
+    : has(/\b(first|earliest)\b/) ? 'first'
+      // "When was it last below 50%" - but not "last week" or "last night".
+      : has(/\b(last time|most recent\w*|latest)\b|\bwhen\b.*\blast\b(?!\s+(week|month|year|night|\d+|seven|thirty|twelve)\b)/) ? 'last'
+        : has(TOP) ? 'highest'
+          : has(/\b(lowest|min\w*|least|smallest|worst)\b/) ? 'lowest'
+            : has(/\b(average|avg|mean|typical|usual|normal|per day|a day)\b/) ? 'average'
+              : has(/\b(total|sum|altogether|in all|overall|how much)\b/) ? 'total' : null;
+  // "Daily" names a day's peak or a battery's day, not a split by day; a split by week, month or year wins over it.
+  const DAILY = /^(peak_power|battery_high|battery_low)$/.test(measure) ? /\b(each day|every day|day by day|by day)\b/ : /\b(each day|every day|day by day|by day|daily)\b/;
+  const by = has(/\b(by hour|each hour|per hour|hourly|which hour|what hour|time of (the )?day|hour of (the )?day|what time)\b/) ? 'hour_of_day'
+    : has(/\b(weekdays?|day of (the )?week|weekends?|mondays|tuesdays|wednesdays|thursdays|fridays|saturdays|sundays)\b/) ? 'weekday'
+      : has(/\b(each week|every week|week by week|by week|weekly|per week)\b/) ? 'week'
+        : has(/\b(each month|every month|month by month|by month|monthly|per month)\b/) ? 'month'
+          : has(/\b(each year|every year|year by year|by year|yearly|per year|annual\w*)\b/) ? 'year'
+            : has(DAILY) && stat !== 'average' && stat !== 'count' ? 'day' : null;
+
+  // Any amount it names, in the measure's unit: watts are kilowatts over a thousand; selling is grid power below zero.
+  const amount = (re: RegExp): number | null => {
+    const m = re.exec(t);
+    if (!m) return null;
+    const n = Number(m[1]);
+    return /^w|watt/.test(m[2] ?? '') ? n / 1000 : n;
+  };
+  const UNIT = '\\s*(kwh|mwh|kw|w|watts?|%|percent|units?)?';
+  let above = amount(new RegExp(`\\b(?:above|over|more than|greater than|higher than|exceed\\w*|at least|beyond)\\s+(-?\\d+(?:\\.\\d+)?)${UNIT}`));
+  let below = amount(new RegExp(`\\b(?:below|under|less than|lower than|at most|fewer than)\\s+(-?\\d+(?:\\.\\d+)?)${UNIT}`));
+  if (measure === 'battery_high' && above == null && has(/\bfull\b/)) above = 97;
+  if (measure === 'battery_low' && below == null && has(/\b(empty|flat)\b/)) below = 21;
+  // Selling or discharging "more than 3 kW" is below -3, and only such moments count: the most of it is the lowest figure.
+  if (outward) {
+    if (above != null) { below = -above; above = null; } else if (below == null) below = 0;
+    if (stat === 'highest') stat = 'lowest'; else if (stat === 'lowest') stat = 'highest';
+  }
+  return {
+    measure,
+    ...(stat && !(by && stat !== 'count' && has(/\b(which|what) (hour|time|day|weekday|week|month|year)\b/)) ? { stat } : {}),
+    ...(by ? { by } : {}),
+    ...(above != null ? { above } : {}),
+    ...(below != null ? { below } : {}),
+  };
+}
+
+/**
+ * A question asking what a word means - "what is kWp?", "what is a string?", "what does SOC mean?" -
+ * not asking for a value: "what is the PV1 voltage?", "what is my SOC?".
+ */
+function defining(t: string): boolean {
+  const asks = /\b(what does .* mean|meaning of|define|definition|stands? for|explain (what|the term)|what is meant by|difference between)\b/.test(t)
+    || /^(what(\s+is|\s+are|'s|s)|explain)\s+(?!the\b|my\b|our\b|your\b|its\b|their\b)/.test(t.trim());
+  return asks && !/\b(my|our|your|now|today|yesterday|this|last|current\w*|total|how much|many)\b/.test(t)
+    && findHelp(t).some((e) => e.term);
+}
+
+/**
+ * Two or three questions in one message - "how much did I make yesterday, and what is the battery at?" -
+ * as separate questions. A time of day ("between 2pm and 4pm") and a follow-up ("and the week before?")
+ * stay whole: an "and" splits only before a new question.
+ */
+function splitQuestions(q: string): string[] {
+  const parts = q.split(/\?\s+|\s*;\s*|,?\s+\b(?:and also|also|as well as|plus)\b\s+|,?\s+and\s+(?=(?:what|how|when|which|who|is|are|was|were|did|does|do|show|give|tell|plot|graph|chart|draw|list|compare|analy\w*)\b)/i)
+    .map((s) => s.trim()).filter((s) => s.length > 3);
+  return parts.length > 1 ? parts.slice(0, MAX_CALLS) : [q];
+}
+
 /** What a question is about, from its words. */
 function kindOf(t: string): string | null {
+  // A word explained, from the guide's own entries.
+  if (defining(t)) return 'define';
   // An analysis - what stands out, why, what to do - first: "how can I improve" is not how to use the app.
-  if (/\b(analy\w*|insights?|how can (i|we) (improve|save|do better|use more)|improve|optimi[sz]\w*|recommend\w*|suggest\w*|advice|advise|what should (i|we) do|anything (unusual|wrong|odd|strange))\b/.test(t)) return 'analysis';
+  if (/\b(analy\w*|insights?|how can (i|we) (improve|save|do better|use more)|improve|optimi[sz]\w*|recommend\w*|suggest\w*|advice|advise|tips?|what should (i|we) do|anything (unusual|wrong|odd|strange)|everything (ok|okay|fine|good|alright|all right))\b/.test(t)) return 'analysis';
+  // "Is my output normal?", "are the panels ok?": how things stand - but a datalogger or a connection is the outages'.
+  if (/\b(is|are) (my|our|the)\b.*\b(normal|ok|okay|fine|good|healthy|alright|right)\b/.test(t) && !/\b(now|currently)\b/.test(t)
+    && !/\b(wi-?fi|data ?logger|logger|online|offline|relay|log ?in|connect\w*)\b/.test(t)) return 'analysis';
   // "How is my system doing?" asks for the analysis; "...doing now?" for the moment.
   if (/\bhow (is|are) (my|the|our) (solar|system|systems|panels|plant|installation|setup)s? (doing|performing)\b/.test(t) && !/\b(now|currently|today)\b/.test(t)) return 'analysis';
+  // Since it was installed - before "install", which is how to set something up.
+  if (LIFETIME.test(t)) return 'figures';
   if (/\b(how (do|can|to|should)|where (is|do|can|are|should)|set ?up|turn (on|off)|enable|disable|install|connect)\b/.test(t)) return 'help';
   if (FUTURE.test(t)) return 'future';
   if (/\b(report|summar(y|ise|ize))\b/.test(t)) return 'report';
   // Offline, not working, since when, when it last made power, the relay and its login - before "why", since "why is it offline?" is this.
   if (/\b(of+\s?-?line|online|not (working|reporting|running|generating|producing|online)|is \w+ (working|running|reporting)|stop(ped|s)?|stop working|outages?|downtime|no (data|readings)|since when|from when|went (off|down|quiet|dark)|c[ao]me back|last (reading|report\w*|seen|gen[a-z]*r[a-z]*t\w*|produc\w*|made|power|worked)|relays?|log ?in|expir\w*|data ?logger|connected|connection|wi-?fi)\b/.test(t)) return 'outage';
+  // A figure asked for as such - how many days, the first or last time, each weekday - but a count of production's days is the statistics'.
+  if (FIGURE_ASKED.test(t)) {
+    const f = figuresIn(t);
+    if (f && !(f.measure === 'made' && f.stat === 'count')) return 'figures';
+  }
   if (/\bwhy\b/.test(t)) return 'why';
   if (/\b(degrad\w*|declin\w*|dirty|trend|health|getting worse|losing|slowly)\b/.test(t)) return 'trend';
   if (/\b(faults?|alarms?|errors?|warnings?)\b/.test(t)) return 'faults';
@@ -286,14 +446,28 @@ function kindOf(t: string): string | null {
   if (/\b(temp\w*|heat\w*|hot|hottest|overheat\w*|degrees?)\b/.test(t)) return 'inverter';
   // A graph over a time, or the usual day hour by hour.
   if (/\b(graph\w*|chart\w*|plot\w*|visuali[sz]\w*|draw)\b/.test(t)) return 'chart';
-  if (/\b(which hours?|what time|time of (the )?day|hour of (the )?day|by hour|each hour|daily pattern|typical day)\b|\bwhen do(es)?\b.*\bpeak/.test(t)) return 'profile';
-  if (/\b(batter(y|ies)|soc|state of charge|discharg\w*)\b/.test(t)) return 'battery';
+  if (/\b(which hours?|what hours?|what time|time of (the )?day|hour of (the )?day|by hour|each hour|daily pattern|typical day|at night|overnight|night ?time|during the night|in the (morning|evening))\b|\bwhen do(es)?\b.*\bpeak/.test(t)) return 'profile';
+  // The most sold or bought at once, the battery's fastest discharge, the lowest daily peak: a statistic no other tool keeps - unless it is now.
+  const f = figuresIn(t);
+  if (f && /^(grid|battery_power|peak_power)$/.test(String(f.measure)) && !/\b(now|currently|at the moment|at present)\b/.test(t)
+    && ((f.stat && f.stat !== 'total') || (/\d/.test(t) && (f.above != null || f.below != null)))) return 'figures';
+  // The battery; its average charge, exactly, is a figure.
+  if (/\b(batter(y|ies)|soc|state of charge|discharg\w*)\b/.test(t)) return /\b(average|avg|mean|typical)\b/.test(t) && figuresIn(t) ? 'figures' : 'battery';
+  // What is happening now - the load, the power, the grid - is the moment, not a period's energy.
+  if (/\b(right now|now|currently|at the moment|at present|live)\b/.test(t)) return 'now';
+  // Bought against sold, or the net of them: both totals, side by side.
+  if (/\b(import\w*|bought|buy\w*|from the grid)\b/.test(t) && /\b(export\w*|sold|sell\w*|feed[- ]?in|to the grid)\b/.test(t)) return 'trade';
+  if (/\bnet (grid|import\w*|export\w*|usage|use|consumption|metering)\b/.test(t)) return 'trade';
   // How the power went through a day: its swings, dips and peak. Over many days, that is the statistics.
   if (/\b(fluc\w*|swing\w*|spikes?|dips?|dipped|choppy|stable|steady|unstable|stability|curve|profile|variab\w*|variation|vary|varies|varied|peak(ed|s)?|highest power|max(imum)? power|min(imum)? power)\b/.test(t)) return 'power';
   // How much of the sun's energy was used at home, and how much of the house's use the sun covered.
   if (/\bself[- ]?(consum\w*|us\w*|suffic\w*)|\b(use[ds]?|consumed) (it )?(myself|ourselves)\b|\bhow much of (my|our|the) (solar|power|energy|generation|production)\b|\bpercent\w*\b.*\b(myself|at home|ourselves)\b/.test(t)) return 'self';
   if (/\b(sav\w*|money|earn\w*|bill|cost|worth|rupees?|dollars?|pounds?|euros?|pkr|inr|usd|currency|co2|carbon|tariff)\b/.test(t)) return 'saved';
-  if (/\b(stats?|statistic\w*|average|mean|median|capacity factor|specific yield|consistent|how many days)\b/.test(t)) return 'stats';
+  // The statistics are production's: an average of anything else is a figure.
+  if (/\b(stats?|statistic\w*|average|mean|median|capacity factor|specific yield|consistent|how many days)\b/.test(t)) {
+    const f = figuresIn(t);
+    return f && f.measure !== 'made' && f.measure !== 'power' ? 'figures' : 'stats';
+  }
   if (/\b(export\w*|sold|sell\w*|feed[- ]?in)\b/.test(t)) return 'exported';
   if (/\b(import\w*|bought|buy|from the grid)\b/.test(t)) return 'imported';
   // "How do I use..." is help, caught above; any other "use" is the house's.
@@ -340,6 +514,42 @@ export function guessCalls(question: string, systems: Sys[], now: number, off: n
   const today = isoDay(dayNo(now, off));
   const period = periodIn(t, today);
   const system = systemIn(question, systems);
+  // Tools that look at a period, and so can look at another.
+  const periodic = (c: Call) => !DATE_TOOLS[c.tool] && !['inverter', 'app_help', 'status_now', 'performance_trend'].includes(c.tool);
+  // Two or three questions in one are each answered: a part that names no period or system takes the message's,
+  // unless it asks about now.
+  const parts = splitQuestions(question);
+  if (parts.length > 1) {
+    const calls = parts.flatMap((part) => {
+      const ofNow = /\b(right now|now|currently|at the moment|at present|live)\b/.test(mend(part));
+      return (guessCalls(part, systems, now, off) ?? []).map((c) => {
+        const own = c.args.range !== undefined || c.args.from !== undefined || c.args.date !== undefined;
+        const args: Args = { ...c.args };
+        if (!own && !ofNow && period && periodic(c)) Object.assign(args, period);
+        if (!own && !ofNow && period && DATE_TOOLS[c.tool]) args.date = dateOf(period, String(args.date ?? DATE_TOOLS[c.tool]));
+        if (system && args.system === undefined && c.tool !== 'app_help' && c.tool !== 'compare_systems') args.system = system.name;
+        return { tool: c.tool, args };
+      });
+    });
+    const seen = new Set<string>();
+    const unique = calls.filter((c) => !seen.has(JSON.stringify(c)) && !!seen.add(JSON.stringify(c)));
+    if (unique.length) return unique.slice(0, MAX_CALLS);
+  }
+  const calls = readQuestion(t, question, systems, now, off, previous, today, period, system);
+  // Two periods set against each other - "this week than last week" - are each looked at the same way.
+  const second = calls?.length ? secondPeriodIn(t, today) : null;
+  if (!calls || !second) return calls;
+  const again = calls.flatMap((c) => {
+    const { range: _r, from: _f, to: _t, date: _d, ...rest } = c.args;
+    if (periodic(c)) return [{ tool: c.tool, args: { ...rest, ...second } }];
+    if (DATE_TOOLS[c.tool] && dateOf(second, '')) return [{ tool: c.tool, args: { ...rest, date: dateOf(second, '') } }];
+    return [];
+  });
+  return [...calls, ...again].slice(0, MAX_CALLS);
+}
+
+/** One question read: its kind, the period and the system it names, or a follow-up of the turn before. */
+function readQuestion(t: string, question: string, systems: Sys[], now: number, off: number, previous: Call[], today: string, period: Args | null, system: Sys | null): Call[] | null {
   const named = (a: Args = {}): Args => ({ ...a, ...(period ?? {}), ...(system ? { system: system.name } : {}) });
   const kind = kindOf(t);
   const last = previous[0];
@@ -429,7 +639,23 @@ export function guessCalls(question: string, systems: Sys[], now: number, off: n
       const by = /\b(which|best|worst|most|least|highest|lowest)\s+month\b/.test(t) ? 'month' : /\b(which|best|worst|most|least|highest|lowest)\s+day\b/.test(t) ? 'day' : null;
       return [{ tool: 'energy', args: named(by ? { group_by: by } : {}) }];
     }
-    default: return null;
+    case 'define': return [{ tool: 'app_help', args: { question } }];
+    case 'trade': return [{ tool: 'figures', args: named({ measure: 'bought', stat: 'total' }) }, { tool: 'figures', args: named({ measure: 'sold', stat: 'total' }) }];
+    case 'figures': {
+      // "The most ever made in a day": ever is as far back as a day's figure reaches, a year.
+      const f = figuresIn(t)!;
+      const ever = !period && /\b(ever|all[- ]time|of all time)\b/.test(t) && f.measure !== 'lifetime_made';
+      return [{ tool: 'figures', args: { ...named(f), ...(ever ? { range: 'last_12_months' } : {}) } }];
+    }
+    default: {
+      // Nothing above fits. A figure its words name; else, for anything about the systems, how they are doing -
+      // now, when it asks of now, or the analysis. Only a question about nothing here gets no call.
+      const f = figuresIn(t);
+      if (f) return [{ tool: 'figures', args: named(f) }];
+      if (!system && !ABOUT_SOLAR.test(t)) return null;
+      if (/\b(now|right now|currently|at the moment|today)\b/.test(t)) return [{ tool: 'status_now', args: system ? { system: system.name } : {} }];
+      return [{ tool: 'analysis', args: named() }];
+    }
   }
 }
 
@@ -454,6 +680,10 @@ async function understandingPrompt(systems: Sys[], today: string): Promise<strin
     'For a graph or chart of power, load, grid, battery power or battery charge over a time, use chart (with versus for a second measure); for the usual day hour by hour - when the load peaks, which hours buy from the grid - chart with profile "hour_of_day". A graph of energy per day or month is energy.',
     "For anything the inverter itself shows - PV strings, voltages, currents, the grid's frequency, the power factor, its temperature, the DC bus, the battery's own readings - use inverter.",
     'For an analysis - how the systems are doing, what stands out and why, what to do, insights, how to improve, anything unusual - use analysis; for the figures of a period set out in full, report.',
+    'For any other figure the records hold - a total, an average, the highest or lowest, how many days it was above or below an amount, the first or last time, '
+      + 'by hour, weekday, day, week, month or year, or what was made since the system was installed - use figures, whatever words the question uses.',
+    'For what a word means - kWp, SOC, net metering, a string - use app_help with the question. If the records do not hold what is asked - the past of a '
+      + "string's voltage or of a temperature, anything to come - make no call, and say so plainly in reply.",
     'SolarLens has no forecast: for tomorrow or the future, make no call and reply that it reports what has been made.',
     'Answer with JSON only: {"calls": [{"tool": "<name>", "args": {...}}], "reply": "<text>"}.',
     'Leave "calls" empty only for a greeting or when you must ask back; then "reply" is one or two sentences, and never states a figure.',
@@ -523,6 +753,22 @@ export function checkTurns(raw: unknown): Turn[] | string {
 
 type Outcome = { status: number; body: Reply | { error: string } };
 
+/** What SolarLens can answer, said when a message asks nothing it can look up. */
+const CAN_DO = 'I can analyse how your systems are doing - what stands out, why, and what to do - and answer questions about the energy they made, used, bought and sold; '
+  + 'any figure the records hold - totals, averages, highs and lows, how many days, the first or last time, by hour, weekday, day, week, month or year; '
+  + 'how they compare; their faults; why a day was low; whether one is slowly making less; statistics and reports for any period; graphs of any measure; '
+  + 'any part of a day and how steady the power was; the battery; what the inverter shows; whether a system is offline and since when; the money saved; '
+  + 'what a word means; and how to use SolarLens. Try "analyse the last 30 days", "a report on last month" or "which hours do I buy from the grid?".';
+
+/** A greeting, thanks, or who SolarLens is, answered as such: a message asks nothing it can look up. */
+function smallTalk(question: string): string | null {
+  const t = question.toLowerCase();
+  if (/\b(thanks|thank you|thx|shukri\w*|cheers|appreciated)\b/.test(t)) return "You're welcome. Ask anything else about your systems whenever you like.";
+  if (/^\s*(hi|hello|hey|hiya|salam|assalam\w*|aoa|good (morning|afternoon|evening))\b/.test(t)) return `Hello! ${CAN_DO}`;
+  if (/\b(who|what) are you\b|\bwhat can you do\b|\bwhat do you know\b/.test(t)) return `I am SolarLens's assistant, and every figure I give is worked out from your own systems' records. ${CAN_DO}`;
+  return null;
+}
+
 /**
  * Answer the conversation's last message. `calls`, when given, are what to
  * look up, decided already (a "Why?" button); otherwise the model decides -
@@ -577,10 +823,7 @@ export async function converse(env: Env, input: { messages: unknown; calls?: Cal
         // What is still to come: no forecast is made here, and saying so beats a figure about something else.
         ? "SolarLens has no forecast: it reports what your systems have made, and - on each system's page - what today's sunlight so far allowed. "
           + 'Ask what they made yesterday or last week, or how a day compared with a usual one.'
-        : 'I can analyse how your systems are doing - what stands out, why, and what to do - and answer questions about the energy they made, used, bought and sold; '
-          + 'how they compare; their faults; why a day was low; whether one is slowly making less; statistics and reports for any period; graphs of any measure; '
-          + 'any part of a day and how steady the power was; the battery; what the inverter shows; whether a system is offline and since when; the money saved; '
-          + 'and how to use SolarLens. Try "analyse the last 30 days", "a report on last month" or "which hours do I buy from the grid?".',
+        : smallTalk(question) ?? CAN_DO,
       worded: safe ? 'model' : 'solarlens', understood, kind: 'chat', calls: [], results: [], errors: [],
     });
   }

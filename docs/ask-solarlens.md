@@ -18,7 +18,14 @@ up:
   worst, how much days vary, capacity factor, low days
 - *"A report on last month"* - a full report, to read or to download and print
 - *"Why was yesterday low?"*, *"Is any system slowly making less?"*
+- *"How many days was the battery full?"*, *"When did I first buy more than
+  2 kW?"*, *"Which weekday do we use the most?"*, *"What has it made since it
+  was installed?"* - any figure the records hold
+- *"What is kWp?"*, *"The difference between kW and kWh"* - the words explained
 - *"How do I get alerts on Telegram?"* - how to do something in the app, and where
+
+These are examples, not a menu: ask anything about the systems, in your own
+words, two or three questions at once if you like.
 
 Every answer comes with the figures it came from. Beside the conversation are
 two things that run on their own every Monday: a **weekly report**, which
@@ -92,24 +99,41 @@ SolarLens reads the question itself. It works out:
   day hour by hour (*which hours*, *what time*, *when does it peak*), anything
   the inverter shows (*PV1*, *strings*, *voltage*, *current*, *frequency*,
   *power factor*, *BMS*, *temperature*), how many days made more or less than
-  an amount, whether a system is offline and since when, the relay's login, or
-  how to use the app. A question about tomorrow is told plainly that SolarLens
-  makes no forecast;
+  an amount, any other figure (*how many days*, *the first* or *last time*,
+  *each weekday*, *which hour*, *the most ever*, *since it was installed*),
+  whether a system is offline and since when, the relay's login, what a word
+  means (*what is kWp*, *what does SOC mean*), or how to use the app. A
+  question about tomorrow is told plainly that SolarLens makes no forecast;
+- for any other figure, the measure, how, by what and any amount, in its unit:
+  *the battery full* is its charge above 97%, *empty* below 21%; *more than
+  1500 watts* is 1.5 kW; *selling* or *discharging more than 3 kW* is below
+  -3 kW, so *the highest export* is the lowest figure;
 - for a graph, the measures in the order named - *PV against load* is power,
   then load - and the step and the reading asked for: *every 15 minutes*,
   *hourly*, *each day*, *weekly*; *the highest*, *the lowest*;
-- the period: *last week*, *this year*, *in May*, *21 September*, *2025*, *the
-  last 3 days*, a date;
+- the period: *last week*, *this year*, *in May*, *21 September*, *3rd
+  September 2026*, *2025*, *the last 3 days*, *last night*, a date - the first
+  one named, so *August this year* is August - and a second one set against
+  it: *this week than last week*, *August compared with July*, each looked up;
 - a time of day: *between 2pm and 4pm*, *2-4pm*, *from 14:00 to 16:30*,
   *after 3pm*, *this afternoon*;
 - the system, by its name, its short name, or a word only its name has -
   *orchard* for a system called *Orchard Hybrid*.
 
 It forgives typing slips in the words it routes on - *genration*,
-*fluctarion*, *septmber*, *yesterady* - and a time of day needs no
-"between" at all: *2pm aand 4pm* is enough. The words it mends were chosen
-because nothing common in English sits near them, so *expected* is never read
-as *exported*, nor *warning* as *morning*.
+*fluctarion*, *septmber*, *yesterady*, two letters swapped as in *yetserday* -
+writes out short forms (*wk*, *yr*, *tdy*, *yday*, *avg*, *batt*, *hrs*, *exp*,
+*imp*), and a time of day needs no "between" at all: *2pm aand 4pm* is enough.
+The words it mends were chosen because nothing common in English sits near
+them, so *expected* is never read as *exported*, nor *warning* as *morning*.
+
+Two or three questions in one message - *"how much did I make yesterday, and
+what is the battery at?"* - are each answered, and each takes the message's
+period and system unless it names its own. A question about the systems that
+fits none of these readings is still answered: with how they are doing now if
+it asks about now or today, and with an analysis otherwise. A greeting, thanks,
+or *"who are you?"* gets a reply of its own, and anything else is told what
+SolarLens can answer.
 
 A follow-up works the same way. *"And the one before?"* steps back a whole
 month, year or week - or as many days again. *"For the garage?"* keeps the
@@ -119,7 +143,7 @@ period and changes the system. The answer is the figures' own sentences.
 
 | Tool | Answers |
 |---|---|
-| `status_now` | what each system is doing right now: power, today so far, battery, whether it is reporting, and its inverter's temperature as last read - SolarLens keeps the latest temperature, not the day's |
+| `status_now` | what each system is doing right now: power, today so far, battery, what the house is drawing and which way the grid flows, whether it is reporting, and its inverter's temperature as last read - SolarLens keeps the latest temperature, not the day's |
 | `outages` | whether each system is reporting now and, if not, since when; the last time it made power; and each stretch of daylight with no readings over a period - silence at night, when an inverter without a battery switches off, is not counted. It says why where something else reports it: the plant's datalogger offline since a time, or for SolisCloud the relay silent, or its login run out - and clears the relay when it is still reporting. It gives the relay's SolisCloud login date |
 | `inverter` | what each inverter itself shows, from its latest device record: each PV string's voltage, current and power, each AC phase's voltage and current, the grid's frequency, the power factor, the inverter's temperature, the DC bus, and the battery's own readings - its voltage, current and temperature, and the BMS's charge, limits and capacity. It compares the strings and names one making under half of the best while the inverter is producing - shade, dirt, or a fault on that string - and says when they cannot be compared (old readings, or none producing). `part` narrows the words to the strings, the grid side, the battery or the temperature; every reading is in the table either way |
 | `energy` | energy over any period - made, used by the house, bought and sold - in total or per day, week, month or year, for one system or all; the best and lowest period - day by day, from days wholly recorded for every system; with a tariff set, the money saved and CO₂ avoided (measure `saved`, which says so when no tariff is set); and how much of what was made was used at home and how much of what the houses used the sun covered (measure `self`, over the systems that report their sales and purchases) |
@@ -132,8 +156,9 @@ period and changes the system. The answer is the figures' own sentences.
 | `day_report` | why a day was low: each system's energy against a usual day, the sunlight against usual, what that sunlight should have made, stretches with no readings, faults - and the likely cause |
 | `performance_trend` | whether a system is slowly losing output: energy made against the sunlight on its panels, week by week |
 | `analysis` | an analysis of a period - the last 30 days unless named, a year at most - that reads the figures together and says what stands out, why, and what to do: each system against the days before and for its sunlight, the systems per kWp, the lowest day and its likely cause, the power used at home and when it is bought, the always-on load, the battery, whether a system is down now and why, days not wholly recorded, faults and weak strings. Each finding needs a look, is worth knowing, or is fine, with its figures; the evidence follows as its parts (see *Analysis* below) |
+| `figures` | any figure the records hold, worked out as asked (see *Any figure* below): a day's energy - made, used, bought, sold, into and out of the battery - a day's peak power, the battery's lowest and highest charge in a day, or at any moment the power, the house load, the grid, the battery's power or charge; as a total, an average, the highest or lowest and when, how many days it was above or below an amount, or the first or last time; by hour of the day, weekday, day, week, month or year - and what each inverter has made since it was installed |
 | `report` | a full report on a period, in one: the headline figures, then energy, the systems side by side (with more than one), the statistics, the faults and the health check, each as its own part |
-| `app_help` | how to do something in SolarLens, and on which tab - from the guide written into the Worker (`src/help.ts`), never made up by a model |
+| `app_help` | how to do something in SolarLens, and on which tab, and what a word means - kW and kWh, kWp, performance ratio, capacity factor, self-consumption, net metering, SOC and the BMS, battery modes, strings and MPPT, power factor, base load, irradiance, degradation, the datalogger and the relay - from the guide written into the Worker (`src/help.ts`), never made up by a model |
 
 A period is a named one - today, yesterday, this or last week, month or year,
 the last 7 or 30 days, the last 12 months - or two dates. Weeks run Monday to
@@ -141,7 +166,7 @@ Sunday, and days are the plants' own. With no period named, `energy` and
 `compare_systems` cover this month, `faults` and `stats` the last 30 days,
 `outages` and `battery` the last 7 days, a `chart` today (a point a day, the
 last 30 days; a week, the last twelve; the average day, the last 7 days), an
-`analysis` the last 30 days, and a `report` last month; `power_day` takes one day, today unless
+`analysis` and `figures` the last 30 days, and a `report` last month; `power_day` takes one day, today unless
 named, and times of day as HH:MM on the plant's clock; `inverter` takes no
 period, since it reads the latest record. The same tools are served without a
 model at `GET /api/tools` and `GET /api/tools/<name>?<arguments>`. The MCP
@@ -179,6 +204,38 @@ readings - is kept as each inverter last reported it, not through the day. So
 *"what is the PV1 voltage?"* is answered with the latest reading and when it
 was read, but a graph of a string's voltage over a day cannot be drawn: the
 vendors' records are only ever the newest.
+
+### Any figure
+
+The other tools answer the questions people ask most, each in its own way. The
+`figures` tool answers the rest - any figure the records hold, worked out as
+asked:
+
+- **What**: a day's energy - made, used by the house, bought, sold, taken in
+  or given out by the battery - a day's highest power, or the battery's lowest
+  or highest charge in a day; or, from every reading, the power made, the house
+  load, the grid, the battery's power or its charge; or what each inverter has
+  made since it was installed, by its own counter.
+- **How**: the total, the average, the highest or lowest and when, how many
+  days it was above or below an amount, or the first or last time it was.
+- **By**: the hour of the day, the weekday, the day, week, month or year.
+
+So *"how many days was the battery full last month?"* counts the days its
+highest charge passed 97%; *"when did I first sell more than 3 kW?"* finds the
+first reading below -3 kW, since selling is the grid below zero; *"which weekday
+do we use the most?"* averages each weekday, as there are not as many of each;
+*"the most I ever made in a day"* looks back twelve months. A day's figure asked
+for by the hour is the reading behind it: the energy used, hour by hour, is the
+house load at each hour, since an hour's average in kW is that hour's energy in
+kWh; a day's peak by the hour is the highest power at each hour.
+
+A day's figure counts whole days only - part of a day, and today, would pull an
+average or a low down - except in a total, which counts what each day recorded.
+It covers a year at most, and a figure from every reading three months, as a
+graph does. With more than one system, energy is also given for all of them
+together. A system that does not record something at all - an on-grid plant has
+no house meter or battery - is said once in a note rather than given a zero,
+and *never above 5 kW* is kept apart from *no record*.
 
 ### Analysis
 

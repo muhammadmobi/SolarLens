@@ -39,7 +39,8 @@ const DAY = 86400;
 /** One argument a tool takes. */
 export type ParamSpec =
   | { type: 'string'; description: string; enum?: readonly string[]; pattern?: RegExp; optional?: boolean }
-  | { type: 'integer'; description: string; min: number; max: number; optional?: boolean };
+  | { type: 'integer'; description: string; min: number; max: number; optional?: boolean }
+  | { type: 'number'; description: string; min: number; max: number; optional?: boolean };
 
 /** What every tool answers with. */
 export interface ToolResult {
@@ -163,6 +164,7 @@ export const DEFAULT_RANGE: Record<string, Range> = {
   battery: 'last_7_days',
   chart: 'today',
   analysis: 'last_30_days',
+  figures: 'last_30_days',
 };
 
 /**
@@ -331,6 +333,12 @@ export function checkArgs(tool: Tool, raw: unknown): Args | string {
       out[name] = n;
       continue;
     }
+    if (spec.type === 'number') {
+      const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+      if (!Number.isFinite(n) || n < spec.min || n > spec.max) return `${name} is a number from ${spec.min} to ${spec.max}.`;
+      out[name] = n;
+      continue;
+    }
     if (typeof v !== 'string' && typeof v !== 'number') return `${name} is text.`;
     let s = String(v).trim().slice(0, 200);
     if (spec.enum) {
@@ -348,8 +356,8 @@ export function checkArgs(tool: Tool, raw: unknown): Args | string {
 export function jsonSchemaOf(tool: Tool): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   for (const [name, spec] of Object.entries(tool.params)) {
-    properties[name] = spec.type === 'integer'
-      ? { type: 'integer', minimum: spec.min, maximum: spec.max, description: spec.description }
+    properties[name] = spec.type === 'integer' || spec.type === 'number'
+      ? { type: spec.type, minimum: spec.min, maximum: spec.max, description: spec.description }
       : { type: 'string', description: spec.description, ...(spec.enum ? { enum: [...spec.enum] } : {}), ...(spec.pattern ? { pattern: spec.pattern.source } : {}) };
   }
   const required = Object.entries(tool.params).filter(([, s]) => !s.optional).map(([n]) => n);
@@ -360,7 +368,8 @@ export function jsonSchemaOf(tool: Tool): Record<string, unknown> {
 
 const statusNow: Tool = {
   name: 'status_now',
-  description: "What each system is doing right now: its power, what it has made today, its battery, whether it is reporting, and its inverter's temperature.",
+  description: "What each system is doing right now: its power, what it has made today, what the house is drawing and which way the grid flows, its battery, "
+    + "whether it is reporting, and its inverter's temperature.",
   params: { system: systemParam },
   async run({ db, now }, args) {
     const all = await loadSystems(db);
@@ -402,21 +411,37 @@ const statusNow: Tool = {
       const on = now - r.ts <= STALE_AFTER_S && r.status !== 'offline';
       return ` ${s.name}'s battery ${on ? `is at ${Math.round(r.battery_soc)}%` : `was at ${Math.round(r.battery_soc)}% at its last reading, ${stamp(r.ts, s.off ?? off)}`}.`;
     }).join('');
+    // What each house draws now, and which way the grid flows, where a system meters them and reports now.
+    const flows: ToolResult['facts'] = {};
+    const flowWords = chosen.map((s) => {
+      const r = live.find((x) => x.id === s.id);
+      if (!r?.ts || now - r.ts > STALE_AFTER_S || r.status === 'offline') return '';
+      const k = chosen.length === 1 ? '' : `${s.alias}_`;
+      const parts: string[] = [];
+      if (r.load_power_w != null) { parts.push(`the house is drawing ${kw(r.load_power_w)}`); flows[`${k}load_now_w`] = Math.round(r.load_power_w); }
+      // Under 20 W either way is the meter's drift, not a flow.
+      if (r.grid_power_w != null && Math.abs(r.grid_power_w) >= 20) {
+        parts.push(r.grid_power_w > 0 ? `buying ${kw(r.grid_power_w)} from the grid` : `selling ${kw(-r.grid_power_w)} to the grid`);
+        flows[`${k}grid_now_w`] = Math.round(r.grid_power_w);
+      }
+      return parts.length ? ` At ${s.name}, ${parts.join(', ')}.` : '';
+    }).join('');
     return {
       tool: 'status_now',
       title: 'Right now',
       period: { from: isoDay(dayNo(now, off)), to: isoDay(dayNo(now, off)), label: `today (${dayWords(isoDay(dayNo(now, off)), true)})` },
       columns: ['System', 'Status', 'Power now (W)', 'Made today (kWh)', 'Battery (%)', 'Last reading'],
       rows,
-      facts: { power_now_w: power, made_today_kwh: today, reporting: online, systems: chosen.length, ...tempFacts },
+      facts: { power_now_w: power, made_today_kwh: today, reporting: online, systems: chosen.length, ...flows, ...tempFacts },
       notes: [
         ...(freshness.offline.length ? [`Not reporting now: ${freshness.offline.join(', ')}. An offline system counts as making nothing.`] : []),
         ...(temps.length ? ["An inverter's temperature is kept as last read, not through the day."] : []),
       ],
       summary: `${who} ${chosen.length === 1 ? 'is' : 'are'} making ${power >= 1000 ? `${r2(power / 1000)} kW` : `${power} W`} now, and ${kwh(today)} so far today`
         + `${chosen.length > 1 ? `; ${online} of ${chosen.length} reporting` : online ? '' : '; it is not reporting'}.`
-        // Each battery's charge - the last one read, said as such when the system is not reporting now - and each inverter's temperature.
-        + batteries + tempWords,
+        // Each house's draw and the grid's way, each battery's charge - the last one read, said as such when the system is not
+        // reporting now - and each inverter's temperature.
+        + flowWords + batteries + tempWords,
       freshness,
     };
   },
@@ -1916,6 +1941,12 @@ const BUYING_W = 50;
  */
 const MORNING_MIN = 9 * 60;
 const AFTERNOON_MIN = 15 * 60;
+/** Whether a system's day was wholly recorded: MIN_SAMPLES readings, from the morning into the afternoon on its clock. */
+function recordedWhole(r: DayRow, s: Sys, off: number): boolean {
+  if (r.samples < MIN_SAMPLES) return false;
+  const minute = (ts: number) => Math.floor(((((ts + (s.off ?? off)) % DAY) + DAY) % DAY) / 60);
+  return minute(r.first_ts) <= MORNING_MIN && minute(r.last_ts) >= AFTERNOON_MIN;
+}
 /** The order areas are said in, within how they stand. */
 const AREAS = ['Reporting', 'Production', 'Systems compared', 'The battery', 'Using your own power', 'The house', 'The lowest day', 'Strings', 'Faults', 'Money'];
 
@@ -1976,12 +2007,7 @@ const analysisTool: Tool = {
     const lastIso = isoDay(last);
     const inPeriod = rows.filter((r) => r.day >= p.from && r.day <= lastIso && ids.includes(r.inverter_id));
     const before = compared ? rows.filter((r) => r.day >= isoDay(first - span) && r.day < p.from && ids.includes(r.inverter_id)) : [];
-    const minuteOf = (ts: number, s: Sys) => Math.floor(((((ts + (s.off ?? off)) % DAY) + DAY) % DAY) / 60);
-    const whole = (r: DayRow | undefined): r is DayRow => {
-      if (!r || r.yield_kwh == null || r.samples < MIN_SAMPLES) return false;
-      const s = chosen.find((x) => x.id === r.inverter_id)!;
-      return minuteOf(r.first_ts, s) <= MORNING_MIN && minuteOf(r.last_ts, s) >= AFTERNOON_MIN;
-    };
+    const whole = (r: DayRow | undefined): r is DayRow => !!r && r.yield_kwh != null && recordedWhole(r, chosen.find((x) => x.id === r.inverter_id)!, off);
     const daysOf = (s: Sys) => inPeriod.filter((r) => r.inverter_id === s.id);
     const mean = (xs: number[]) => xs.reduce((a, x) => a + x, 0) / xs.length;
     const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
@@ -2414,6 +2440,356 @@ const analysisTool: Tool = {
   },
 };
 
+// ---------------------------------------------------------------- any figure
+
+/**
+ * What the figures tool works out. A day's figure is each inverter's own day counter, or the day's
+ * record - one figure a system a day - and a moment's is every reading. Only these columns are ever
+ * written into a query: nothing asked for is.
+ */
+const DAY_FIGURES = {
+  made: { field: 'yield_kwh', unit: 'kWh', words: 'energy made', adds: true },
+  used: { field: 'load_kwh', unit: 'kWh', words: 'energy the house used', adds: true },
+  bought: { field: 'import_kwh', unit: 'kWh', words: 'energy bought from the grid', adds: true },
+  sold: { field: 'export_kwh', unit: 'kWh', words: 'energy sold to the grid', adds: true },
+  battery_in: { field: 'batt_charge_kwh', unit: 'kWh', words: 'energy the battery took in', adds: true },
+  battery_out: { field: 'batt_discharge_kwh', unit: 'kWh', words: 'energy the battery gave out', adds: true },
+  peak_power: { field: 'peak_w', unit: 'kW', words: "a day's highest power", adds: false },
+  battery_low: { field: 'soc_min', unit: '%', words: "the battery's lowest charge in a day", adds: false },
+  battery_high: { field: 'soc_max', unit: '%', words: "the battery's highest charge in a day", adds: false },
+} as const;
+const MOMENT_FIGURES = {
+  power: { column: 'ac_power_w', unit: 'kW', words: 'power made' },
+  load: { column: 'load_power_w', unit: 'kW', words: 'house load' },
+  grid: { column: 'grid_power_w', unit: 'kW', words: 'grid power' },
+  battery_power: { column: 'battery_power_w', unit: 'kW', words: 'battery power' },
+  battery_charge: { column: 'battery_soc', unit: '%', words: 'battery charge' },
+} as const;
+type DayFigure = keyof typeof DAY_FIGURES;
+type MomentFigure = keyof typeof MOMENT_FIGURES;
+const FIGURE_STATS = ['total', 'average', 'highest', 'lowest', 'count', 'first', 'last'] as const;
+type FigureStat = (typeof FIGURE_STATS)[number];
+const FIGURE_BY = ['none', 'hour_of_day', 'weekday', 'day', 'week', 'month', 'year'] as const;
+type FigureBy = (typeof FIGURE_BY)[number];
+/** A day's figure covers a year at most; a moment's, three months, as a chart does. */
+const FIGURE_DAYS = 366;
+const WEEKDAYS_LONG = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+/**
+ * A day's figure asked for by the hour: the moment's figure behind it, and how, unless asked otherwise -
+ * energy made by the hour is the power made at each hour, a day's peak the highest power.
+ */
+const HOURLY: Record<DayFigure, [MomentFigure, FigureStat]> = {
+  made: ['power', 'average'], used: ['load', 'average'], bought: ['grid', 'average'], sold: ['grid', 'average'],
+  battery_in: ['battery_power', 'average'], battery_out: ['battery_power', 'average'],
+  peak_power: ['power', 'highest'], battery_low: ['battery_charge', 'lowest'], battery_high: ['battery_charge', 'highest'],
+};
+
+/** One figure worked out over a set of days or readings: the value, when, and how many it came from. */
+interface Figure { v: number | null; at: string | null; n: number; of: number }
+
+const figuresTool: Tool = {
+  name: 'figures',
+  description: 'Any figure the records hold, worked out as asked: for a question no other tool answers as directly. '
+    + "A measure: a day's energy - made, used by the house, bought, sold, taken in or given out by the battery (made, used, bought, sold, battery_in, battery_out) - "
+    + "a day's highest power (peak_power), the battery's lowest or highest charge in a day (battery_low, battery_high); or at any moment the power made, "
+    + 'house load, grid power (above zero while buying, below zero while selling), battery power (above zero while charging) or battery charge '
+    + '(power, load, grid, battery_power, battery_charge); or lifetime_made, what each inverter has made since it was installed. '
+    + 'How: total, average, highest, lowest, count (the days it was above or below an amount), first or last (the first or last time it was). '
+    + 'By: none, hour_of_day, weekday, day, week, month or year. For "how many days was the battery full" (battery_high, count, above 97), '
+    + '"when did I first buy more than 2 kW" (grid, first, above 2), "selling more than 3 kW" (grid, below -3), "average use on each weekday" '
+    + '(used, average, by weekday), "the highest power this year" (power, highest), "lifetime generation" (lifetime_made). '
+    + "A day's figure covers a year at most, a moment's three months.",
+  params: {
+    ...periodParams,
+    measure: { type: 'string', enum: [...Object.keys(DAY_FIGURES), ...Object.keys(MOMENT_FIGURES), 'lifetime_made'], description: 'What to work out.' },
+    stat: { type: 'string', enum: FIGURE_STATS, description: "How: total, average, highest, lowest, count, first or last; a total for a day's energy, else the average, by default.", optional: true },
+    by: { type: 'string', enum: FIGURE_BY, description: "Split by hour_of_day (a day's figure by the hour is the power, load, grid or battery at each hour), weekday, day, week, month or year; none by default.", optional: true },
+    above: { type: 'number', min: -1000000, max: 1000000, description: 'Only where the figure is above this, in its unit: kWh, kW or %.', optional: true },
+    below: { type: 'number', min: -1000000, max: 1000000, description: 'Only where the figure is below this, in its unit: kWh, kW or %.', optional: true },
+    system: systemParam,
+  },
+  async run({ db, now }, args) {
+    const all = await loadSystems(db);
+    const chosen = pickSystems(all, args.system);
+    const off = zoneOf(all);
+    const above = args.above as number | undefined;
+    const below = args.below as number | undefined;
+    const by = (args.by as FigureBy | undefined) ?? 'none';
+    // A day's figure is one a day: by the hour, it is the moment's figure behind it.
+    const hourly = by === 'hour_of_day' && String(args.measure) in DAY_FIGURES ? HOURLY[args.measure as DayFigure] : null;
+    const measure = hourly ? hourly[0] : String(args.measure);
+    const one = chosen.length === 1;
+    const key = (name: string, what: string) => (one ? what : `${chosen.find((s) => s.name === name)?.alias ?? 'together'}_${what}`);
+
+    // Since it was installed: each inverter's own lifetime counter, as last read.
+    if (measure === 'lifetime_made') {
+      const live = await latest(db);
+      const facts: ToolResult['facts'] = {};
+      const lines: string[] = [];
+      const rows = chosen.map((s) => {
+        const r = live.find((x) => x.id === s.id);
+        const total = r?.total_kwh ?? null;
+        facts[key(s.name, 'lifetime_kwh')] = total != null ? r1(total) : null;
+        lines.push(total != null ? `${s.name} has made ${kwh(total)} since it was installed, by its inverter's own counter as last read, ${at(r!.ts!, s.off ?? off)}.`
+          : `${s.name}'s inverter has not reported a lifetime total.`);
+        return [s.name, total != null ? r1(total) : null, r?.ts ? at(r.ts, s.off ?? off) : null];
+      });
+      const known = rows.map((r) => r[1]).filter((x): x is number => typeof x === 'number');
+      if (!one && known.length > 1) {
+        facts.together_lifetime_kwh = r1(known.reduce((a, x) => a + x, 0));
+        lines.push(`Together, ${kwh(facts.together_lifetime_kwh as number)}.`);
+      }
+      return {
+        tool: 'figures', title: 'Made since installed', period: null, columns: ['System', 'Made since installed (kWh)', 'As last read'], rows, facts,
+        notes: ["Each inverter's own lifetime counter, which counts from before SolarLens began."], summary: lines.join(' '), freshness: freshnessFrom(live, chosen, now),
+      };
+    }
+
+    const p = resolvePeriod(args, now, off, DEFAULT_RANGE.figures);
+    const days = noOf(p.to) - noOf(p.from) + 1;
+    const during = p.from === p.to ? (/^(today|yesterday)/.test(p.label) ? p.label : `on ${p.label}`) : /^(this|last) /.test(p.label) ? p.label : `over ${p.label}`;
+    const isDay = measure in DAY_FIGURES;
+    const unit = isDay ? DAY_FIGURES[measure as DayFigure].unit : MOMENT_FIGURES[measure as MomentFigure].unit;
+    const words = isDay ? DAY_FIGURES[measure as DayFigure].words : `the ${MOMENT_FIGURES[measure as MomentFigure].words}`;
+    const adds = isDay && DAY_FIGURES[measure as DayFigure].adds;
+    // Energy adds up to a total - but set side by side by weekday or hour, days of each come in unequal numbers: the average then.
+    const asked = (args.stat as FigureStat | undefined) ?? (hourly ? hourly[1] : adds && by !== 'weekday' && by !== 'hour_of_day' ? 'total' : 'average');
+    // Power, charge and a day's highest do not add up over time: a total of them is their average.
+    const stat: FigureStat = asked === 'total' && !adds ? 'average' : asked;
+    const notes: string[] = [];
+    if (hourly) {
+      const day = DAY_FIGURES[args.measure as DayFigure];
+      notes.push(`${day.words[0].toUpperCase()}${day.words.slice(1)} is one figure a day: by the hour, this is ${words} at each hour instead.`
+        + (day.unit === 'kWh' ? " An hour's average in kW is that hour's energy in kWh." : ''));
+    } else if (asked !== stat) notes.push(`${words[0].toUpperCase()}${words.slice(1)} does not add up over time, so this is its average.`);
+    const show = (v: number) => (unit === 'kWh' ? kwh(v) : unit === 'kW' ? kw(v * 1000) : `${Math.round(v)}%`);
+    const num = (v: number) => (unit === '%' ? Math.round(v) : r2(v));
+    // The amount in words - and for the grid and the battery, the way it flows.
+    const amount = (x: number) => (unit === '%' ? `${x}%` : `${x} ${unit}`);
+    // Beyond zero is simply buying or selling, charging or discharging.
+    const flows = (lo: number | undefined, hi: number | undefined): string => {
+      if (measure === 'grid' && lo != null && lo >= 0 && hi == null) return lo ? `buying more than ${amount(lo)}` : 'buying';
+      if (measure === 'grid' && hi != null && hi <= 0 && lo == null) return hi ? `selling more than ${amount(-hi)}` : 'selling';
+      if (measure === 'battery_power' && lo != null && lo >= 0 && hi == null) return lo ? `charging at more than ${amount(lo)}` : 'charging';
+      if (measure === 'battery_power' && hi != null && hi <= 0 && lo == null) return hi ? `discharging at more than ${amount(-hi)}` : 'discharging';
+      return lo != null && hi != null ? `between ${amount(lo)} and ${amount(hi)}` : lo != null ? `above ${amount(lo)}` : `below ${amount(hi!)}`;
+    };
+    const cond = above != null || below != null ? flows(above, below) : null;
+    const meets = (x: number) => (above == null || x > above) && (below == null || x < below);
+    const label = (b: string): string => {
+      if (by === 'hour_of_day') return `${b.padStart(2, '0')}:00`;
+      if (by === 'weekday') return WEEKDAYS_LONG[Number(b)];
+      if (by === 'day') return dayWords(b, true);
+      if (by === 'week') return `week of ${dayWords(b)}`;
+      if (by === 'month') return `${MONTHS[Number(b.slice(5, 7)) - 1]} ${b.slice(0, 4)}`;
+      return b;
+    };
+    // Each subject's figure in each bucket, bucket keys in order.
+    const table = new Map<string, Map<string, Figure>>();
+    let freshness: ToolResult['freshness'];
+
+    if (isDay) {
+      const m = DAY_FIGURES[measure as DayFigure];
+      if (days > FIGURE_DAYS) throw new ToolError("A figure from each day covers a year at most: for longer, ask for the energy per month or per year.");
+      const [rows, live] = await Promise.all([dayRows(db, chosen, p, off), latest(db)]);
+      freshness = freshnessFrom(live, chosen, now);
+      const today = isoDay(dayNo(now, off));
+      // A battery's figures are a battery's: an on-grid plant's stray zero charge does not make it one.
+      const counted = measure.startsWith('battery')
+        ? chosen.filter((s) => rows.some((r) => r.inverter_id === s.id && ((r.soc_max ?? 0) > 0 || (r.batt_charge_kwh ?? 0) > 0)))
+        : chosen;
+      const valueOf = (r: DayRow) => { const v = r[m.field] as number | null; return v == null ? null : m.field === 'peak_w' ? v / 1000 : v; };
+      // A total counts what each day recorded; anything else only whole days, which today is not yet.
+      const usable = (r: DayRow, s: Sys) => stat === 'total' || (r.day !== today && recordedWhole(r, s, off));
+      const bucketOf = (day: string): string => {
+        const n = noOf(day);
+        if (by === 'weekday') return String((utc(n).getUTCDay() + 6) % 7);
+        if (by === 'day') return day;
+        if (by === 'week') return isoDay(n - ((utc(n).getUTCDay() + 6) % 7));
+        if (by === 'month') return day.slice(0, 7);
+        if (by === 'year') return day.slice(0, 4);
+        return '';
+      };
+      // A system not counted is kept, with nothing: it is then said, once, to have no record of this.
+      const series = new Map<string, { day: string; v: number }[]>();
+      for (const s of chosen) {
+        series.set(s.name, !counted.includes(s) ? [] : rows.filter((r) => r.inverter_id === s.id && usable(r, s)).map((r) => ({ day: r.day, v: valueOf(r) }))
+          .filter((x): x is { day: string; v: number } => x.v != null).sort((a, b) => a.day.localeCompare(b.day)));
+      }
+      // Every system together, for energy: a day counts when every system with a figure in the period has one that day.
+      const having = counted.filter((s) => series.get(s.name)!.length);
+      if (!one && adds && having.length > 1) {
+        const dayset = [...new Set(having.flatMap((s) => series.get(s.name)!.map((x) => x.day)))].sort();
+        series.set('Together', stat === 'total'
+          ? having.flatMap((s) => series.get(s.name)!)
+          : dayset.filter((d) => having.every((s) => series.get(s.name)!.some((x) => x.day === d)))
+            .map((d) => ({ day: d, v: having.reduce((a, s) => a + series.get(s.name)!.find((x) => x.day === d)!.v, 0) })));
+      }
+      for (const [who, points] of series) {
+        const buckets = new Map<string, { day: string; v: number }[]>();
+        for (const x of points) buckets.set(bucketOf(x.day), [...(buckets.get(bucketOf(x.day)) ?? []), x]);
+        const out = new Map<string, Figure>();
+        for (const [b, xs] of buckets) {
+          const hit = xs.filter((x) => meets(x.v));
+          const pick = (xsx: typeof xs, better: (a: number, b: number) => boolean) => (xsx.length ? xsx.reduce((a, x) => (better(x.v, a.v) ? x : a)) : null);
+          const f: Figure = stat === 'total' ? { v: hit.length ? hit.reduce((a, x) => a + x.v, 0) : null, at: null, n: hit.length, of: xs.length }
+            : stat === 'average' ? { v: hit.length ? hit.reduce((a, x) => a + x.v, 0) / hit.length : null, at: null, n: hit.length, of: xs.length }
+              : stat === 'count' ? { v: hit.length, at: null, n: hit.length, of: xs.length }
+                : stat === 'first' || stat === 'last' ? (() => { const x = hit.length ? hit[stat === 'first' ? 0 : hit.length - 1] : null; return { v: x?.v ?? null, at: x?.day ?? null, n: hit.length, of: xs.length }; })()
+                  : (() => { const x = pick(hit, stat === 'highest' ? (a, b2) => a > b2 : (a, b2) => a < b2); return { v: x?.v ?? null, at: x?.day ?? null, n: hit.length, of: xs.length }; })();
+          out.set(b, f);
+        }
+        table.set(who, out);
+      }
+    } else {
+      const m = MOMENT_FIGURES[measure as MomentFigure];
+      if (days > CHART_DAYS) throw new ToolError('A figure from every reading covers three months at most: for longer, ask for a day\'s figure, such as the peak power or the energy.');
+      const scale = unit === 'kW' ? 1000 : 1;
+      const local = 'ts + COALESCE(tz_offset_sec, ?3)';
+      const bucket = {
+        none: "''", hour_of_day: `CAST(((${local}) % 86400) / 3600 AS INTEGER)`, weekday: `CAST(((${local}) / 86400 + 3) % 7 AS INTEGER)`,
+        day: `date(${local}, 'unixepoch')`, week: `date((${local}) - ((((${local}) / 86400 + 3) % 7) * 86400), 'unixepoch')`,
+        month: `strftime('%Y-%m', ${local}, 'unixepoch')`, year: `strftime('%Y', ${local}, 'unixepoch')`,
+      }[by];
+      const ids = chosen.map((s) => s.id);
+      const binds: unknown[] = [noOf(p.from) * DAY - off - DAY, Math.min((noOf(p.to) + 1) * DAY - off + DAY, now), off, noOf(p.from) * DAY, (noOf(p.to) + 1) * DAY, ...ids];
+      const limit = (op: '>' | '<', x: number) => { binds.push(x * scale); return `${m.column} ${op} ?${binds.length}`; };
+      const conds = [above != null ? limit('>', above) : null, below != null ? limit('<', below) : null].filter(Boolean);
+      const condSql = conds.length ? conds.join(' AND ') : `${m.column} IS NOT NULL`;
+      const dayOf = `CAST((${local}) / 86400 AS INTEGER)`;
+      // One aggregate a statistic: with a single MIN or MAX, the time read beside it is the time of that very reading.
+      const pick: Record<FigureStat, string> = {
+        total: `AVG(${m.column}) AS v, NULL AS t`,
+        average: `AVG(${m.column}) AS v, NULL AS t`,
+        highest: `MAX(${m.column}) AS v, ts AS t`,
+        lowest: `MIN(${m.column}) AS v, ts AS t`,
+        count: `COUNT(DISTINCT CASE WHEN ${condSql} THEN ${dayOf} END) AS v, NULL AS t`,
+        first: `MIN(ts) AS t, ${m.column} AS v`,
+        last: `MAX(ts) AS t, ${m.column} AS v`,
+      };
+      // A battery's figures are a battery's: a system counts once it has reported a charge above nothing in the period.
+      const battery = measure.startsWith('battery')
+        ? ` AND inverter_id IN (SELECT inverter_id FROM readings WHERE ts BETWEEN ?1 AND ?2 AND battery_soc > 0)` : '';
+      const where = `${stat === 'count' ? `${m.column} IS NOT NULL` : condSql}${battery}`;
+      const [{ results }, live] = await Promise.all([
+        db.prepare(
+          `SELECT inverter_id AS id, ${bucket} AS b, ${pick[stat]}, COUNT(DISTINCT ${dayOf}) AS days
+           FROM readings
+           WHERE ts BETWEEN ?1 AND ?2 AND ${local} >= ?4 AND ${local} < ?5 AND inverter_id IN (${ids.map((_, i) => `?${i + 6}`).join(', ')})
+             AND ${where}
+           GROUP BY inverter_id, b`,
+        ).bind(...binds).all<{ id: string; b: string | number; v: number | null; t: number | null; days: number }>(),
+        latest(db),
+      ]);
+      freshness = freshnessFrom(live, chosen, now);
+      // The days each system was read at all, for "on 5 of the 23 days it was read".
+      const { results: read } = stat === 'count' || !conds.length ? { results: [] as { id: string; days: number }[] } : await db.prepare(
+        `SELECT inverter_id AS id, COUNT(DISTINCT ${dayOf}) AS days FROM readings
+         WHERE ts BETWEEN ?1 AND ?2 AND ${local} >= ?4 AND ${local} < ?5 AND inverter_id IN (${ids.map((_, i) => `?${i + 6}`).join(', ')}) AND ${m.column} IS NOT NULL
+         GROUP BY inverter_id`,
+      ).bind(...binds.slice(0, 5 + ids.length)).all<{ id: string; days: number }>();
+      for (const s of chosen) {
+        const out = new Map<string, Figure>();
+        // Read, but never as asked: a figure of nothing, from the days it was read - "never above", not "no record".
+        const readDays = read.find((x) => x.id === s.id)?.days ?? 0;
+        if (by === 'none' && readDays && !results.some((x) => x.id === s.id)) out.set('', { v: null, at: null, n: 0, of: readDays });
+        for (const r of results.filter((x) => x.id === s.id)) {
+          const of = stat === 'count' || !conds.length ? r.days : read.find((x) => x.id === s.id)?.days ?? r.days;
+          out.set(String(r.b), {
+            v: r.v == null ? null : stat === 'count' ? r.v : r.v / scale,
+            at: r.t != null && stat !== 'average' && stat !== 'total' ? at(r.t, s.off ?? off) : null,
+            n: stat === 'count' ? r.v ?? 0 : r.days, of,
+          });
+        }
+        table.set(s.name, out);
+      }
+      if (!one) notes.push(`Each system on its own: ${words} at a moment is not added across systems here - a chart adds them.`);
+      if (measure === 'grid') notes.push('Grid power is above zero while buying from the grid, and below zero while selling to it.');
+      if (measure === 'battery_power') notes.push('Battery power is above zero while charging, and below zero while discharging.');
+    }
+
+    // The figures in words and as a table: one row a system, or one a bucket with a column a system.
+    const facts: ToolResult['facts'] = {};
+    const lines: string[] = [];
+    const statWords: Record<FigureStat, string> = { total: 'Total', average: 'Average', highest: 'Highest', lowest: 'Lowest', count: 'Days', first: 'First', last: 'Last' };
+    // A system that does not record this at all - an on-grid plant has no house meter - is said once, in a note.
+    const recorded = (who: string) => [...table.get(who)!.values()].some((f) => f.v != null || f.of > 0);
+    const silent = [...table.keys()].filter((who) => !recorded(who));
+    const subjects = silent.length < table.size ? [...table.keys()].filter(recorded) : [...table.keys()];
+    if (silent.length && silent.length < table.size) notes.unshift(`${inWords(silent)} ${silent.length === 1 ? 'has' : 'have'} no record of ${words} ${during}.`);
+    if (!table.size) subjects.push(...chosen.map((s) => s.name));
+    const said = (who: string, f: Figure | undefined): string => {
+      if (!f || (f.v == null && !f.of)) return `${who}: no record of ${words} ${during}.`;
+      // Recorded, but never as asked.
+      if (f.v == null && stat !== 'count') return `${who}: ${words} was never ${cond ?? 'recorded'} ${during}.`;
+      const when = f.at ? (isDay ? `on ${dayWords(f.at, true)}` : `on ${f.at.replace(/ (\d\d:\d\d)$/, ' at $1')}`) : '';
+      switch (stat) {
+        case 'total': return `${who}: ${show(f.v!)} of ${words} ${during}${cond ? `, on the ${f.n} day${f.n === 1 ? '' : 's'} it was ${cond}` : `, from ${f.n} day${f.n === 1 ? '' : 's'}`}.`;
+        case 'average': return isDay
+          ? `${who}: ${words} was ${show(f.v!)} on an average day ${during}${cond ? ` of those it was ${cond}` : ''}, from ${f.n} whole day${f.n === 1 ? '' : 's'}.`
+          : `${who}: ${words} averaged ${show(f.v!)} ${during}${cond ? ` while it was ${cond}` : ''}, from ${f.n} day${f.n === 1 ? '' : 's'} of readings.`;
+        case 'highest': case 'lowest': {
+          // The grid and the battery run both ways, and the most sold or discharged is the lowest figure: said the way it flows.
+          const v = f.v!;
+          const most = (v < 0) === (stat === 'lowest');
+          if (measure === 'grid' && v) return `${who}: the ${most ? 'most' : 'least'} ${v < 0 ? 'sold to' : 'bought from'} the grid at once was ${show(Math.abs(v))}, ${when}, ${during}.`;
+          if (measure === 'battery_power' && v) return `${who}: the battery ${v < 0 ? 'discharged' : 'charged'} ${most ? 'fastest' : 'slowest'} at ${show(Math.abs(v))}, ${when}, ${during}.`;
+          return `${who}: ${words} was at its ${stat}, ${show(v)}, ${when}, ${during}.`;
+        }
+        case 'count': return `${who}: ${words} was ${cond ?? 'recorded'} on ${f.v} of the ${f.of} day${f.of === 1 ? '' : 's'} ${isDay ? 'wholly recorded' : 'it was read'} ${during}.`;
+        default: return f.at ? `${who}: ${words} was ${stat === 'first' ? 'first' : 'last'} ${cond ?? 'recorded'} ${when} (${show(f.v!)}), ${during}.` : `${who}: ${words} was never ${cond} ${during}.`;
+      }
+    };
+    let rows: (string | number | null)[][];
+    let columns: string[];
+    let chart: ToolResult['chart'] | undefined;
+    if (by === 'none') {
+      const withWhen = stat === 'highest' || stat === 'lowest' || stat === 'first' || stat === 'last';
+      columns = ['System', stat === 'count' ? `Days it was ${cond ?? 'recorded'}` : `${statWords[stat]} (${unit})`, ...(withWhen ? ['When'] : []), stat === 'count' ? 'Of days' : 'Days'];
+      rows = subjects.map((who) => {
+        const f = table.get(who)!.get('');
+        facts[key(who, stat === 'count' ? 'days' : stat)] = f?.v == null ? null : stat === 'count' ? f.v : num(f.v);
+        if (withWhen) facts[key(who, 'when')] = f?.at ?? null;
+        lines.push(said(who, f));
+        return [who, f?.v == null ? null : stat === 'count' ? f.v : num(f.v), ...(withWhen ? [f?.at ?? null] : []), f ? (stat === 'count' ? f.of : f.n) : 0];
+      });
+    } else {
+      const keys = [...new Set(subjects.flatMap((who) => [...table.get(who)!.keys()]))]
+        .sort((a, b) => (by === 'hour_of_day' || by === 'weekday' ? Number(a) - Number(b) : a.localeCompare(b)));
+      const heading: Record<FigureBy, string> = { none: 'Period', hour_of_day: 'Hour', weekday: 'Weekday', day: 'Day', week: 'Week', month: 'Month', year: 'Year' };
+      columns = [heading[by], ...subjects.map((who) => `${who} (${stat === 'count' ? 'days' : unit})`)];
+      rows = keys.map((b) => [label(b), ...subjects.map((who) => {
+        const f = table.get(who)!.get(b);
+        return f?.v == null ? null : stat === 'count' ? f.v : num(f.v);
+      })]);
+      // Where each system's figure was highest and lowest, bucket by bucket.
+      for (const [i, who] of subjects.entries()) {
+        const got = rows.map((r) => ({ label: String(r[0]), v: r[i + 1] })).filter((x): x is { label: string; v: number } => typeof x.v === 'number');
+        if (!got.length) { lines.push(`${who}: no record of ${words} ${during}.`); continue; }
+        const top = got.reduce((a, x) => (x.v > a.v ? x : a));
+        const low = got.reduce((a, x) => (x.v < a.v ? x : a));
+        const fmt = (v: number) => (stat === 'count' ? `${v} day${v === 1 ? '' : 's'}` : show(v));
+        Object.assign(facts, { [key(who, 'highest_bucket')]: top.label, [key(who, 'highest')]: top.v, [key(who, 'lowest_bucket')]: low.label, [key(who, 'lowest')]: low.v });
+        lines.push(`${who}: ${words}, ${stat === 'count' ? `days it was ${cond ?? 'recorded'}` : statWords[stat].toLowerCase()} by ${by === 'hour_of_day' ? 'hour' : by} ${during} - `
+          + `highest ${fmt(top.v)} (${top.label}), lowest ${fmt(low.v)} (${low.label}).`);
+      }
+      // The systems together where there is such a line; else up to two systems.
+      const together = subjects.indexOf('Together');
+      chart = { kind: by === 'hour_of_day' || by === 'day' ? 'line' : 'bar', columns: together >= 0 ? [together + 1] : subjects.slice(0, 2).map((_, i) => i + 1) };
+    }
+    if (isDay && stat !== 'total') notes.push('Whole days only - recorded from the morning into the afternoon - so part of a day, and today, are left out.');
+    const title = `${words[0].toUpperCase()}${words.slice(1)}: ${stat === 'count' ? `days ${cond ?? 'recorded'}` : statWords[stat].toLowerCase()}${cond && stat !== 'count' ? `, ${cond}` : ''}${by !== 'none' ? `, by ${by === 'hour_of_day' ? 'hour' : by}` : ''}`;
+    // Nothing on record at all is one sentence, not one a system.
+    const none = silent.length === table.size && stat !== 'count';
+    return {
+      tool: 'figures', title, period: p, columns, rows, facts, notes: none ? notes.filter((n) => !n.includes('no record')) : notes,
+      summary: none ? `There is no record of ${words}${cond ? ` ${cond}` : ''} ${during}.` : lines.join(' '),
+      freshness, ...(chart && rows.length > 1 ? { chart } : {}),
+    };
+  },
+};
+
 // ---------------------------------------------------------------- report
 
 const reportTool: Tool = {
@@ -2482,7 +2858,9 @@ const reportTool: Tool = {
 const appHelp: Tool = {
   name: 'app_help',
   description: 'How to do something in SolarLens, and where: signing in, sharing, notifications, alerts on Telegram or Discord, Home Assistant, the tariff, groups, '
-    + 'reports, the MCP server, a system that reads offline. For any question about using the app rather than about the figures.',
+    + 'reports, the MCP server, a system that reads offline - and what a word means: kW and kWh, kWp, performance ratio, capacity factor, self-consumption, '
+    + 'net metering, SOC and the BMS, battery modes, strings and MPPT, power factor, the always-on load, irradiance, the datalogger. '
+    + 'For any question about using the app, or its words, rather than about the figures.',
   params: { question: { type: 'string', description: "The question, in the owner's own words." } },
   async run(_ctx, args) {
     const found = findHelp(String(args.question));
@@ -2505,7 +2883,7 @@ const appHelp: Tool = {
 
 /** Every tool, in the order a person would reach for them. */
 export const TOOLS: readonly Tool[] = [
-  statusNow, outages, inverterTool, energy, powerDay, chartTool, batteryTool, compareSystems, statsTool, faults, dayReport, performanceTrend, analysisTool, reportTool, appHelp,
+  statusNow, outages, inverterTool, energy, powerDay, chartTool, batteryTool, compareSystems, statsTool, faults, dayReport, performanceTrend, analysisTool, figuresTool, reportTool, appHelp,
 ];
 
 export const toolByName = (name: unknown): Tool | undefined => TOOLS.find((t) => t.name === name);

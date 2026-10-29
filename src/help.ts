@@ -17,6 +17,8 @@ export interface HelpEntry {
   answer: string;
   /** The page it happens on, as the dashboard's own address: '#/settings'. */
   where: string;
+  /** A word SolarLens uses, explained: "what is kWp?" asks for this rather than how to do something. */
+  term?: true;
 }
 
 export const HELP: readonly HelpEntry[] = [
@@ -131,7 +133,7 @@ export const HELP: readonly HelpEntry[] = [
   {
     topic: 'The assistant, and reports',
     words: ['ask', 'question', 'assistant', 'report', 'reports', 'chat', 'generate', 'pdf', 'print'],
-    answer: 'Ask tab: questions in plain words, with follow-ups. Every figure is worked out by SolarLens and shown with the answer. Ask for "a report on last month" and Download report saves it as a page you can print or keep.',
+    answer: 'Ask tab: any question about your systems, in your own words, with follow-ups - the questions shown there are only examples. Every figure is worked out by SolarLens and shown with the answer. Ask for "a report on last month" and Download report saves it as a page you can print or keep.',
     where: '#/ask',
   },
   {
@@ -170,6 +172,78 @@ export const HELP: readonly HelpEntry[] = [
     answer: 'The theme button in the top right cycles automatic, light and dark. To install SolarLens like an app, use the browser\'s Add to home screen or Install.',
     where: '#/',
   },
+
+  // --- the words SolarLens uses, explained
+  {
+    topic: 'kW and kWh', term: true, where: '#/guide',
+    words: ['kw', 'kwh', 'kilowatt', 'kilowatts', 'unit', 'units', 'watt', 'watts', 'difference'],
+    answer: 'kW is power - how fast energy flows at a moment, what the panels are making now. kWh is energy - power over time: 1 kW for an hour is 1 kWh, the "unit" on an electricity bill. A day\'s production and a bill are in kWh; the curve through a day is in kW.',
+  },
+  {
+    topic: 'kWp, the size of a system', term: true, where: '#/compare',
+    words: ['kwp', 'peak', 'size', 'capacity', 'rated', 'nameplate', 'kilowatt-peak'],
+    answer: 'kWp - kilowatt-peak - is the size of the panels: what they make in full sun under test conditions. A 5 kWp system rarely makes 5 kW; energy per kWp (kWh/kWp) is how systems of different sizes are compared fairly, as on the Compare tab.',
+  },
+  {
+    topic: 'Performance ratio', term: true, where: '#/ask',
+    words: ['performance', 'ratio', 'pr', 'efficiency', 'efficient'],
+    answer: 'The performance ratio is the energy made against the sunlight on the panels and their size: how much of what the sun offered the system turned into power. It moves a little with the season; a fall of 8% or more over weeks - dirt, shade, a string down - is what the Monday health check flags.',
+  },
+  {
+    topic: 'Capacity factor and specific yield', term: true, where: '#/ask',
+    words: ['capacity', 'factor', 'specific', 'yield', 'kwh/kwp'],
+    answer: 'Specific yield is the energy made per kWp of panels - kWh/kWp - for a day, a month or a year. Capacity factor is the energy made against the panels running at their full size all day, every day: 15 to 20% is usual for solar, as the sun sets and clouds pass.',
+  },
+  {
+    topic: 'Using your own power: self-consumption and self-sufficiency', term: true, where: '#/analysis',
+    words: ['self', 'consumption', 'sufficiency', 'self-consumption', 'self-sufficiency', 'autarky', 'own'],
+    answer: 'Self-consumption is the share of what the panels made that the house used itself, rather than sold. Self-sufficiency is the share of what the house used that the sun covered, rather than the grid. Both are in an analysis and on the Analysis tab.',
+  },
+  {
+    topic: 'Import and export, net metering and feed-in', term: true, where: '#/settings',
+    words: ['import', 'export', 'net', 'metering', 'feed', 'feed-in', 'tariff', 'buy', 'sell', 'bought', 'sold'],
+    answer: 'Import is power bought from the grid; export is power sold to it. With net metering, each kWh sold offsets one bought, so it is worth the import price; without it, a kWh sold earns the feed-in rate, usually less. Set yours under Settings → Tariff.',
+  },
+  {
+    topic: 'Battery charge (SOC) and the BMS', term: true, where: '#/',
+    words: ['soc', 'state', 'charge', 'bms', 'battery', 'percentage', 'percent', 'lithium'],
+    answer: 'SOC - state of charge - is how full the battery is, in %. The BMS - battery management system - is the battery\'s own electronics: it measures its cells, keeps them within their limits and reports the charge, voltage, current and temperature the inverter shows.',
+  },
+  {
+    topic: 'Inverter battery modes: self-use, backup, grid first', term: true, where: '#/',
+    words: ['mode', 'modes', 'self-use', 'backup', 'sbu', 'sub', 'uti', 'utility', 'priority', 'solar-first', 'grid-first', 'setting'],
+    answer: 'A hybrid inverter\'s battery mode says what the battery is for. In self-use (solar first, SBU) it runs the house when the sun cannot, and fills again by day, so less is bought. In backup or grid-first (SUB, UTI) it is kept full for power cuts, and the house runs from the grid at night. The mode is set on the inverter or in the vendor\'s app.',
+  },
+  {
+    topic: 'PV strings and MPPT', term: true, where: '#/',
+    words: ['string', 'strings', 'mppt', 'pv1', 'pv2', 'tracker', 'panel', 'panels', 'array'],
+    answer: 'A string is a row of panels wired together into one input of the inverter - PV1, PV2. An MPPT - maximum power point tracker - is the part of the inverter that gets the most from each input. A string making far less than the others is usually shade, dirt or a fault on it.',
+  },
+  {
+    topic: 'Power factor, grid frequency and the DC bus', term: true, where: '#/',
+    words: ['power', 'factor', 'frequency', 'hz', 'hertz', 'dc', 'bus', 'phase', 'phases', 'voltage'],
+    answer: 'Grid frequency is how fast the mains alternates - 50 Hz, or 60 in some countries - and drifts a little with the grid\'s load. Power factor is how well the current keeps in step with the voltage: 1 is perfect, and an inverter at rest may read 0. The DC bus is the voltage inside the inverter between the panels and the output.',
+  },
+  {
+    topic: 'Peak, base and always-on load', term: true, where: '#/analysis',
+    words: ['base', 'baseload', 'always-on', 'standby', 'phantom', 'peak', 'load', 'demand'],
+    answer: 'The load is what the house draws at a moment. The always-on (base) load is what it never goes below - fridges, routers, pumps and devices on standby; every 100 W of it is 2.4 kWh a day. The peak is its highest, often in the evening when the sun is gone.',
+  },
+  {
+    topic: 'Irradiance and sunlight', term: true, where: '#/',
+    words: ['irradiance', 'sunlight', 'ghi', 'radiation', 'kwh/m2', 'sun', 'insolation'],
+    answer: 'Irradiance is the sunlight reaching the ground, in W/m²; over a day it adds up to kWh/m² - 5 or 6 on a clear summer day, much less when cloudy. SolarLens takes it from Open-Meteo at each system\'s position, to tell the weather from a fault.',
+  },
+  {
+    topic: 'Degradation', term: true, where: '#/ask',
+    words: ['degradation', 'degrade', 'degrading', 'ageing', 'aging', 'wear'],
+    answer: 'Panels lose a little output each year - about 0.5% - as they age. A fall of several percent within weeks is not ageing but dirt, shade, or a fault; the Monday health check watches for it against the sunlight.',
+  },
+  {
+    topic: 'Datalogger and relay', term: true, where: '#/devices',
+    words: ['datalogger', 'logger', 'dongle', 'wifi', 'wi-fi', 'relay', 'stick'],
+    answer: 'The datalogger is the small Wi-Fi unit on the inverter that sends its readings to the vendor\'s cloud; when it is offline, the vendor - and SolarLens - get nothing new. The relay is the small program that fetches SolisCloud\'s figures for SolarLens, where the cloud will not be asked directly. Both are on the Devices tab.',
+  },
 ];
 
 /** The words of a question, lower case, without the ones every question has. */
@@ -181,8 +255,12 @@ const wordsOf = (text: string) => text.toLowerCase().normalize('NFKD').replace(/
  * an entry lists counts, a word in its topic counts double, and a word that only
  * begins one of the entry's (notif… for notifications) counts too.
  */
+/** A question asking what a word means, rather than how to do something. */
+export const DEFINING = /\b(what (is|are|does|do)|what's|whats|meaning|means?|define|definition|explain|stands? for)\b/;
+
 export function findHelp(question: string, limit = 3): HelpEntry[] {
   const q = wordsOf(question);
+  const defining = DEFINING.test(question.toLowerCase());
   const scored = HELP.map((e) => {
     const topic = new Set(wordsOf(e.topic));
     let score = 0;
@@ -193,5 +271,7 @@ export function findHelp(question: string, limit = 3): HelpEntry[] {
     }
     return { e, score };
   }).filter((x) => x.score > 0);
-  return scored.sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.e);
+  // A word explained for "what is...", how to do something for the rest; the other kind only when nothing else fits.
+  const wanted = scored.filter((x) => !!x.e.term === defining);
+  return (wanted.length ? wanted : scored).sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.e);
 }

@@ -3605,7 +3605,7 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
     const log = state.chat.map((t, i) => `<div class="msg me"><p>${esc(t.question)}</p></div>${botMessage(t, i)}`).join('');
     $('view').innerHTML = `<div class="stack askpage">
       <section class="card"><h2>Ask SolarLens</h2><div class="body">
-        <div class="chatlog" aria-live="polite">${log || `<p class="cardnote">Ask about your energy, your systems, a day or any period - statistics, a report - or how to do something in SolarLens. Follow-ups work too: "and the month before?"</p>`}
+        <div class="chatlog" aria-live="polite">${log || `<p class="cardnote">Ask anything about your systems, in your own words - an analysis, any figure, a graph, a day or any period, a report, what a word means, or how to do something in SolarLens. The questions below are only examples. Follow-ups work too: "and the month before?"</p>`}
           ${state.asking ? `<div class="msg me"><p>${esc(state.asking)}</p></div><div class="msg bot"><p class="said faint">Working it out…</p></div>` : ''}</div>
         <form class="askform" id="askform">
           <label for="askq" class="vh">Your message</label>
@@ -4926,7 +4926,7 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
       ['Whether a system is making what the weather allowed', `the system's page - Against the weather; and the dashed line on its day curve, on ${tab('#/', 'Overview')} and ${tab('#/power', 'Power')}`],
       ['What the sun has saved, and the CO₂ it has avoided', `each system's page - Money and carbon; and ${tab('#/history', 'Historical Data')}, by day, month or year. The owner sets the prices under ${tab('#/settings', 'Settings')}`],
       ['Which system is doing best, for its size', `${tab('#/compare', 'Compare')} - kWh per kWp, today and this month (with two systems or more)`],
-      ['Ask anything in words, with follow-ups - statistics, a report, how to do something', `${tab('#/ask', 'Ask')} - every answer shows the figures it came from, and Download keeps it as a page`],
+      ['Ask anything in words, with follow-ups - an analysis, any figure, a graph, statistics, a report, what a word means, how to do something',`${tab('#/ask', 'Ask')} - every answer shows the figures it came from, and Download keeps it as a page`],
       ['Why was a day low?', `${tab('#/history', 'Historical Data')} - "Why?" next to a low day; or ask on ${tab('#/ask', 'Ask')}`],
       ['Whether a system is slowly making less', `${tab('#/ask', 'Ask')} - Health, checked every Monday`],
       ['A day hour by hour: made against used, and the peaks', `${tab('#/analysis', 'Analysis')} - any of the last seven days, one system or all`],

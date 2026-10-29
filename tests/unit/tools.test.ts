@@ -98,7 +98,7 @@ describe('arguments', () => {
     expect(s.properties.from.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
     expect((jsonSchemaOf(toolByName('performance_trend')!) as { properties: Record<string, unknown> }).properties.weeks)
       .toMatchObject({ type: 'integer', minimum: 8, maximum: 26 });
-    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'inverter', 'energy', 'power_day', 'chart', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'analysis', 'report', 'app_help']);
+    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'inverter', 'energy', 'power_day', 'chart', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'analysis', 'figures', 'report', 'app_help']);
   });
 });
 
@@ -1191,6 +1191,173 @@ describe('analysis', () => {
     expect(r.facts.days_not_wholly_recorded).toBe(1);
     // The late day is left out of the average: 120 kWh over the 6 whole days.
     expect(said(r, 'Production')).toEqual(['Roof made 120 kWh over 6 whole days, 20 kWh on an average day.']);
+  });
+});
+
+describe('figures', () => {
+  /** Last week: Garage a hybrid with a house and a battery kept full, Roof panels only; both reporting now, with their lifetime counters. */
+  async function week() {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    for (let n = dayNumber('2026-09-21'); n <= dayNumber('2026-09-27'); n++) {
+      await addDay(h.env.DB, ROOF, isoOf(n), 20);
+      await addHybridDay(h.env.DB, GARAGE, isoOf(n));
+    }
+    const now = (id: string, total: number, extra: string, values: number[]) => h.env.DB
+      .prepare(`INSERT INTO readings (inverter_id, ts, source, ac_power_w, today_kwh, total_kwh, metrics, tz_offset_sec${extra}) VALUES (?1, ?2, 'test', 800, 0.4, ?3, '{}', 0${values.map((_, i) => `, ?${i + 4}`).join('')})`)
+      .bind(id, NOW - 120, total, ...values).run();
+    await now(ROOF, 12345.6, '', []);
+    await now(GARAGE, 7831.4, ', load_power_w, grid_power_w', [450, -1200]);
+  }
+
+  it('counts the days a battery was full, leaving a system with no battery to a note', async () => {
+    await week();
+    const r = await run('figures', { measure: 'battery_high', stat: 'count', above: 97, range: 'last_week' });
+    expect(r.columns).toEqual(['System', 'Days it was above 97%', 'Of days']);
+    expect(r.rows).toEqual([['Garage', 7, 7]]);
+    expect(r.summary).toBe("Garage: the battery's highest charge in a day was above 97% on 7 of the 7 days wholly recorded last week (21 – 27 Sep 2026).");
+    expect(r.notes[0]).toBe("Roof has no record of the battery's highest charge in a day last week (21 – 27 Sep 2026).");
+    noIds(r);
+  });
+
+  it('says the first time the grid was bought from above an amount, and how often it was sold to', async () => {
+    await week();
+    const first = await run('figures', { measure: 'grid', stat: 'first', above: 0.2, range: 'last_week' });
+    expect(first.summary).toBe('Garage: the grid power was first buying more than 0.2 kW on Mon 21 Sep 2026 at 00:00 (300 W), last week (21 – 27 Sep 2026).');
+    expect(first.rows).toEqual([['Garage', 0.3, 'Mon 21 Sep 2026 00:00', 7]]);
+    const sold = await run('figures', { measure: 'grid', stat: 'count', below: -2, range: 'last_week' });
+    expect(sold.summary).toBe('Garage: the grid power was selling more than 2 kW on 7 of the 7 days it was read last week (21 – 27 Sep 2026).');
+    expect(sold.notes).toContain('Grid power is above zero while buying from the grid, and below zero while selling to it.');
+  });
+
+  it('adds energy up day by day with every system together, and charts the total', async () => {
+    await week();
+    const r = await run('figures', { measure: 'made', by: 'day', range: 'last_week' });
+    expect(r.columns).toEqual(['Day', 'Roof (kWh)', 'Garage (kWh)', 'Together (kWh)']);
+    expect(r.rows[0]).toEqual(['Mon 21 Sep 2026', 20, expect.any(Number), expect.any(Number)]);
+    expect(r.rows[0][3]).toBeCloseTo(20 + (r.rows[0][2] as number), 1);
+    expect(r.chart).toEqual({ kind: 'line', columns: [3] });
+    expect(r.title).toBe('Energy made: total, by day');
+  });
+
+  it("averages each weekday, finds a moment's highest with its time, and gives what was made since installed", async () => {
+    await week();
+    const weekday = await run('figures', { measure: 'used', by: 'weekday', range: 'last_week' });
+    expect(weekday.rows.map((x) => x[0])).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
+    expect(weekday.rows[0][1]).toBe(9.6);
+    expect(weekday.chart).toEqual({ kind: 'bar', columns: [1] });
+    await h.env.DB.prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', 3500, '{}', 0)")
+      .bind(GARAGE, dayNumber('2026-09-24') * DAY + 12 * 3600 + 600).run();
+    const top = await run('figures', { measure: 'power', stat: 'highest', range: 'last_week', system: 'Garage' });
+    expect(top.summary).toBe('Garage: the power made was at its highest, 3.5 kW, on Thu 24 Sep 2026 at 12:10, last week (21 – 27 Sep 2026).');
+    const life = await run('figures', { measure: 'lifetime_made' });
+    expect(life.summary).toBe('Roof has made 12.3 MWh since it was installed, by its inverter\'s own counter as last read, Mon 28 Sep 2026 08:58. '
+      + "Garage has made 7831 kWh since it was installed, by its inverter's own counter as last read, Mon 28 Sep 2026 08:58. Together, 20.2 MWh.");
+    expect(life.facts).toMatchObject({ s1_lifetime_kwh: 12345.6, s2_lifetime_kwh: 7831.4, together_lifetime_kwh: 20177 });
+    noIds(life);
+  });
+
+  it('answers every measure, every way, by every step - in words with no gap in them', async () => {
+    await week();
+    const measures = ['made', 'used', 'bought', 'sold', 'battery_in', 'battery_out', 'peak_power', 'battery_low', 'battery_high', 'power', 'load', 'grid', 'battery_power', 'battery_charge'];
+    const stats = ['total', 'average', 'highest', 'lowest', 'count', 'first', 'last'];
+    const asked: Record<string, unknown>[] = [
+      ...measures.flatMap((measure) => stats.map((stat) => ({ measure, stat }))),
+      ...['weekday', 'day', 'week', 'month', 'year'].flatMap((by) => ['made', 'load', 'battery_high'].flatMap((measure) => ['average', 'highest', 'count'].map((stat) => ({ measure, stat, by })))),
+      ...measures.map((measure) => ({ measure, by: 'hour_of_day' })),
+      ...measures.flatMap((measure) => [{ measure, stat: 'count', above: 0.1 }, { measure, stat: 'first', below: 50 }, { measure, stat: 'total', above: 1 }, { measure, stat: 'average', above: 1, below: 1000 }]),
+    ];
+    for (const a of asked) {
+      const r = await run('figures', { ...a, range: 'last_week' });
+      expect(r.summary.length, JSON.stringify(a)).toBeGreaterThan(20);
+      expect(r.summary, JSON.stringify(a)).not.toMatch(/undefined|NaN|null|\[object/);
+      expect(r.rows.length, JSON.stringify(a)).toBeGreaterThan(0);
+      noIds(r);
+    }
+  });
+
+  it('says a battery and the grid by the way they flow, a day as it is named, and never when it never was', async () => {
+    await week();
+    const flow = async (a: Record<string, unknown>) => (await run('figures', { measure: 'battery_power', stat: 'count', range: 'last_week', system: 'Garage', ...a })).summary;
+    expect(await flow({ above: 0.5 })).toContain('was charging at more than 0.5 kW on');
+    expect(await flow({ below: -0.5 })).toContain('was discharging at more than 0.5 kW on');
+    expect(await flow({ above: -1, below: 1 })).toContain('was between -1 kW and 1 kW on');
+    // Beyond zero is simply charging or discharging, buying or selling.
+    expect(await flow({ above: 0 })).toContain('was charging on');
+    expect(await flow({ below: 0 })).toContain('was discharging on');
+    // The most sold is the lowest figure, and said as sold; the most bought, and the battery's fastest charge, likewise.
+    const sold = await run('figures', { measure: 'grid', stat: 'lowest', below: 0, range: 'last_week', system: 'Garage' });
+    expect(sold.title).toBe('The grid power: lowest, selling');
+    expect(sold.summary).toMatch(/^Garage: the most sold to the grid at once was [\d.]+ k?W, on \w{3} \d\d Sep 2026 at \d\d:\d\d, last week \(21 – 27 Sep 2026\)\.$/);
+    expect((await run('figures', { measure: 'grid', stat: 'highest', range: 'last_week', system: 'Garage' })).summary)
+      .toMatch(/^Garage: the most bought from the grid at once was [\d.]+ k?W, on /);
+    // The week's battery is idle, kept full: one charge and one discharge between its readings.
+    const battery = (iso: string, at: number, w: number) => h.env.DB
+      .prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, battery_power_w, battery_soc, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', 0, ?3, 98, '{}', 0)")
+      .bind(GARAGE, dayNumber(iso) * DAY + at, w).run();
+    await battery('2026-09-23', 9 * 3600 + 600, 1200);
+    await battery('2026-09-25', 21 * 3600 + 600, -900);
+    const fastest = async (stat: string) => (await run('figures', { measure: 'battery_power', stat, range: 'last_week', system: 'Garage' })).summary;
+    expect(await fastest('highest')).toBe('Garage: the battery charged fastest at 1.2 kW, on Wed 23 Sep 2026 at 09:10, last week (21 – 27 Sep 2026).');
+    expect(await fastest('lowest')).toBe('Garage: the battery discharged fastest at 900 W, on Fri 25 Sep 2026 at 21:10, last week (21 – 27 Sep 2026).');
+    expect((await run('figures', { measure: 'grid', stat: 'count', above: 0, range: 'last_week', system: 'Garage' })).summary).toContain('was buying on');
+    const high = await run('figures', { measure: 'made', stat: 'first', above: 10, range: 'last_week', system: 'Roof' });
+    expect(high.summary).toBe('Roof: energy made was first above 10 kWh on Mon 21 Sep 2026 (20 kWh), last week (21 – 27 Sep 2026).');
+    const never = await run('figures', { measure: 'made', stat: 'last', above: 1000, range: 'last_week', system: 'Roof' });
+    expect(never.summary).toBe('Roof: energy made was never above 1000 kWh last week (21 – 27 Sep 2026).');
+    const byMonth = await run('figures', { measure: 'made', by: 'month', from: '2026-08-01', to: '2026-09-27', system: 'Roof' });
+    expect(byMonth.rows).toEqual([['Sep 2026', 140]]);
+    const byHour = await run('figures', { measure: 'load', by: 'hour_of_day', range: 'last_week', system: 'Garage' });
+    expect(byHour.rows[19]).toEqual(['19:00', 0.9]);
+    expect(byHour.summary).toBe('Garage: the house load, average by hour last week (21 – 27 Sep 2026) - highest 900 W (18:00), lowest 300 W (00:00).');
+  });
+
+  it("gives a day's figure by the hour as the moment's, refuses too long a span, says a total of power is its average, and one sentence for nothing on record", async () => {
+    await week();
+    // The energy the house used, by the hour, is its load at each hour; a day's peak by the hour is the highest power at each.
+    const used = await run('figures', { measure: 'used', by: 'hour_of_day', range: 'last_week', system: 'Garage' });
+    expect(used.title).toBe('The house load: average, by hour');
+    expect(used.rows[19]).toEqual(['19:00', 0.9]);
+    expect(used.notes[0]).toBe("Energy the house used is one figure a day: by the hour, this is the house load at each hour instead. An hour's average in kW is that hour's energy in kWh.");
+    const peak = await run('figures', { measure: 'peak_power', by: 'hour_of_day', range: 'last_week', system: 'Garage' });
+    expect(peak.title).toBe('The power made: highest, by hour');
+    expect(peak.notes[0]).toBe("A day's highest power is one figure a day: by the hour, this is the power made at each hour instead.");
+    await expect(run('figures', { measure: 'load', from: '2026-05-01', to: '2026-09-27' })).rejects.toThrow('three months at most');
+    await expect(run('figures', { measure: 'made', from: '2025-01-01', to: '2026-09-27' })).rejects.toThrow('a year at most');
+    const total = await run('figures', { measure: 'load', stat: 'total', range: 'last_week', system: 'Garage' });
+    expect(total.notes).toContain('The house load does not add up over time, so this is its average.');
+    expect(total.summary.startsWith('Garage: the house load averaged 400 W last week (21 – 27 Sep 2026)')).toBe(true);
+    expect((await run('figures', { measure: 'sold', range: 'last_month' })).summary).toBe('There is no record of energy sold to the grid last month (1 – 31 Aug 2026).');
+  });
+
+  it('names a day or a span as it was asked, nothing as asked in one sentence, and an inverter with no lifetime counter', async () => {
+    await week();
+    const day = await run('figures', { measure: 'made', from: '2026-09-24', to: '2026-09-24', system: 'Roof' });
+    expect(day.summary).toBe('Roof: 20 kWh of energy made on Thu 24 Sep 2026, from 1 day.');
+    const span = await run('figures', { measure: 'made', above: 10, from: '2026-09-21', to: '2026-09-23', system: 'Roof' });
+    expect(span.summary).toBe('Roof: 60 kWh of energy made over 21 – 23 Sep 2026, on the 3 days it was above 10 kWh.');
+    const yesterday = await run('figures', { measure: 'load', stat: 'highest', range: 'yesterday', system: 'Garage' });
+    expect(yesterday.summary).toMatch(/^Garage: the house load was at its highest, [\d.]+ k?W, on Sun 27 Sep 2026 at \d\d:\d\d, yesterday \(.*27 Sep 2026\)\.$/);
+    expect((await run('figures', { measure: 'sold', above: 1, range: 'last_month' })).summary)
+      .toBe('There is no record of energy sold to the grid above 1 kWh last month (1 – 31 Aug 2026).');
+    // A third system reporting, with no lifetime counter: said so, and left out of the total of the other two.
+    await addSystem(h.env.DB, { id: 'solarman:station:gamma', name: 'Shed', kwp: 2 });
+    await h.env.DB.prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, metrics, tz_offset_sec) VALUES ('solarman:station:gamma', ?1, 'test', 100, '{}', 0)").bind(NOW - 60).run();
+    const life = await run('figures', { measure: 'lifetime_made' });
+    expect(life.summary).toContain("Shed's inverter has not reported a lifetime total.");
+    expect(life.rows.find((r) => r[0] === 'Shed')).toEqual(['Shed', null, 'Mon 28 Sep 2026 08:59']);
+    expect(life.facts.together_lifetime_kwh).toBe(20177);
+  });
+});
+
+describe('status_now: the house and the grid, now', () => {
+  it('says what the house draws and which way the grid flows, for a system reporting now', async () => {
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    await h.env.DB.prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, today_kwh, load_power_w, grid_power_w, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', 2000, 6.2, 450, -1200, '{}', 0)")
+      .bind(GARAGE, NOW - 60).run();
+    const r = await run('status_now', {});
+    expect(r.summary).toBe('Garage is making 2 kW now, and 6.2 kWh so far today. At Garage, the house is drawing 450 W, selling 1.2 kW to the grid.');
+    expect(r.facts).toMatchObject({ load_now_w: 450, grid_now_w: -1200 });
   });
 });
 
