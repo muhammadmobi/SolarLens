@@ -1,9 +1,20 @@
 # SolarLens
 
 **One screen for all your inverters.** SolarLens polls SolisCloud and SolarMan, stores every
-reading in your own database, and shows both systems side by side — live power, today /
+reading in your own database, and shows every system side by side — live power, today /
 month / year / lifetime energy, grid import & export, battery state — on a page you can open
 from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or locally.
+
+**[See it running](https://muhammadmobi.github.io/SolarLens/)** — the real dashboard, on made-up
+data, with no server behind it.
+
+| | |
+|---|---|
+| ![The Overview: three systems, each with its energy flow, its figures and its day](docs/screenshots/overview.png) | ![Compare: every system per kWp of panels](docs/screenshots/compare.png) |
+| ![The same Overview in the dark theme](docs/screenshots/overview-dark.png) | ![Devices: each datalogger and its week](docs/screenshots/devices.png) |
+| ![A system in full](docs/screenshots/system.png) | ![On a phone](docs/screenshots/phone.png) |
+
+<sub>Screenshots of the demo: three invented systems, made-up figures. `npm run screenshots` retakes them.</sub>
 
 - **Two vendors, one model.** SolisCloud and SolarMan are normalised into the same reading shape, so the UI never cares where a number came from.
 - **Your data, kept.** Every sample is stored (with the untouched vendor payload), so you get history the vendor apps don't let you keep or export.
@@ -11,7 +22,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 - **Honest about freshness.** Every panel shows *when* it was last updated. A system reads **offline** the moment either the vendor says so or nothing has arrived for 25 minutes — and an offline system's live figures are zero, not whatever it managed just before it dropped.
 - **Reads well in either theme.** A three-state toggle in the top-right corner follows your system, or forces light or dark; the choice is remembered and applied before first paint.
 - **Labelled, not cryptic.** Every headline figure says what it is and what it covers — "Producing now", "Produced today", "Consumed today" — and each system's live output is set against its rated size.
-- **Open it and it is there.** No login, no token to copy onto each device — the readings are public by design, with vendor identifiers stripped from every response before it leaves the Worker.
+- **Open it and it is there - or make it yours alone.** Out of the box, no login and no token to copy onto each device, with vendor identifiers stripped from every response before it leaves the Worker. Turn on *Require sign-in to view* and it is private: a passkey or a password, once per device, and never again; share a view-only link with anyone you choose.
 - **Each system's day ends where its own sun sets.** Every plant's timezone is stored, and every figure, curve and daily row is cut at that plant's midnight rather than at the reader's — so two systems in different countries are each shown their own day, on the same screen.
 - **Fault history, with what the vendor advises.** Every alarm each vendor has on record, back to installation: when, how severe, the fault code, how long it lasted, and the vendor's own advice where it gives any. SolarMan's alert list says only when a fault was raised; its timeline, read for the newest alerts each hour, supplies when each one cleared, and the occurrences the list folds into one entry per day.
 - **Tells your phone, even with the dashboard closed.** Turn it on once per device on the Alerts tab, and that device is notified when a system stops reporting while it was producing, when a fault is recorded, when a SolisCloud login is about to run out, or when a vendor stops answering. A system going quiet at dusk is not news, so it is not announced. While a tab is open, a second switch announces every change the Alerts tab shows.
@@ -34,7 +45,7 @@ from any device. It runs entirely on Cloudflare's free tier (Workers + D1) or lo
 3. [Quick start (≈10 minutes)](#quick-start-10-minutes)
 4. [Getting credentials](#getting-credentials) — [SolisCloud](#soliscloud-official-api-key) · [SolarMan](#solarman-official-business-api) · [SolarMan fallback](#solarman-browser-session-fallback)
 5. [SolisCloud relay agent](#soliscloud-relay-agent) — [one command on Windows](#one-command-on-windows) · [more than one machine](#running-it-on-more-than-one-machine) · [replacing a token](#replacing-a-token)
-6. [Notifications on your phone](#notifications-on-your-phone) · [Signing in, and making it private](#signing-in-and-making-it-private)
+6. [Notifications on your phone](#notifications-on-your-phone) · [Signing in, and making it private](#signing-in-and-making-it-private) · [The demo on GitHub Pages](#the-demo-on-github-pages)
 7. [Configuration reference](#configuration-reference)
 8. [Local development](#local-development)
 9. [Testing](#testing) — [what runs on every pull request](#what-runs-on-every-pull-request) · [where the reports are](#where-the-reports-are)
@@ -510,6 +521,27 @@ tries from one address lock it out for a quarter of an hour, and thirty from
 everywhere in an hour pause password sign-in for an hour; passkeys still work
 through both.
 
+## The demo on GitHub Pages
+
+[muhammadmobi.github.io/SolarLens](https://muhammadmobi.github.io/SolarLens/) is the dashboard as
+it ships, with no server behind it. `scripts/build-demo.mjs` copies `public/` into `site/`
+and adds `demo/demo.js`, which runs before the dashboard's own script and answers every
+`/api` and `/auth` request with sample data made up in the visitor's browser: three invented
+systems, placed each time wherever it is early afternoon, so the day's curve is always there to
+see. Nothing in it came from a real plant, and nothing a visitor changes is saved.
+
+```bash
+npm run demo:build     # site/, the same thing Pages publishes
+npm run screenshots    # retake docs/screenshots/*.png, of the demo
+```
+
+`.github/workflows/pages.yml` builds and publishes it whenever `public/` or `demo/` changes on
+`main`. It needs Pages turned on once, with **GitHub Actions** as the source (Settings →
+Pages). The demo's sample data is held to the real Worker's answers field by field
+(`tests/unit/fixture-contract.test.ts`), and `tests/e2e/demo.spec.ts` opens the built site
+under a sub-path, as Pages serves it, and checks every view draws, no request leaves for a
+server, and nothing reaches for the root of the site.
+
 ## Configuration reference
 
 Secrets go in with `npm run cf -- secret put NAME` (production) or in `.dev.vars` (local, gitignored — copy from `.dev.vars.example`).
@@ -591,7 +623,7 @@ npm run test:e2e            # playwright
 npm run test:e2e:ui         # playwright's inspector, for stepping through a failure
 ```
 
-**532 unit tests** and **450 end-to-end tests** (225 specs across a desktop and a mobile project), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
+**537 unit tests** and **462 end-to-end tests** (231 specs across a desktop and a mobile project, plus seven that retake the README's screenshots on request), all runnable on a laptop with no Cloudflare account, no database and no vendor credentials.
 
 ### Debugging a failing test
 
@@ -666,7 +698,7 @@ Twenty-nine files, one concern each. Most are pure-function tests against fixtur
 
 ### End-to-end tests — `tests/e2e/`
 
-Twelve spec files, **225 tests**, each run twice: **chrome** (Desktop Chrome) and
+Thirteen spec files, **231 tests**, each run twice: **chrome** (Desktop Chrome) and
 **mobile** (Pixel 7). `scripts/serve-static.mjs` serves `public/`, and every
 `/api/*` route is answered from fixtures in the spec, so the suite needs no
 Worker, database or vendor. They assert what a person sees and what the page
@@ -676,6 +708,7 @@ sends:
 |---|---|
 | `dashboard.spec.ts` | The bulk, 141 tests: the overview and its layout at both widths, the theme, the header figures, each system's page, charts, alerts, history, devices, each datalogger's card and week, relays, TV mode, freshness and the auth gate |
 | `accessibility.spec.ts` | axe-core's WCAG 2 A and AA rules on every view, a keyboard walk-through, and a full keyboard lap of each view showing focus |
+| `demo.spec.ts` | The GitHub Pages demo, built and served under a sub-path as Pages serves it: the banner says the data is made up, every view draws from the sample data, no request leaves for an `/api` or `/auth`, nothing reaches for the site's root, the day's curve is there at any hour, and axe finds nothing serious. (`screenshots.spec.ts` beside it takes the README's pictures, and is skipped unless `npm run screenshots` asks for it.) |
 | `many-systems.spec.ts` | More than two systems: a colour per system (two on the same vendor differ; the palette comes round after eight), the Overview's strip and when it stops fitting one screen, Compare on a per-kWp scale and with an offline system, TV mode taking turns, and a plant with two inverters |
 | `signin.spec.ts` | Signing in and Settings: a private dashboard asks for a sign-in instead of showing an error and comes back without a reload; setup with the setup code; the switch, devices, share links and password in Settings; a visitor's and a stranger's Settings; and a real passkey - made and used by Chrome's virtual authenticator, checked with the Worker's own verifier |
 | `guide.spec.ts` | The guide: one tap from anywhere, opens with no data or a refused request, names the systems, links only to real pages |
@@ -904,13 +937,17 @@ reviewer, and nothing deploys until someone approves the run on GitHub.
    which is what makes rolling back the Worker alone a safe answer.
 3. **Deploy the Worker.**
 4. **Ask the live site whether it works** - `scripts/ci/smoke.mjs`: the page
-   loads and still carries its security policy, `/api/health` and `/api/latest`
-   answer, a vendor feed is current, the public responses carry no identifiers,
+   loads and still carries its security policy, `/api/status` answers and a
+   vendor feed is current, `/api/latest` and `/api/health` answer - or, on a
+   private dashboard, ask a signed-out caller to sign in - the responses carry no identifiers,
    and `/api/poll` and `/api/ingest/relay` still refuse a caller with no token.
 5. **If any of that fails, the previous version is put back automatically** and
    the run is marked failed, with the reason in its log.
 6. **The run's summary says whether the relay computers need updating**, when
    the merge touched `agent/`, the relay scripts or a `.cmd`.
+
+`.github/workflows/pages.yml` publishes the demo to GitHub Pages when `public/` or `demo/`
+changes - see [The demo on GitHub Pages](#the-demo-on-github-pages).
 
 `.github/workflows/release.yml` is the release button: run it from the Actions
 tab with a version, and it refuses unless `package.json` carries that version,
@@ -1052,6 +1089,7 @@ solar-lens/
 │   ├── workflows/release.yml  the release button: tag and publish the notes
 │   ├── privacy-allow.txt     long numbers the privacy guard may let through
 │   ├── CODEOWNERS            asks the owner to review anyone elses pull request
+│   ├── workflows/pages.yml     builds the demo and publishes it to GitHub Pages
 │   └── workflows/reviewers.yml  asks Copilot, and the owner, for a review
 ├── tsconfig.json             typecheck for src/
 ├── tsconfig.tests.json       typecheck for tests/ (browser + Worker types)
@@ -1097,6 +1135,9 @@ solar-lens/
 │   ├── icon.svg              app icon and favicon
 │   └── icon-192.png          rendered from icon.svg for installs and iOS
 │       icon-512.png
+├── demo/
+│   └── demo.js               the demo's sample data, and the fetch that serves it
+├── docs/screenshots/         the README's pictures, taken of the demo
 ├── agent/
 │   ├── solis-relay.mjs       local Chrome relay for SolisCloud
 │   ├── solis-extras.mjs      its slower reads: alarm history and period totals
@@ -1125,7 +1166,9 @@ solar-lens/
 │   ├── probe-solis.mjs          one signed Solis request, raw response printed
 │   ├── seed-local.mjs           a day of synthetic readings for the local DB
 │   ├── capture-portals.mjs      saves portal responses as test fixtures
-│   ├── serve-static.mjs         serves public/ for the e2e run
+│   ├── serve-static.mjs         serves public/ for the e2e run, and the built demo at /demo/
+│   ├── build-demo.mjs           builds the GitHub Pages demo into site/
+│   ├── screenshots.mjs          retakes docs/screenshots/, of the demo
 │   └── make-icons.mjs           renders icon.svg to the manifest's PNG sizes
 ├── tests/
 │   ├── unit/units.test.ts       W / kWh / timestamp scaling
@@ -1163,6 +1206,8 @@ solar-lens/
 │   ├── e2e/push.spec.ts         turning notifications to a closed browser on and off
 │   ├── e2e/signin.spec.ts       signing in, Settings, and a real passkey
 │   ├── e2e/many-systems.spec.ts  more than two systems: colours, Compare, TV turns
+│   ├── e2e/demo.spec.ts         the GitHub Pages demo, built and served under a sub-path
+│   ├── e2e/screenshots.spec.ts  the README's pictures; skipped unless asked for
 │   ├── e2e/guide.spec.ts        the guide page and its button
 │   ├── e2e/history-systems.spec.ts  Historical Data, one system or all
 │   ├── e2e/new-version.spec.ts  the reload notice after a release
@@ -1358,6 +1403,7 @@ One third-party request remains: the page loads its web font from Google, which 
 - [x] An owner login with passkeys, a private dashboard on the owner's say-so, signed-in devices and view-only share links (3.0)
 - [x] Everything each datalogger reports, and its link over the week (3.0)
 - [x] Any number of systems: a colour each, Compare per kWp, TV mode taking turns, polling spread across runs (3.0)
+- [x] A demo on GitHub Pages, on made-up data, and screenshots taken of it (3.0)
 - [ ] Local Modbus agent for LSW-3/LSE-3 loggers → `/api/ingest`
 - [x] SolarMan device endpoints — inverter/collector list, datalogger signal and firmware
 - [x] Per-string voltage & current, per-phase AC, heatsink temperature — both vendors, no API key needed

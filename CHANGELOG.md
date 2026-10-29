@@ -18,6 +18,16 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **A demo on GitHub Pages.** The real dashboard, on made-up data, with no
+  server behind it: `demo/demo.js` answers every request with three invented
+  systems, placed wherever it is early afternoon so the day's curve is always
+  there, and a banner says so. Built by `scripts/build-demo.mjs` and published
+  by `.github/workflows/pages.yml` whenever the page changes. Its sample data is
+  held to the real Worker's answers field by field, like the test fixtures.
+
+- **Screenshots in the README**, taken of the demo by `npm run screenshots`, so
+  no real plant or figure can end up in a picture.
+
 - **Any number of systems.** Each system has a colour of its own, used
   wherever it appears, where colour used to come from the vendor - so two
   plants on SolarMan were both blue. A **Compare** tab, with two systems or

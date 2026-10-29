@@ -25,7 +25,8 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['Pixel 7'], channel: 'chrome' } },
   ],
   webServer: {
-    command: `node scripts/serve-static.mjs`,
+    // The demo is built first, so the /demo/ tests run against what Pages would serve.
+    command: `node scripts/build-demo.mjs && node scripts/serve-static.mjs`,
     url: `http://127.0.0.1:${PORT}/`,
     env: { PORT: String(PORT) },
     reuseExistingServer: !process.env.CI,

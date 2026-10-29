@@ -28,3 +28,6 @@ coverage/
 
 # Generated from wrangler.jsonc with your own ids filled in (scripts/wrangler.mjs)
 .wrangler.local.jsonc
+
+# The GitHub Pages demo, built by scripts/build-demo.mjs
+site/
