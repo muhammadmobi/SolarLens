@@ -146,6 +146,14 @@ link does not get it - and its tiles see only this site's origin.
 A Settings page for the tariff and net metering, filled in by the owner when
 ready. From it: savings per day, month and year, and the CO₂ avoided.
 
+**As built:** the tariff is a card in Settings rather than a page of its own,
+beside the sign-in settings it belongs with. The Worker keeps and checks the
+numbers; the page does the sums from figures it already has, so no new history
+query was needed. A kWh used at home is worth one bought, one exported earns
+the export price (or the import price, with net metering), and a period whose
+export the vendor does not report is marked as an upper bound rather than
+guessed. With no tariff set, no money is shown anywhere.
+
 ### 9. New views
 
 A power analysis view (hour by hour, load against generation, peaks), and

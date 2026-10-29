@@ -71,8 +71,13 @@ describe('SolisCloud station normaliser', () => {
       gridSellTotalEnergy: 3400, gridSellTotalEnergyStr: 'kWh',
       gridPurchasedDayEnergy: 2.4, gridPurchasedDayEnergyStr: 'kWh',
       gridSellDayEnergy: 10.7, gridSellDayEnergyStr: 'kWh',
+      gridSellMonthEnergy: 212, gridSellMonthEnergyStr: 'kWh',
+      gridSellYearEnergy: 1.9, gridSellYearEnergyStr: 'MWh',
     } as Record<string, unknown>);
     expect(metered.metrics?.gridImportTotalKwh).toBe(1200);
+    // Month and year exports, which money saved needs; the unit is honoured.
+    expect(metered.metrics?.gridExportMonthKwh).toBe(212);
+    expect(metered.metrics?.gridExportYearKwh).toBe(1900);
     expect(metered.metrics?.gridExportTodayKwh).toBe(10.7);
     expect(metered.metrics?.loadTodayKwh).toBe(49);
     expect(metered.loadPowerW).toBe(0);

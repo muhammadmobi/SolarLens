@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { bearer, createHarness, testReading, type Harness } from '../helpers/worker';
 import { insertReading } from '../../src/db';
 import { storeWeather, upsertLocation } from '../../src/weather';
+import { parseTariff } from '../../src/settings';
 import { deviceHistory, devices, inverters } from '../fixtures/dashboard-api';
 
 const post = (body: unknown) => ({
@@ -157,7 +158,7 @@ describe('the demo matches what the Worker sends', () => {
   });
 
   it('answers every read the dashboard makes', () => {
-    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/auth/status', '/auth/settings']) {
+    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/api/expected', '/api/weather', '/api/locations', '/api/settings/tariff', '/auth/status', '/auth/settings']) {
       expect(demo, path).toHaveProperty([path]);
     }
   });
@@ -188,6 +189,11 @@ describe('the demo matches what the Worker sends', () => {
     }
     const hour = fields((rowsOf(worker['/api/expected'], 'systems')[0].hours as Record<string, unknown>[])[0]);
     for (const sys of rowsOf(demo['/api/expected'], 'systems')) expect(fields((sys.hours as Record<string, unknown>[])[0])).toEqual(hour);
+  });
+
+  it('its tariff is one the Worker would keep, unchanged', () => {
+    const t = (demo['/api/settings/tariff'] as { tariff: unknown }).tariff;
+    expect(parseTariff(t)).toEqual({ tariff: t });
   });
 
   it('its status and health answers have the Worker\'s shape', () => {

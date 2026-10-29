@@ -186,6 +186,8 @@ function stationMetrics(d: Rec): Metrics {
     m.gridExportTodayKwh = kwhPair(d, 'gridSellDayEnergy');
     m.gridImportTotalKwh = kwhPair(d, 'gridPurchasedTotalEnergy');
     m.gridExportTotalKwh = kwhPair(d, 'gridSellTotalEnergy');
+    m.gridExportMonthKwh = kwhPair(d, 'gridSellMonthEnergy');
+    m.gridExportYearKwh = kwhPair(d, 'gridSellYearEnergy');
   }
   m.fullLoadHours = num(pick(d, 'fullHour'));
   // condTxtD is the daytime description; the snapshot also carries sunrise and

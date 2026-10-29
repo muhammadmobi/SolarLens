@@ -748,6 +748,8 @@
   .settings .authform:not(.inline) { max-width: 440px; }
   .authform label { display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; font-weight: 650; }
   .authform label small { color: var(--muted); font-weight: 500; }
+  .authform label.switchrow { flex-direction: row; font-weight: 500; }
+  .formrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .authform input, .authform select, .sharelink input {
     font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); min-width: 0;
@@ -2762,16 +2764,24 @@
       const anyGrid = mine.some((r) => r.import_kwh != null || r.export_kwh != null);
       const anyBatt = mine.some((r) => r.batt_charge_kwh != null || r.batt_discharge_kwh != null);
 
+      // With a tariff set, each row also says what it was worth. The sum is
+      // of the rows, so it is exactly the column's total.
+      const money = state.tariff ? mine.map((r) => valueOf(r.yield_kwh, r.export_kwh)) : null;
+      const worth = money ? money.reduce((a, v) => ({ money: a.money + (v?.money ?? 0), co2: a.co2 + (v?.co2 ?? 0),
+        assumed: a.assumed || !!v?.assumed }), { money: 0, co2: 0, assumed: false }) : null;
+
       const head = [periodWord, 'Produced', anyLoad ? 'Consumed' : null, anyGrid ? 'Imported' : null,
         anyGrid ? 'Exported' : null, anyBatt ? 'Charged' : null, anyBatt ? 'Discharged' : null,
+        money ? 'Saved' : null, money ? 'CO₂ avoided' : null,
         'Peak', group === 'day' ? null : 'Days recorded', 'Samples', group === 'day' ? null : 'Source'].filter(Boolean);
 
-      const body = mine.map((r) => `<tr>
+      const body = mine.map((r, ri) => `<tr>
         <td class="mono">${esc(r.day)}</td>
         <td>${fmtKwh(r.yield_kwh)}</td>
         ${anyLoad ? `<td>${fmtKwh(r.load_kwh)}</td>` : ''}
         ${anyGrid ? `<td>${fmtKwh(r.import_kwh)}</td><td>${fmtKwh(r.export_kwh)}</td>` : ''}
         ${anyBatt ? `<td>${fmtKwh(r.batt_charge_kwh)}</td><td>${fmtKwh(r.batt_discharge_kwh)}</td>` : ''}
+        ${money ? `<td>${esc(fmtMoney(money[ri]?.money))}${money[ri]?.assumed ? '*' : ''}</td><td>${esc(fmtCo2(money[ri]?.co2))}</td>` : ''}
         <td>${fmtWs(r.peak_w)}</td>
         ${group === 'day' ? '' : `<td class="${r.days < r.span ? 'partial' : ''}">${r.days} of ${r.span}</td>`}
         <td class="faint">${r.samples}</td>
@@ -2811,10 +2821,14 @@
           </table></div>
           <dl class="kv" style="padding:16px 20px 20px">
             <dt>Recorded here</dt><dd>${fmtKwh(group === 'day' ? totals.yield : mine.reduce((a, r) => a + (r.recorded_kwh ?? 0), 0))} over ${group === 'day' ? mine.length : mine.reduce((a, r) => a + r.days, 0)} day${(group === 'day' ? mine.length : mine.reduce((a, r) => a + r.days, 0)) === 1 ? '' : 's'}</dd>
+            ${worth ? `<dt>Saved</dt><dd>${esc(fmtMoney(worth.money))}${worth.assumed ? '*' : ''}</dd>
+              <dt>CO₂ avoided</dt><dd>${esc(fmtCo2(worth.co2))}</dd>` : ''}
             ${m.genMonthKwh != null ? `<dt>Vendor · this month</dt><dd>${fmtKwh(m.genMonthKwh)}</dd>` : ''}
             ${m.genYearKwh != null ? `<dt>Vendor · this year</dt><dd>${fmtKwh(m.genYearKwh)}</dd>` : ''}
             ${m.genTotalKwh != null ? `<dt>Vendor · lifetime</dt><dd>${fmtKwh(m.genTotalKwh)}</dd>` : ''}
           </dl>
+          ${worth ? `<p class="cardnote" style="margin:0 20px 16px">${esc(tariffLine())}${worth.assumed
+            ? ' * No export figure for that period, so every kWh counts as used at home: an upper bound.' : ''}</p>` : ''}
         </div>
       </details>`;
     }).join('');
@@ -2827,6 +2841,7 @@
         <p class="cardnote" style="margin-top:14px">Built from the samples SolarLens has stored, so the record begins when it
         started collecting — not when the array was installed. Each vendor's own running totals are shown at the
         foot of its section for comparison.</p>
+        ${state.tariff ? '' : '<p class="cardnote">Money saved and CO₂ avoided appear here once the owner sets the tariff under Settings (the gear).</p>'}
       </div></section>${sections}`;
     bindRange();
     const csvBtn = $('csv');
@@ -3235,6 +3250,75 @@
     ], 'Sunlight measured by Open-Meteo at the system\'s position. On the Overview and the Power tab, the dashed line on its day curve is the expected output, hour by hour.');
   }
 
+  // ---------- money and carbon ----------
+  /**
+   * What the sun has been worth, from the tariff the owner set in Settings
+   * (GET /api/settings/tariff, kept in state.tariff).
+   *
+   * A kWh made and used at home saves one bought, at the import price. A kWh
+   * sent to the grid earns the export price - or, with net metering, cancels
+   * one bought and is worth the import price as well. Every kWh made avoids
+   * the CO2 the grid would have put out for it. No tariff, no money: until the
+   * owner fills it in, every figure below is left out rather than guessed.
+   *
+   * `assumed` marks a figure worked out without knowing the export: the
+   * vendors give month and year production but not always what was sold, and
+   * such a period counts every kWh at the import price - an upper bound, and
+   * said so wherever it is shown. With net metering, or both prices equal, it
+   * makes no difference and is not flagged.
+   */
+  function valueOf(madeKwh, exportKwh, t = state.tariff) {
+    if (!t || madeKwh == null || !Number.isFinite(madeKwh)) return null;
+    const made = Math.max(0, madeKwh);
+    const known = exportKwh != null && Number.isFinite(exportKwh);
+    const sold = t.netMetering || !known ? 0 : Math.min(made, Math.max(0, exportKwh));
+    return {
+      money: (made - sold) * t.importPrice + sold * t.exportPrice,
+      co2: made * t.co2KgPerKwh,
+      assumed: !known && !t.netMetering && t.exportPrice !== t.importPrice,
+    };
+  }
+
+  /** Money in the owner's currency, in the reader's own number format. */
+  function fmtMoney(v, t = state.tariff) {
+    if (v == null || !t) return '—';
+    try {
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency: t.currency, maximumFractionDigits: Math.abs(v) >= 100 ? 0 : 2 }).format(v);
+    } catch {
+      return `${v.toFixed(Math.abs(v) >= 100 ? 0 : 2)} ${t.currency}`;
+    }
+  }
+
+  /** Kilograms of CO2, in tonnes past one. */
+  const fmtCo2 = (kg) => kg == null ? '—' : kg >= 1000 ? `${(kg / 1000).toFixed(kg >= 10000 ? 1 : 2)} t CO₂` : `${kg.toFixed(kg >= 100 ? 0 : 1)} kg CO₂`;
+
+  /** The prices in words, for the note under a money figure. */
+  function tariffLine(t = state.tariff) {
+    if (!t) return '';
+    return `At ${fmtMoney(t.importPrice, t)} for a kWh bought and ${t.netMetering ? 'the same for one exported (net metering)' : `${fmtMoney(t.exportPrice, t)} for one sold`}; ${t.co2KgPerKwh} kg of CO₂ for each kWh the grid supplies.`;
+  }
+
+  /**
+   * A system's page: what it has saved today, this month, this year and in
+   * its lifetime, from the vendor's own running totals. Today's export is
+   * known wherever the vendor reports it; the longer periods mostly are not.
+   */
+  function moneyCard(inv) {
+    if (!state.tariff) return '';
+    const m = parse(inv.metrics) ?? {};
+    const periods = [
+      ['Today', inv.today_kwh, m.gridExportTodayKwh],
+      ['This month', m.genMonthKwh, m.gridExportMonthKwh],
+      ['This year', m.genYearKwh, m.gridExportYearKwh],
+      ['Lifetime', inv.total_kwh, m.gridExportTotalKwh],
+    ].map(([k, made, sold]) => [k, valueOf(made, sold)]).filter(([, v]) => v);
+    if (!periods.length) return '';
+    const guessed = periods.some(([, v]) => v.assumed);
+    return kvCard('Money and carbon', periods.map(([k, v]) =>
+      [k, `<strong>${esc(fmtMoney(v.money))}</strong>${v.assumed ? '<sup title="Export not known: every kWh counted at the price of one bought">*</sup>' : ''} · <span class="faint">${esc(fmtCo2(v.co2))} avoided</span>`]),
+      `${tariffLine()}${guessed ? ' * The vendor gives no export figure for the periods marked, so they count every kWh as used at home: an upper bound.' : ''} The owner sets these prices under Settings.`);
+  }
+
   /**
    * A plant with more than one inverter: the first one's cards are above, as
    * for any system; each further one gets its own identity, strings and AC
@@ -3501,7 +3585,7 @@
         </div>
       </div>`,
       flow: `<section class="card" style="margin-bottom:16px"><div class="body">${flowSvg(inv, m)}</div></section>`,
-      blocks: `<div class="blocks">${identity}${link}${live}${counters}${weatherCard(inv)}${stringsCard(invDev, accent, st.offline)}${acCard(invDev)}${battery}${diagnostics}</div>${moreInverters(devs, accent, st.offline)}`,
+      blocks: `<div class="blocks">${identity}${link}${live}${counters}${weatherCard(inv)}${moneyCard(inv)}${stringsCard(invDev, accent, st.offline)}${acCard(invDev)}${battery}${diagnostics}</div>${moreInverters(devs, accent, st.offline)}`,
       raw: rawCard(inv),
     };
   }
@@ -3549,6 +3633,17 @@
       const wait = data.until ? ` Try again after ${when(data.until)}.` : '';
       throw new Error((data.error || `The server said ${res.status}.`) + (res.status === 429 ? wait : ''));
     }
+    return data;
+  }
+  /** A write under /api/ with a JSON body - the owner's cookie is what lets it through. */
+  async function apiSend(method, path, body) {
+    const res = await fetch(path, {
+      method, credentials: 'same-origin',
+      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `The server said ${res.status}.`);
     return data;
   }
   const authGet = async (path) => {
@@ -3729,6 +3824,24 @@
         <p class="cardnote">The relays, phone notifications and the status check keep working either way.</p>
       </div></section>
 
+      <section class="card"><h2>Tariff</h2><div class="body">
+        <p class="cardnote">What electricity costs you, so the dashboard can say what the sun has saved and the CO₂ it has avoided. Everyone who can see the dashboard sees the savings.</p>
+        <form class="authform" id="tariff-form">
+          <label>Currency <small>a three-letter code, such as PKR, EUR or GBP</small>
+            <input id="t-cur" required maxlength="3" autocapitalize="characters" pattern="[A-Za-z]{3}" value="${esc(state.tariff?.currency ?? '')}"></label>
+          <label>A kWh bought from the grid costs
+            <input id="t-imp" type="number" inputmode="decimal" step="any" min="0" max="1000" required value="${esc(state.tariff?.importPrice ?? '')}"></label>
+          <label class="switchrow"><input type="checkbox" id="t-net" ${state.tariff?.netMetering ? 'checked' : ''}>
+            <span><strong>Net metering</strong><small class="faint">Each kWh sent to the grid cancels one bought, so it is worth the same.</small></span></label>
+          <label id="t-exp-row" ${state.tariff?.netMetering ? 'hidden' : ''}>A kWh sold to the grid earns
+            <input id="t-exp" type="number" inputmode="decimal" step="any" min="0" max="1000" value="${esc(state.tariff?.exportPrice ?? 0)}"></label>
+          <label>CO₂ per kWh from the grid <small>kg; about 0.4 is a typical mix, lower where the grid is mostly hydro, nuclear or wind</small>
+            <input id="t-co2" type="number" inputmode="decimal" step="any" min="0" max="2" required value="${esc(state.tariff?.co2KgPerKwh ?? 0.4)}"></label>
+          <div class="formrow"><button type="submit" class="authbtn">Save the tariff</button>
+            ${state.tariff ? '<button type="button" class="rangebtn" id="t-clear">Clear it, and show no money</button>' : ''}</div>
+        </form>
+      </div></section>
+
       <section class="card"><h2>Passkeys</h2><div class="body">
         <p class="cardnote">Sign in with a fingerprint, a face or the device PIN. Nothing that could sign you in is stored on the server.</p>
         <ul class="authlist">${passkeys}</ul>
@@ -3771,6 +3884,20 @@
 
     $('req').onchange = act(async () => redo((await authPost('/auth/settings/required', { on: $('req').checked })).required
       ? 'The dashboard is private now.' : 'The dashboard is open to anyone with its address again.'));
+    $('t-net').onchange = () => { $('t-exp-row').hidden = $('t-net').checked; };
+    $('tariff-form').onsubmit = act(async () => {
+      const net = $('t-net').checked;
+      const imp = Number($('t-imp').value);
+      state.tariff = (await apiSend('PUT', '/api/settings/tariff', {
+        currency: $('t-cur').value.trim().toUpperCase(), importPrice: imp,
+        exportPrice: net ? imp : Number($('t-exp').value || 0), netMetering: net, co2KgPerKwh: Number($('t-co2').value),
+      })).tariff;
+      redo('Tariff saved. Savings show on each system\'s page and under Historical Data.');
+    });
+    if ($('t-clear')) $('t-clear').onclick = act(async () => {
+      state.tariff = (await apiSend('DELETE', '/api/settings/tariff')).tariff;
+      redo('Tariff cleared. No money is shown until it is set again.');
+    });
     if ($('pk-add')) $('pk-add').onsubmit = act(async () => { await addPasskey($('pk-name').value.trim()); redo('Passkey added.'); });
     $('pw-change').onsubmit = act(async () => {
       await authPost('/auth/settings/password', { current: $('pw-cur') ? $('pw-cur').value : undefined, next: $('pw-new').value });
@@ -3826,6 +3953,7 @@
       ['See what each system is producing right now', tab('#/', 'Overview')],
       ['Where each system is, on a map (the owner only)', `${tab('#/map', 'Map')}, once you are signed in`],
       ['Whether a system is making what the weather allowed', `the system's page - Against the weather; and the dashed line on its day curve, on ${tab('#/', 'Overview')} and ${tab('#/power', 'Power')}`],
+      ['What the sun has saved, and the CO₂ it has avoided', `each system's page - Money and carbon; and ${tab('#/history', 'Historical Data')}, by day, month or year. The owner sets the prices under ${tab('#/settings', 'Settings')}`],
       ['Which system is doing best, for its size', `${tab('#/compare', 'Compare')} - kWh per kWp, today and this month (with two systems or more)`],
       ['See every system on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
       ['See one system on its own, in full', `${tab('#/', 'Overview')} - tap the system`],
@@ -4087,7 +4215,7 @@
     if (document.hidden && !force) return;
     try {
       const now = Math.floor(Date.now() / 1000);
-      const [lat, ser, devs, health, expected, locs] = await Promise.all([
+      const [lat, ser, devs, health, expected, locs, tariff] = await Promise.all([
         api('/api/latest'),
         api(`/api/series?to=${now}&tz=${new Date().getTimezoneOffset()}`),
         api('/api/devices').catch(() => ({ devices: [] })),
@@ -4096,6 +4224,8 @@
         api('/api/expected').catch(() => null),
         // Where each system is: the owner's alone, refused to anyone else.
         api('/api/locations').catch(() => null),
+        // The owner's prices, for money saved; null until they are set.
+        api('/api/settings/tariff').catch(() => null),
       ]);
       // An offline inverter is not still producing whatever it managed just
       // before it dropped - nothing is flowing that anyone can see - so its
@@ -4109,7 +4239,7 @@
         i.grid_power_w = i.load_power_w = 0;
         if (i.battery_power_w != null) i.battery_power_w = 0;
       }
-      state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.expected = expected; state.locations = locs?.locations ?? []; state.error = null;
+      state.latest = lat; state.series = ser; state.devices = devs.devices ?? []; state.health = health; state.expected = expected; state.locations = locs?.locations ?? []; state.tariff = tariff?.tariff ?? null; state.error = null;
 
       const withData = lat.inverters.filter((i) => i.ts);
       // Offline systems now contribute a real zero rather than a last-known
