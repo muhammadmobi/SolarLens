@@ -261,6 +261,12 @@ checkout of any tag says which release it is.
 
 ### Fixed
 
+- **Produced today and Consumed today no longer count a system silent since an
+  earlier day.** Its newest reading still carries that day's counters, which
+  the header added to today's; with a relay off since Thursday, Thursday's
+  energy read as today's. They now read as not reported, as the Worker's own
+  answers already had it.
+
 - **The Raw telemetry table, the vendor-flag alerts and a device's own alert
   count now appear on the live site.** All three read the vendor's raw payload,
   which the public view has never sent, so none of them had ever shown outside

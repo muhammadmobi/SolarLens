@@ -5157,8 +5157,16 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
       // before it dropped - nothing is flowing that anyone can see - so its
       // instantaneous figures read zero everywhere at once, from this one
       // place. The cumulative ones (today, lifetime) are left alone: those
-      // kilowatt-hours were genuinely generated and are still true.
+      // kilowatt-hours were genuinely generated and are still true - but only
+      // on the day they were read. A system silent since an earlier day, its
+      // relay off since then, still carries that day's counters; today they
+      // are not reported, rather than that day's passed off as today's.
       for (const i of lat.inverters) {
+        if (i.ts && plantDay(i.ts, i.tz_offset_sec) !== plantDay(now, i.tz_offset_sec)) {
+          i.today_kwh = null;
+          const m = parse(i.metrics);
+          if (m) i.metrics = JSON.stringify(Object.fromEntries(Object.entries(m).filter(([k]) => !/Today/.test(k))));
+        }
         i.offline = statusOf(i).offline;
         if (!i.offline) continue;
         i.ac_power_w = i.dc_power_w = 0;
