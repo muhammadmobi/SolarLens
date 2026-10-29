@@ -13,7 +13,7 @@ import {
 } from '../../src/tools';
 import { setTariff } from '../../src/settings';
 import { createHarness, type Harness } from '../helpers/worker';
-import { DAY, addDay, addFault, addSun, addSystem, dayNumber, isoOf } from '../helpers/solar-days';
+import { DAY, addDay, addFault, addHybridDay, addSun, addSystem, dayNumber, isoOf } from '../helpers/solar-days';
 
 /** Monday 28 September 2026, 09:00 UTC. */
 const NOW = Date.UTC(2026, 8, 28, 9) / 1000;
@@ -98,7 +98,7 @@ describe('arguments', () => {
     expect(s.properties.from.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
     expect((jsonSchemaOf(toolByName('performance_trend')!) as { properties: Record<string, unknown> }).properties.weeks)
       .toMatchObject({ type: 'integer', minimum: 8, maximum: 26 });
-    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'inverter', 'energy', 'power_day', 'chart', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'report', 'app_help']);
+    expect(TOOLS.map((t) => t.name)).toEqual(['status_now', 'outages', 'inverter', 'energy', 'power_day', 'chart', 'battery', 'compare_systems', 'stats', 'faults', 'day_report', 'performance_trend', 'analysis', 'report', 'app_help']);
   });
 });
 
@@ -961,6 +961,239 @@ describe('inverter', () => {
   });
 });
 
+describe('analysis', () => {
+  const SHED = 'solarman:station:gamma';
+  /** A reading just now, so a system counts as reporting. */
+  const fresh = (id: string) => h.env.DB.prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, today_kwh, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', 800, 0.4, '{}', 0)")
+    .bind(id, NOW - 120).run();
+  const said = (r: ToolResult, area: string) => r.rows.filter((x) => x[1] === area).map((x) => x[2]);
+  const week = async (id: string, o: Parameters<typeof addHybridDay>[3] = {}) => {
+    for (let n = dayNumber('2026-09-21'); n <= dayNumber('2026-09-27'); n++) await addHybridDay(h.env.DB, id, isoOf(n), o);
+  };
+
+  it('finds a battery kept full while the house buys at night, power sold that could be used, and an always-on load', async () => {
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    await week(GARAGE);
+    await fresh(GARAGE);
+    const r = await run('analysis', { range: 'last_week' });
+    expect(r.title).toBe('Analysis: Garage');
+    expect(r.columns).toEqual(['How it stands', 'Area', 'What stands out', 'What to do']);
+    // What needs a look comes first, then what is worth knowing, then what is fine.
+    expect(r.rows.map((x) => [x[0], x[1]])).toEqual([
+      ['Needs a look', 'The battery'], ['Worth knowing', 'Using your own power'], ['Worth knowing', 'The house'],
+      ['Fine', 'Production'], ['Fine', 'The lowest day'], ['Fine', 'Faults'],
+    ]);
+    expect(said(r, 'The battery')[0]).toMatch(/^Garage's battery was full on 7 of 7 days and on a typical day went no lower than 97%; it gave out 0 kWh in all, while the house bought [\d.]+ kWh from the grid, mostly at 00:00–06:00, 18:00–24:00: it is kept full rather than used at night\.$/);
+    expect(r.rows[0][3]).toMatch(/^Check the inverter's battery setting\. In a self-use \(solar first\) mode/);
+    expect(said(r, 'Using your own power')[0]).toMatch(/^Garage used \d+% of what it made at home and sold \d+% \([\d.]+ kWh\); the sun covered \d+% of what the house used, and [\d.]+ kWh was bought, most of it at 00:00–06:00, 18:00–24:00, when the sun is down\.$/);
+    expect(r.rows[1][3]).toBe('Run what can wait - washing, water heating, pumping, charging - at 07:00–18:00, when the panels make more than the house uses and the rest is sold.');
+    expect(said(r, 'The house')).toEqual(["Garage's house never draws less than about 300 W on an average day - 7.2 kWh a day, 75% of what it uses - and draws most at 18:00 (900 W), when the sun is down."]);
+    expect(said(r, 'The lowest day')[0]).toMatch(/^No day was far below the rest: the lowest, Mon 21 Sep 2026, made 100% of the median day/);
+    expect(r.facts).toMatchObject({ needs_a_look: 1, worth_knowing: 2, battery_typical_low_pct: 97, battery_full_days: 7, always_on_w: 300, always_on_share_pct: 75, peak_load_at: '18:00' });
+    // The summary lists what stands out, then what to do; the evidence is the day hour by hour, each day, and the battery.
+    expect(r.summary.split('\n')[0]).toBe('Garage last week (21 – 27 Sep 2026): 1 thing to look at, 2 worth knowing.');
+    expect(r.summary).toContain("\nWhat to do:\n- Check the inverter's battery setting.");
+    expect(r.sections?.map((s) => s.title)).toEqual(['Made and used, on an average day, Garage', 'Grid and battery, on an average day, Garage', 'Energy day by day', 'The battery, day by day']);
+    expect(r.sections?.[0].chart).toEqual({ kind: 'line', columns: [1, 2] });
+    expect(r.sections?.[0].rows[12]).toEqual(['12:00', 2.98, 0.3]);
+    noIds(r);
+  });
+
+  it('says a battery that runs the house at night is used, and one that runs low is worth knowing', async () => {
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    await week(GARAGE, { cycle: 15 });
+    await fresh(GARAGE);
+    const r = await run('analysis', { range: 'last_week' });
+    expect(said(r, 'The battery')[0]).toMatch(/^Garage's battery ran down to 20% or less on 7 of 7 days, as low as 15% and gave out [\d.]+ kWh\.$/);
+    expect(r.rows.find((x) => x[1] === 'The battery')?.[0]).toBe('Worth knowing');
+  });
+
+  it('compares the systems per kWp, blames the sun for a day every system was low, and says what else needs a look', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: SHED, name: 'Shed', kwp: 4 });
+    for (let n = dayNumber('2026-09-21'); n <= dayNumber('2026-09-27'); n++) {
+      const dull = isoOf(n) === '2026-09-23';
+      await addDay(h.env.DB, ROOF, isoOf(n), dull ? 6 : 20);
+      await addDay(h.env.DB, SHED, isoOf(n), dull ? 3 : 10);
+      await addSun(h.env.DB, ROOF, isoOf(n), dull ? 1.5 : 5);
+      await addSun(h.env.DB, SHED, isoOf(n), dull ? 1.5 : 5);
+    }
+    await fresh(ROOF);
+    await h.env.DB.prepare("UPDATE inverters SET plant_id = 'plant-' || name").run();
+    const device = (id: string, plant: string, kind: string, status: string, seen: number, strings: unknown) => h.env.DB
+      .prepare("INSERT INTO devices (id, provider, plant_id, kind, status, last_seen, strings, updated_at) VALUES (?1, 'solarman', ?2, ?3, ?4, ?5, ?6, ?5)")
+      .bind(id, plant, kind, status, seen, strings ? JSON.stringify(strings) : null).run();
+    await device('dev-roof', 'plant-Roof', 'inverter', 'online', NOW - 300, [{ index: 1, voltageV: 380, currentA: 5, powerW: 1900 }, { index: 2, voltageV: 360, currentA: 0.8, powerW: 300 }]);
+    await device('log-shed', 'plant-Shed', 'datalogger', 'offline', dayNumber('2026-09-27') * DAY + 16 * 3600, null);
+    await addFault(h.env.DB, SHED, 'f-shed', dayNumber('2026-09-25') * DAY + 10 * 3600, null, 'Grid overvoltage');
+    await setTariff(h.env.DB, { currency: 'EUR', importPrice: 0.3, exportPrice: 0.1, netMetering: false, co2KgPerKwh: 0.4 });
+    const r = await run('analysis', { range: 'last_week' });
+    expect(r.title).toBe('Analysis');
+    expect(r.rows.map((x) => [x[0], x[1]])).toEqual([
+      ['Needs a look', 'Reporting'], ['Needs a look', 'Systems compared'], ['Needs a look', 'Strings'], ['Needs a look', 'Faults'],
+      ['Worth knowing', 'The lowest day'], ['Fine', 'Production'], ['Fine', 'Production'], ['Fine', 'Money'],
+    ]);
+    expect(said(r, 'Reporting')).toEqual(['Shed has not reported since Sun 27 Sep 2026 19:39, 13 h ago: its datalogger has been offline since Sun 27 Sep 2026 16:00.']);
+    expect(said(r, 'Systems compared')).toEqual(['Per kWp of panels, Shed made 38% less than Roof on an average whole day (2.25 against 3.6 kWh per kWp).']);
+    expect(said(r, 'Strings')).toEqual(['On Roof, PV2 is making far less than PV1 (300 W against 1900 W), as last read at 08:55.']);
+    expect(said(r, 'Faults')).toEqual(['1 fault is still active: Grid overvoltage on Shed.']);
+    expect(said(r, 'The lowest day')).toEqual(['The lowest day was Wed 23 Sep 2026, with 9 kWh against a median day of 30 kWh - Roof 6 kWh (30% of its median day) and Shed 3 kWh (30% of its median day): '
+      + 'less sun at Roof, 1.5 kWh/m² against a usual 5; less sun at Shed, 1.5 kWh/m² against a usual 5.']);
+    expect(said(r, 'Money')).toEqual(['By your tariff, the power made saved about 56.7 EUR and avoided 75.6 kg of CO2.']);
+    expect(r.rows.map((x) => x[3]).filter(Boolean)).toEqual([
+      "Check Shed's datalogger at the site - its Wi-Fi and its power.",
+      'If the two face the same way under the same sky, look for shade, dirt or a string down on Shed; a different tilt or direction explains some of it.',
+      'Look at PV2 on Roof: shade, dirt, or a loose or failed connection.',
+      "See what each one means, and the vendor's advice, on the Alerts tab.",
+    ]);
+    expect(r.summary.split('\n')[0]).toBe('Your systems last week (21 – 27 Sep 2026): 4 things to look at, 1 worth knowing.');
+    expect(r.sections?.map((s) => s.title)).toEqual(['Energy day by day', 'Systems per kWp, on an average whole day', 'Output for the sunlight, week by week', 'Faults']);
+    noIds(r);
+  });
+
+  it('puts a day one system alone was low down to that system', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: SHED, name: 'Shed', kwp: 4 });
+    for (let n = dayNumber('2026-09-21'); n <= dayNumber('2026-09-27'); n++) {
+      await addDay(h.env.DB, ROOF, isoOf(n), isoOf(n) === '2026-09-23' ? 6 : 20);
+      await addDay(h.env.DB, SHED, isoOf(n), 16);
+    }
+    await fresh(ROOF);
+    await fresh(SHED);
+    const r = await run('analysis', { range: 'last_week' });
+    const low = r.rows.find((x) => x[1] === 'The lowest day')!;
+    expect(low.slice(0, 3)).toEqual(['Needs a look', 'The lowest day', 'The lowest day was Wed 23 Sep 2026, with 22 kWh against a median day of 36 kWh - Roof 6 kWh (30% of its median day) and Shed 16 kWh (100% of its median day): '
+      + 'only Roof was low, so the cause was its own - a fault, shade, or a gap in its record.']);
+    expect(low[3]).toBe('Ask "why was 23 Sep 2026 low?" for the whole of that day at Roof.');
+  });
+
+  it('tells a system slowly making less for its sunlight from one that only had less sun', async () => {
+    // Twelve weeks: Roof makes 20 kWh a day in 5 kWh/m² of sun for eight weeks, then 16; Garage makes 16 throughout.
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    const monday = dayNumber('2026-09-28');
+    for (let n = monday - 84; n < monday; n++) {
+      await addDay(h.env.DB, ROOF, isoOf(n), n >= monday - 28 ? 16 : 20);
+      await addDay(h.env.DB, GARAGE, isoOf(n), 16);
+      await addSun(h.env.DB, ROOF, isoOf(n), 5);
+      await addSun(h.env.DB, GARAGE, isoOf(n), 5);
+    }
+    await fresh(ROOF);
+    await fresh(GARAGE);
+    const r = await run('analysis', {});
+    expect(r.period?.label).toBe('the last 30 days (30 Aug – 28 Sep 2026), to yesterday');
+    expect(said(r, 'Production')).toEqual([
+      'Roof made 468 kWh over 29 whole days, 16.1 kWh on an average day - 19% less a day than in the 29 days before, and for its sunlight it is making 20% less over the last 4 weeks than in the 8 before: the system itself, not only the weather.',
+      'Garage made 464 kWh over 29 whole days, 16 kWh on an average day; for its sunlight it is steady.',
+    ]);
+    expect(r.rows[0].slice(0, 2)).toEqual(['Needs a look', 'Production']);
+    expect(r.rows[0][3]).toBe("Look at Roof's panels for dirt or new shade, and at its strings for one down: cleaning often brings the output back.");
+    expect(r.facts).toMatchObject({ s1_health: 'declining', s1_health_change_pct: -20, s1_against_before_pct: -19, s2_health: 'steady' });
+    expect(r.notes[0]).toContain('today is left out, as it is not over yet');
+  });
+
+  it('says what power sold is worth used at home, for a house with no battery whose load peaks by day, in a sunnier week than the one before', async () => {
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    for (let n = dayNumber('2026-09-14'); n <= dayNumber('2026-09-20'); n++) await addHybridDay(h.env.DB, GARAGE, isoOf(n), { battery: false, peakW: 2000, baseW: 100, middayW: 1200 });
+    await week(GARAGE, { battery: false, baseW: 100, middayW: 1200 });
+    await fresh(GARAGE);
+    await setTariff(h.env.DB, { currency: 'EUR', importPrice: 0.3, exportPrice: 0.1, netMetering: false, co2KgPerKwh: 0.4 });
+    const r = await run('analysis', { range: 'last_week' });
+    expect(said(r, 'Production')[0]).toMatch(/^Garage made [\d.]+ kWh over 7 whole days, [\d.]+ kWh on an average day - 50% more a day than in the 7 days before\.$/);
+    expect(said(r, 'The house')).toEqual(["Garage's house never draws less than about 100 W on an average day - 2.4 kWh a day, 24% of what it uses - and draws most at 10:00 (1.2 kW)."]);
+    expect(r.rows.find((x) => x[1] === 'The house')?.[3]).toBeNull();
+    expect(r.rows.find((x) => x[1] === 'Using your own power')?.[3]).toBe('Run what can wait - washing, water heating, pumping, charging - at 06:00–18:00, when the panels make more than the house uses and the rest is sold. '
+      + 'By your tariff, each kWh used then rather than bought later is worth 0.2 EUR.');
+    // No battery: the grid alone on its chart, and no battery day by day.
+    const grid = r.sections!.find((s) => s.title.startsWith('Grid and battery'))!;
+    expect(grid.columns).toEqual(['Hour', 'Grid power (kW)']);
+    expect(grid.chart).toEqual({ kind: 'line', columns: [1] });
+    expect(r.sections!.some((s) => s.title === 'The battery, day by day')).toBe(false);
+    // One day: its pattern is that day's own.
+    expect((await run('analysis', { range: 'yesterday' })).notes[0]).toContain('The average day, hour by hour, is from every reading of Sun 27 Sep 2026.');
+  });
+
+  it("finds a day a system made far less than its sunlight gives, and a fault that keeps coming back", async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    for (let n = dayNumber('2026-09-21'); n <= dayNumber('2026-09-27'); n++) {
+      const iso = isoOf(n);
+      await addDay(h.env.DB, ROOF, iso, iso === '2026-09-23' ? 6 : iso === '2026-09-22' ? 8 : 20);
+      await addSun(h.env.DB, ROOF, iso, 5);
+    }
+    await fresh(ROOF);
+    for (const [key, day] of [['f1', '2026-09-22'], ['f2', '2026-09-23'], ['f3', '2026-09-25']]) {
+      await addFault(h.env.DB, ROOF, key, dayNumber(day) * DAY + 11 * 3600, dayNumber(day) * DAY + 12 * 3600, 'DC voltage low');
+    }
+    const r = await run('analysis', { range: 'last_week' });
+    expect(said(r, 'The lowest day')).toEqual(['The lowest day was Wed 23 Sep 2026, with 6 kWh against a median day of 20 kWh: Roof made 30% of what its sunlight usually gives; a fault: DC voltage low.']);
+    expect(r.rows.find((x) => x[1] === 'The lowest day')?.slice(0, 1)).toEqual(['Needs a look']);
+    expect(said(r, 'Faults')).toEqual(['3 faults were recorded and none is still active; the most common was DC voltage low, 3 times.']);
+    expect(r.rows.find((x) => x[1] === 'Faults')?.[3]).toBe('A fault that keeps coming back is worth raising with the installer.');
+    expect(said(r, 'Production')[0]).toBe('Roof made 114 kWh over 7 whole days, 16.3 kWh on an average day. 2 days were under half its median day of 20 kWh.');
+  });
+
+  it('says what the SolisCloud relay tells of a system gone quiet, and nothing of one asleep after dark', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5, provider: 'soliscloud' });
+    for (let n = dayNumber('2026-09-21'); n <= dayNumber('2026-09-27'); n++) await addDay(h.env.DB, ROOF, isoOf(n), 20);
+    const quiet = async () => said(await run('analysis', { range: 'last_week' }), 'Reporting')[0];
+    const relay = (lastSeen: number, loginUntil: number | null) => h.env.DB
+      .prepare("INSERT OR REPLACE INTO relays (id, provider, name, state, login_expires_at, first_seen, last_seen, last_ok_at) VALUES ('r1', 'soliscloud', NULL, 'ok', ?1, ?2, ?2, ?2)")
+      .bind(loginUntil, lastSeen).run();
+    expect(await quiet()).toBe('Roof has not reported since Sun 27 Sep 2026 19:39, 13 h ago: no relay has reported.');
+    await relay(NOW - 300, NOW + 3 * DAY);
+    expect(await quiet()).toBe('Roof has not reported since Sun 27 Sep 2026 19:39, 13 h ago: the relay is running, so SolisCloud has nothing new to send.');
+    await relay(NOW - 2 * DAY, NOW - DAY);
+    expect(await quiet()).toBe("Roof has not reported since Sun 27 Sep 2026 19:39, 13 h ago: the relay's SolisCloud login ran out on Sun 27 Sep 2026 09:00.");
+    await relay(NOW - 2 * DAY, NOW + 3 * DAY);
+    const r = await run('analysis', { range: 'last_week' });
+    expect(said(r, 'Reporting')[0]).toBe('Roof has not reported since Sun 27 Sep 2026 19:39, 13 h ago: no relay has reported since Sat 26 Sep 2026 09:00.');
+    expect(r.rows.find((x) => x[1] === 'Reporting')?.[3]).toBe('Check the relay laptop is on, and its SolisCloud login is current (Devices tab).');
+    // At 21:00 the same silence is an inverter asleep since dusk: nothing to say.
+    const night = await runTool(h.env.DB, 'analysis', { range: 'last_week' }, NOW + 12 * 3600);
+    expect('result' in night && night.result.rows.some((x) => x[1] === 'Reporting')).toBe(false);
+  });
+
+  it('tells a fall the weather explains from one the system does, and says a system doing better for its sunlight', async () => {
+    // Twelve weeks: Roof makes 20 kWh in 5 kWh/m² of sun, then 16 in 4 - the same for its sunlight. Garage makes 16, then 20 in the same sun.
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await addSystem(h.env.DB, { id: GARAGE, name: 'Garage', kwp: 4 });
+    const monday = dayNumber('2026-09-28');
+    for (let n = monday - 84; n < monday; n++) {
+      const late = n >= monday - 28;
+      await addDay(h.env.DB, ROOF, isoOf(n), late ? 16 : 20);
+      await addDay(h.env.DB, GARAGE, isoOf(n), late ? 20 : 16);
+      await addSun(h.env.DB, ROOF, isoOf(n), late ? 4 : 5);
+      await addSun(h.env.DB, GARAGE, isoOf(n), 5);
+    }
+    await fresh(ROOF);
+    await fresh(GARAGE);
+    const r = await run('analysis', {});
+    expect(said(r, 'Production')).toEqual([
+      'Roof made 468 kWh over 29 whole days, 16.1 kWh on an average day - 19% less a day than in the 29 days before; for its sunlight it is steady, so the weather or the season made the difference, not the system.',
+      'Garage made 576 kWh over 29 whole days, 19.9 kWh on an average day - 24% more a day than in the 29 days before; for its sunlight it is making 25% more over the last 4 weeks than in the 8 before.',
+    ]);
+    expect(r.rows.find((x) => x[2] === said(r, 'Production')[0])?.[0]).toBe('Worth knowing');
+  });
+
+  it('needs a whole day, a year at most, and says so when a system was not wholly recorded', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    await expect(run('analysis', { range: 'today' })).rejects.toThrow('at least one whole day');
+    await expect(run('analysis', { from: '2025-01-01', to: '2026-06-30' })).rejects.toThrow('a year at most');
+    for (const d of ['2026-09-20', '2026-09-21', '2026-09-22', '2026-09-24', '2026-09-25', '2026-09-26', '2026-09-27']) await addDay(h.env.DB, ROOF, d, 20);
+    // The 23rd recorded only from 15:05, a reading every two and a half minutes, as a relay started late leaves it:
+    // readings enough to pass for a whole day, and a day short of most of its sun.
+    for (let i = 0; i < 91; i++) {
+      await h.env.DB.prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, today_kwh, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', 500, ?3, '{}', 0)")
+        .bind(ROOF, dayNumber('2026-09-23') * DAY + 15 * 3600 + 300 + i * 150, Math.round(((i + 1) / 91) * 3 * 1000) / 1000).run();
+    }
+    const r = await run('analysis', { range: 'last_week', system: 'Roof' });
+    expect(said(r, 'Reporting')).toEqual(['Roof has not reported since Sun 27 Sep 2026 19:39, 13 h ago.']);
+    expect(r.facts.days_not_wholly_recorded).toBe(1);
+    // The late day is left out of the average: 120 kWh over the 6 whole days.
+    expect(said(r, 'Production')).toEqual(['Roof made 120 kWh over 6 whole days, 20 kWh on an average day.']);
+  });
+});
+
 describe('app_help', () => {
   it("answers how to do something in the app from the guide, with where it is", async () => {
     const r = await run('app_help', { question: 'How do I get alerts on Telegram?' });
@@ -970,6 +1203,7 @@ describe('app_help', () => {
     expect((await run('app_help', { question: 'why is my garage offline?' })).rows[0][0]).toBe('A system reads offline');
     expect((await run('app_help', { question: 'how do I get a graph of the grid power?' })).rows[0][0]).toBe('Graphs and charts');
     expect((await run('app_help', { question: 'where do I see the PV1 voltage?' })).rows[0][0]).toBe('PV strings and voltages');
+    expect((await run('app_help', { question: 'where do I get recommendations and insights?' })).rows[0][0]).toBe('An analysis of your systems');
     const nothing = await run('app_help', { question: 'blue elephants' });
     expect(nothing.notes).toEqual(['Nothing in the guide matched the question; this is what the assistant can do.']);
     expect(nothing.rows[0][0]).toBe('The assistant, and reports');

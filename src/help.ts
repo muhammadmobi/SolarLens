@@ -135,6 +135,12 @@ export const HELP: readonly HelpEntry[] = [
     where: '#/ask',
   },
   {
+    topic: 'An analysis of your systems',
+    words: ['analyse', 'analyze', 'analysis', 'analytics', 'insight', 'insights', 'improve', 'recommend', 'recommendation', 'recommendations', 'advice', 'optimise', 'optimize'],
+    answer: 'Ask tab: ask "analyse the last 30 days" or "how is my system doing?". SolarLens reads the figures together - production against the days before and the sunlight, the systems per kWp, the lowest day, the power used at home and bought at night, the always-on load, the battery, faults and strings - and says what needs a look, and what to do. The weekly report does the same for each week.',
+    where: '#/ask',
+  },
+  {
     topic: 'Graphs and charts',
     words: ['graph', 'graphs', 'chart', 'charts', 'plot', 'draw', 'visualise', 'visualize', 'timeframe', 'pattern'],
     answer: 'Ask tab: ask for a graph in plain words - "graph PV against load today", "plot the battery charge this week", "which hours do I buy from the grid?" - and the answer draws it, over up to three months, with Download to keep it. The Power tab has each day\'s curve, and Historical Data each day\'s energy.',

@@ -268,6 +268,10 @@ const FUTURE = /\b(tomorrow|next (week|month|year)|forecast\w*|predict\w*|will (
 
 /** What a question is about, from its words. */
 function kindOf(t: string): string | null {
+  // An analysis - what stands out, why, what to do - first: "how can I improve" is not how to use the app.
+  if (/\b(analy\w*|insights?|how can (i|we) (improve|save|do better|use more)|improve|optimi[sz]\w*|recommend\w*|suggest\w*|advice|advise|what should (i|we) do|anything (unusual|wrong|odd|strange))\b/.test(t)) return 'analysis';
+  // "How is my system doing?" asks for the analysis; "...doing now?" for the moment.
+  if (/\bhow (is|are) (my|the|our) (solar|system|systems|panels|plant|installation|setup)s? (doing|performing)\b/.test(t) && !/\b(now|currently|today)\b/.test(t)) return 'analysis';
   if (/\b(how (do|can|to|should)|where (is|do|can|are|should)|set ?up|turn (on|off)|enable|disable|install|connect)\b/.test(t)) return 'help';
   if (FUTURE.test(t)) return 'future';
   if (/\b(report|summar(y|ise|ize))\b/.test(t)) return 'report';
@@ -376,6 +380,7 @@ export function guessCalls(question: string, systems: Sys[], now: number, off: n
       if (days || /\b(weeks?|months?|years?)\b/.test(t)) return [{ tool: 'stats', args: named() }];
       return [{ tool: 'power_day', args: { date: dateOf(period, 'today'), ...(system ? { system: system.name } : {}) } }];
     }
+    case 'analysis': return [{ tool: 'analysis', args: named() }];
     case 'report': return [{ tool: 'report', args: named() }];
     case 'why': return [{ tool: 'day_report', args: { date: period?.from && period.from === period.to ? period.from : period?.range === 'today' ? 'today' : 'yesterday', ...(system ? { system: system.name } : {}) } }];
     case 'trend': return [{ tool: 'performance_trend', args: system ? { system: system.name } : {} }];
@@ -448,6 +453,7 @@ async function understandingPrompt(systems: Sys[], today: string): Promise<strin
     'For money saved use energy with measure "saved"; for how much was used at home, measure "self"; for the battery, battery; for "how many days above 50 kWh", stats with above.',
     'For a graph or chart of power, load, grid, battery power or battery charge over a time, use chart (with versus for a second measure); for the usual day hour by hour - when the load peaks, which hours buy from the grid - chart with profile "hour_of_day". A graph of energy per day or month is energy.',
     "For anything the inverter itself shows - PV strings, voltages, currents, the grid's frequency, the power factor, its temperature, the DC bus, the battery's own readings - use inverter.",
+    'For an analysis - how the systems are doing, what stands out and why, what to do, insights, how to improve, anything unusual - use analysis; for the figures of a period set out in full, report.',
     'SolarLens has no forecast: for tomorrow or the future, make no call and reply that it reports what has been made.',
     'Answer with JSON only: {"calls": [{"tool": "<name>", "args": {...}}], "reply": "<text>"}.',
     'Leave "calls" empty only for a greeting or when you must ask back; then "reply" is one or two sentences, and never states a figure.',
@@ -462,15 +468,18 @@ const UNDERSTAND_SCHEMA = {
   },
 };
 
-function wordingPrompt(kind: Reply['kind']): string {
+function wordingPrompt(kind: Reply['kind'], analysis = false): string {
   return [
     "You are SolarLens's assistant, answering the owner of a solar installation.",
     'Answer the latest message from the figures given, and only from them.',
     'Quote numbers exactly as they appear, with their units. Do not add, subtract, average, convert or otherwise work out any number that is not given.',
     'Say which period the figures cover. If they do not answer the message, say what they do show.',
-    kind === 'report'
-      ? 'This is a report: a first line that sums it up, then short paragraphs, each on its own line, on the energy, the systems, the best and worst days, faults and health, and the money if given. 120 to 220 words.'
-      : kind === 'help' ? "This is about using the app: answer from the guide's words, and say which tab or setting it is on." : 'One to four short sentences.',
+    analysis
+      ? 'This is an analysis: a first line on how things stand, then what stands out - what needs a look first, then what is worth knowing - each with its figures and why, '
+        + 'then what to do, as lines starting "- ". Keep what is fine to a line. 150 to 280 words.'
+      : kind === 'report'
+        ? 'This is a report: a first line that sums it up, then short paragraphs, each on its own line, on the energy, the systems, the best and worst days, faults and health, and the money if given. 120 to 220 words.'
+        : kind === 'help' ? "This is about using the app: answer from the guide's words, and say which tab or setting it is on." : 'One to four short sentences.',
     'Plain text: no markdown headers or tables. A line may start with "- " for a list.',
   ].join('\n');
 }
@@ -568,10 +577,10 @@ export async function converse(env: Env, input: { messages: unknown; calls?: Cal
         // What is still to come: no forecast is made here, and saying so beats a figure about something else.
         ? "SolarLens has no forecast: it reports what your systems have made, and - on each system's page - what today's sunlight so far allowed. "
           + 'Ask what they made yesterday or last week, or how a day compared with a usual one.'
-        : 'I can answer questions about the energy your systems made, used, bought and sold; how they compare; their faults; why a day was low; '
-          + 'whether one is slowly making less; statistics and reports for any period; any part of a day and how steady the power was; '
-          + 'the battery; whether a system is offline and since when; the money saved; and how to use SolarLens. '
-          + 'Try "a report on last month", "since when has a system been offline?" or "how do I get alerts on Telegram?".',
+        : 'I can analyse how your systems are doing - what stands out, why, and what to do - and answer questions about the energy they made, used, bought and sold; '
+          + 'how they compare; their faults; why a day was low; whether one is slowly making less; statistics and reports for any period; graphs of any measure; '
+          + 'any part of a day and how steady the power was; the battery; what the inverter shows; whether a system is offline and since when; the money saved; '
+          + 'and how to use SolarLens. Try "analyse the last 30 days", "a report on last month" or "which hours do I buy from the grid?".',
       worded: safe ? 'model' : 'solarlens', understood, kind: 'chat', calls: [], results: [], errors: [],
     });
   }
@@ -585,7 +594,9 @@ export async function converse(env: Env, input: { messages: unknown; calls?: Cal
     if ('error' in out) errors.push(`${c.tool}: ${out.error}`);
     else { results.push(out.result); ran.push({ tool: c.tool, args: out.args }); }
   }
-  const kind: Reply['kind'] = ran.some((c) => c.tool === 'report') ? 'report' : ran.length && ran.every((c) => c.tool === 'app_help') ? 'help' : 'figures';
+  // An analysis is written up, and downloaded, as a report is.
+  const analysis = ran.some((c) => c.tool === 'analysis');
+  const kind: Reply['kind'] = analysis || ran.some((c) => c.tool === 'report') ? 'report' : ran.length && ran.every((c) => c.tool === 'app_help') ? 'help' : 'figures';
   if (!results.length) {
     return done({ answer: `I could not answer that from the figures: ${errors.join(' ')}`, worded: 'solarlens', understood, kind, calls: ran, results, errors });
   }
@@ -596,7 +607,7 @@ export async function converse(env: Env, input: { messages: unknown; calls?: Cal
   try {
     const recent = history.slice(-4).map((t) => `${t.role === 'user' ? 'Owner' : 'Assistant'}: ${t.content}`).join('\n');
     const content = `${recent ? `Conversation so far:\n${recent}\n\n` : ''}Latest message: ${question}\nFigures: ${JSON.stringify(results.map(forWording))}`;
-    const { text } = await chat(env, [{ role: 'system', content: wordingPrompt(kind) }, { role: 'user', content }], { maxTokens: kind === 'report' ? 700 : 400 });
+    const { text } = await chat(env, [{ role: 'system', content: wordingPrompt(kind, analysis) }, { role: 'user', content }], { maxTokens: kind === 'report' ? 700 : 400 });
     const answer = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, kind === 'report' ? 2400 : 900);
     if (!answer || !numbersAgree(answer, results, `${question} ${history.map((t) => t.content).join(' ')}`)) {
       return done({ answer: plain, worded: 'solarlens', understood, kind, calls: ran, results, errors });

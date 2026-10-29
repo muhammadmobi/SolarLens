@@ -46,6 +46,7 @@ const TITLES: Record<string, string> = {
   day_report: 'Why a day was low',
   performance_trend: 'Slow decline',
   stats: 'Statistics',
+  analysis: 'An analysis: what stands out, and what to do',
   report: 'A full report',
   app_help: 'How to use SolarLens',
 };

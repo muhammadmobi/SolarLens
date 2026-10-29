@@ -202,6 +202,21 @@ describe('the questions an owner asks of a day, as typed', () => {
     expect(ask('what does the inverter show on riverside')).toEqual([{ tool: 'inverter', args: { system: 'Riverside Ongrid' } }]);
   });
 
+  it('reads a call for analysis - how it is doing, what stands out, how to improve - and leaves a report and the moment as they were', () => {
+    expect(ask('analyse my system')).toEqual([{ tool: 'analysis', args: {} }]);
+    expect(ask('give me an analysis of the orchard last month')).toEqual([{ tool: 'analysis', args: { range: 'last_month', system: 'Orchard Hybrid' } }]);
+    expect(ask('analytics for the last 3 days')).toEqual([{ tool: 'analysis', args: { from: '2026-09-26', to: '2026-09-28' } }]);
+    expect(ask('how is my solar doing')).toEqual([{ tool: 'analysis', args: {} }]);
+    expect(ask('how can I improve my self consumption?')).toEqual([{ tool: 'analysis', args: {} }]);
+    expect(ask('any insights this week')).toEqual([{ tool: 'analysis', args: { range: 'this_week' } }]);
+    expect(ask('what should I do to save more')).toEqual([{ tool: 'analysis', args: {} }]);
+    expect(ask('is anything unusual on riverside')).toEqual([{ tool: 'analysis', args: { system: 'Riverside Ongrid' } }]);
+    // The figures of a period set out are a report; how it is doing right now is the moment.
+    expect(ask('a report on last month')).toEqual([{ tool: 'report', args: { range: 'last_month' } }]);
+    expect(ask('how is my system doing right now')).toEqual([{ tool: 'status_now', args: {} }]);
+    expect(ask('how do I get alerts on Telegram?')).toEqual([{ tool: 'app_help', args: { question: 'how do I get alerts on Telegram?' } }]);
+  });
+
   it("keeps a day's hours through a follow-up, and moves the day or the system", () => {
     const before = [{ tool: 'power_day', args: { date: 'today', start: '14:00', end: '16:00' } }] as Call[];
     expect(ask('and yesterday?', before)).toEqual([{ tool: 'power_day', args: { date: 'yesterday', start: '14:00', end: '16:00' } }]);
@@ -303,7 +318,7 @@ describe('a turn', () => {
     h = createHarness({ AI: scripted([{ response: { calls: [], reply: 'Hello! Your systems made 1234.5 kWh this year.' } }, { response: { calls: [], reply: 'Hello! Ask me about your systems.' } }]).AI });
     const invented = await turn([{ role: 'user', content: 'Hi there' }]);
     expect(invented).toMatchObject({ kind: 'chat', worded: 'solarlens' });
-    expect(invented.answer).toMatch(/^I can answer questions about the energy/);
+    expect(invented.answer).toMatch(/^I can analyse how your systems are doing/);
     expect(await turn([{ role: 'user', content: 'Hi there' }])).toMatchObject({ kind: 'chat', worded: 'model', answer: 'Hello! Ask me about your systems.' });
   });
 

@@ -14,10 +14,11 @@
  *   is then an alert like any other (./push), told once.
  * - **The weekly report** is written after it: last week against the one
  *   before (./summary), the lowest day and its likely cause (the day_report
- *   tool), and the health check, in three to five sentences by the model - held
- *   to the figures like any answer (./ask numbersAgree), and written from them
- *   by SolarLens itself when there is no model or no call left. It is kept for
- *   the Ask tab, and goes out with the weekly summary.
+ *   tool), the health check, and the week analysed (the analysis tool) - what
+ *   needs a look, and what to do about it - in three to five sentences by the
+ *   model, held to the figures like any answer (./ask numbersAgree), and written
+ *   from them by SolarLens itself when there is no model or no call left. It is
+ *   kept for the Ask tab, and goes out with the weekly summary.
  * - **Why was this day low?** needs no schedule: the day_report tool, asked
  *   for directly from Historical Data or in a question.
  *
@@ -36,7 +37,7 @@ const KEEP_S = 400 * 86400;
 const WEEKLY_PROMPT = [
   'You write a short weekly note for the owner of a solar installation, from the figures given only.',
   'Three to five plain sentences: how last week went against the week before; anything that stands out, such as a low day and its likely cause,',
-  'or a system making less for its sunlight; and whether anything needs doing.',
+  'or a system making less for its sunlight; and, from the analysis, what needs a look and what to do about it.',
   'Quote numbers exactly as they appear, with their units. Do not add, subtract, average, convert or otherwise work out any number that is not given.',
   'Plain text only: no markdown, no lists, no greeting, no sign-off.',
 ].join('\n');
@@ -115,17 +116,27 @@ export async function weeklyReport(env: Env, slot: number, health: Awaited<Retur
   const low = lowest ? await runTool(env.DB, 'day_report', { date: lowest }, now) : null;
   const lowDay = low && 'result' in low ? low.result : null;
   const notable = health.trends.filter((t) => t.verdict === 'declining' || t.verdict === 'improving');
+  // The week analysed, as the Ask tab analyses any period: what needs a look, and what to do about it.
+  const analysed = await runTool(env.DB, 'analysis', { from: summary.from, to: summary.to }, now);
+  const findings = 'result' in analysed
+    ? analysed.result.rows.map(([stands, area, said, todo]) => ({ stands: String(stands), area: String(area), said: String(said), todo: todo == null ? null : String(todo) }))
+    : [];
+  // A system slowly making less is said by the health check already.
+  const toLook = findings.filter((f) => f.stands === 'Needs a look' && f.area !== 'Production');
+  const todos = [...new Set(toLook.map((f) => f.todo).filter((t): t is string => !!t))];
 
   const facts = {
     week: { from: summary.from, to: summary.to },
     summary: words.body,
     lowest_day: lowDay ? { day: lowDay.period?.label, explained: lowDay.summary } : null,
     health: health.trends.map((t) => trendWords(t, WEEKS)),
+    analysis: findings,
   };
   const fallback = [
     words.body.split('\n')[0],
     lowDay ? `The lowest day was ${lowDay.period?.label}: ${lowDay.summary}` : '',
     notable.length ? notable.map((t) => trendWords(t, WEEKS)).join(' ') : 'Every system is steady for its sunlight.',
+    toLook.length ? `Needs a look: ${toLook.map((f) => f.said).join(' ')}${todos.length ? ` What to do: ${todos.join(' ')}` : ''}` : '',
   ].filter(Boolean).join(' ');
 
   let body = fallback;

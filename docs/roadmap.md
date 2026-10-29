@@ -270,6 +270,12 @@ strings, phases, frequency, the battery's own readings - with a weak string
 named. The page draws a chart answer as lines, and keeps it in a download.
 Those graphs showed SolarMan's charging stored as discharging since 2.x: the
 normaliser was put right, and migration 0021 turns the stored readings round.
+The owner's word for the purpose of it all was analysis: so an `analysis` tool
+reads a period's figures together and says what stands out, why and what to do -
+on the real data, a battery kept full every day while the nights were bought,
+an always-on load that was most of what the house used, and a datalogger
+offline - and the weekly report carries the week's, to every place alerts go.
+It reads each kind of record once, to stay inside the free plan's limits.
 
 ## Order
 
