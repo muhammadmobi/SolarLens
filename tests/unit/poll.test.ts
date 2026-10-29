@@ -47,7 +47,7 @@ vi.mock('../../src/providers/solarman-web', async (orig) => ({
   SolarmanWebProvider: class { constructor() { const p = new StubProvider(); p.id = 'solarman' as never; solarmanWeb.instances.push(p); return p; } },
 }));
 
-const { buildProviders, plantFilter, plantsThisRun, pollAll, pollExtras, yearsFromMonths, PLANTS_PER_RUN, MAX_GROUPS } = await import('../../src/poll');
+const { buildProviders, plantFilter, plantsThisRun, pollAll, pollExtras, yearsFromMonths, PLANTS_PER_RUN } = await import('../../src/poll');
 
 let d1: TestD1;
 const envWith = (over: Partial<Env> = {}): Env => ({ DB: d1.db, ASSETS: {} as Fetcher, ...over });
@@ -270,8 +270,9 @@ describe('yearsFromMonths', () => {
 
 /**
  * Many plants: each run reads a share of them, so a fleet can grow without
- * one cron run making every vendor call there is. Every plant must still be
- * read well inside the 25 minutes after which the page calls it offline.
+ * one cron run making every vendor call there is, or running out of database
+ * queries. Up to twelve, every plant is still read well inside the 25 minutes
+ * after which the page calls it offline; past that, a plant waits longer.
  */
 describe('plantsThisRun', () => {
   const plants = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${String(i).padStart(2, '0')}` }));
@@ -281,31 +282,46 @@ describe('plantsThisRun', () => {
   });
 
   it('deals more into groups, one group a run, every plant once per round', () => {
+    // Nine plants, four a run at most: three groups of three.
     const all = plants(9);
     const seen: string[] = [];
-    for (let run = 0; run < MAX_GROUPS; run++) {
+    for (let run = 0; run < 3; run++) {
       const got = plantsThisRun(all, run);
       expect(got).toHaveLength(3);
       seen.push(...got.map((p) => p.id));
     }
     expect(seen.sort()).toEqual(all.map((p) => p.id));
     // The next round starts again with the first group.
-    expect(plantsThisRun(all, MAX_GROUPS)).toEqual(plantsThisRun(all, 0));
+    expect(plantsThisRun(all, 3)).toEqual(plantsThisRun(all, 0));
   });
 
-  it('reads each plant at least every fifteen minutes, however many there are', () => {
-    for (const n of [5, 8, 12, 20]) {
-      const all = plants(n);
-      const lastSeen = new Map<string, number>();
-      let worst = 0;
-      for (let run = 0; run < 12; run++) {
-        for (const p of plantsThisRun(all, run)) {
-          if (lastSeen.has(p.id)) worst = Math.max(worst, run - lastSeen.get(p.id)!);
-          lastSeen.set(p.id, run);
-        }
+  /** The longest any plant waits between its reads, in minutes, over a long stretch of runs. */
+  function longestWait(n: number): { minutes: number; seen: number } {
+    const all = plants(n);
+    const lastSeen = new Map<string, number>();
+    let worst = 0;
+    for (let run = 0; run < 100; run++) {
+      for (const p of plantsThisRun(all, run)) {
+        if (lastSeen.has(p.id)) worst = Math.max(worst, run - lastSeen.get(p.id)!);
+        lastSeen.set(p.id, run);
       }
-      expect(lastSeen.size, `${n} plants`).toBe(n);
-      expect(worst * 5, `${n} plants`).toBeLessThanOrEqual(15);
+    }
+    return { minutes: worst * 5, seen: lastSeen.size };
+  }
+
+  it('reads each plant at least every fifteen minutes, up to twelve of them', () => {
+    for (const n of [5, 8, 12]) {
+      const { minutes, seen } = longestWait(n);
+      expect(seen, `${n} plants`).toBe(n);
+      expect(minutes, `${n} plants`).toBeLessThanOrEqual(15);
+    }
+  });
+
+  it('never reads more than four plants in a run: past twelve, each plant waits longer instead', () => {
+    for (const n of [13, 20, 50, 200]) {
+      for (let run = 0; run < 60; run++) expect(plantsThisRun(plants(n), run).length, `${n} plants`).toBeLessThanOrEqual(PLANTS_PER_RUN);
+      // Every plant still has its turn, once a round of a group per run.
+      expect(longestWait(n), `${n} plants`).toEqual({ minutes: 5 * Math.ceil(n / PLANTS_PER_RUN), seen: n });
     }
   });
 

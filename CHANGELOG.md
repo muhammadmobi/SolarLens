@@ -265,9 +265,13 @@ because of the login - though nothing locks until the owner turns it on.
   shows each of them on its system page.
 
 - **Polling that grows with the fleet.** Past four plants a vendor, each
-  five-minute run reads a share of them in turn, so every plant is still read
-  at least every fifteen minutes - inside the 25 after which the page calls a
-  system offline - without one run making every vendor call there is.
+  five-minute run reads a group of four at most in turn, so up to twelve plants
+  every plant is still read at least every fifteen minutes - inside the 25
+  after which the page calls a system offline - without one run making every
+  vendor call there is. Past twelve, a plant waits longer rather than a run
+  outgrowing the free plan's fifty database queries. SolisCloud's plant and
+  inverter lists are read page by page, as SolarMan's are, so an account with
+  more than fifty of either sees them all.
 
 - **An owner login, and a dashboard that can be private.** Set up once under
   Settings (the new gear in the header) with the setup code - `API_TOKEN` - and

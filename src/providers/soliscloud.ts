@@ -456,12 +456,26 @@ export class SolisCloudProvider implements Provider {
   /** Where each plant is, learned from the plant list and used by the fallback below. */
   private readonly zones = new Map<string, { tzOffsetSec: number | null; tzName: string | null }>();
 
+  /**
+   * Every record of one of SolisCloud's paged lists, fifty a page, read on
+   * until the records reach the total it gives or a page comes back short. An
+   * account with more than fifty plants, or a plant with more than fifty
+   * inverters, used to see only the first fifty.
+   */
+  private async allRecords(path: string, body: Rec = {}): Promise<Rec[]> {
+    const records: Rec[] = [];
+    // Twenty pages - a thousand records - is past anything this dashboard watches, and a bound on a vendor that never runs out.
+    for (let pageNo = 1; pageNo <= 20; pageNo++) {
+      const page = (await call<SolisPage<Rec>>(this.creds, path, { pageNo, pageSize: 50, ...body })).page;
+      const got = page?.records ?? [];
+      records.push(...got);
+      if (got.length < 50 || (typeof page?.total === 'number' && records.length >= page.total)) break;
+    }
+    return records;
+  }
+
   async listPlants(): Promise<Plant[]> {
-    const data = await call<SolisPage<Rec>>(this.creds, '/v1/api/userStationList', {
-      pageNo: 1,
-      pageSize: 50,
-    });
-    return (data.page?.records ?? []).map((r) => {
+    return (await this.allRecords('/v1/api/userStationList')).map((r) => {
       const plant = {
         id: String(r.id),
         name: String(pick(r, 'stationName', 'name') ?? r.id),
@@ -477,12 +491,7 @@ export class SolisCloudProvider implements Provider {
 
   /** The inverters under one plant, or the plant itself when it lists none (see below). */
   async listInverters(plantId: string): Promise<Inverter[]> {
-    const data = await call<SolisPage<Rec>>(this.creds, '/v1/api/inverterList', {
-      pageNo: 1,
-      pageSize: 50,
-      stationId: plantId,
-    });
-    const invs = (data.page?.records ?? []).map((r): Inverter => {
+    const invs = (await this.allRecords('/v1/api/inverterList', { stationId: plantId })).map((r): Inverter => {
       const vendorId = String(r.id);
       const serial = pick(r, 'sn') as string | null;
       return {
