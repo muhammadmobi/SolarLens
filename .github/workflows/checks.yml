@@ -167,22 +167,27 @@ jobs:
       - run: npx playwright install --with-deps chrome
       - name: Compare with the recorded pictures
         run: |
-          before=$(find tests/visual/__screenshots__/linux -maxdepth 1 -type f 2>/dev/null | wc -l)
-          # Every view is compared with its picture in the repository. A view
-          # with none fails too: Playwright records one and marks the test
-          # failed, so a new view - or a picture gone missing - can never pass
-          # by being compared with itself. The recorded picture goes up with
-          # the visual-baselines artifact, to be looked at and committed.
+          # The verdict: every view against its picture in the repository, and
+          # nothing recorded, so a view with no picture - a new one, or one
+          # whose picture went missing - fails, and never passes by being
+          # compared with itself.
           status=0
-          npx playwright test -c playwright.visual.config.ts --update-snapshots=missing || status=$?
-          after=$(find tests/visual/__screenshots__/linux -maxdepth 1 -type f | wc -l)
-          if [ "$after" -gt "$before" ]; then
-            {
-              echo "### Views with no picture to compare with"
-              echo
-              echo "$((after - before)) view(s) had no picture in the repository, so the check failed and one was recorded."
-              echo "Download the **visual-baselines** artifact, look at each new picture, and commit it under \`tests/visual/__screenshots__/linux/\`."
-            } >> "$GITHUB_STEP_SUMMARY"
+          npx playwright test -c playwright.visual.config.ts --update-snapshots=none || status=$?
+          if [ "$status" -ne 0 ]; then
+            # Only once the run has failed: record a picture for each view
+            # that has none, for the visual-baselines artifact. This pass
+            # changes nothing about the verdict.
+            before=$(find tests/visual/__screenshots__/linux -maxdepth 1 -type f 2>/dev/null | wc -l)
+            npx playwright test -c playwright.visual.config.ts --update-snapshots=missing --reporter=dot || true
+            after=$(find tests/visual/__screenshots__/linux -maxdepth 1 -type f | wc -l)
+            if [ "$after" -gt "$before" ]; then
+              {
+                echo "### Views with no picture to compare with"
+                echo
+                echo "$((after - before)) view(s) had no picture in the repository, so the check failed and one was recorded."
+                echo "Download the **visual-baselines** artifact, look at each new picture, and commit it under \`tests/visual/__screenshots__/linux/\`."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           exit "$status"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

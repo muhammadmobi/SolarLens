@@ -65,22 +65,27 @@ export function plantFilter(env: Env): (plantId: string) => boolean {
  * Which of a vendor's plants this cron run reads, once there are many.
  *
  * Each plant costs several vendor calls a run - the snapshot, the device list,
- * each inverter's detail - and the runs share one request budget with the
- * queue's pacing between calls (./providers/queue). Up to four plants are all
- * read every five minutes, as before. Past that, the plants are dealt into at
- * most three groups and each run reads one group in turn, so every plant is
- * still read at least every fifteen minutes - inside the 25 minutes after which
- * the page calls a system offline. Past twelve plants a group grows rather than
- * a plant waiting longer.
+ * each inverter's detail - and several database writes; the runs share one
+ * request budget with the queue's pacing between calls (./providers/queue),
+ * and on the free plan a run has fifty database queries. Up to four plants are
+ * all read every five minutes, as before. Past that, the plants are dealt into
+ * groups of four at most and each run reads one group in turn: up to twelve
+ * plants, every plant is read at least every fifteen minutes - inside the 25
+ * minutes after which the page calls a system offline.
+ *
+ * Past twelve there are more groups, not bigger ones, so a run's work stays
+ * the same however large the fleet: a plant waits longer instead - twenty
+ * minutes at sixteen plants, and past twenty longer than those 25 minutes, so
+ * it reads offline between its turns. A group that grew would run out of
+ * queries part-way, and the plants after that point would not be read at all.
  *
  * `run` is the number of the five-minute slot, so consecutive runs take
  * consecutive groups and every group gets its turn.
  */
 export const PLANTS_PER_RUN = 4;
-export const MAX_GROUPS = 3;
 export function plantsThisRun<T extends { id: string }>(plants: T[], run: number): T[] {
   if (plants.length <= PLANTS_PER_RUN) return plants;
-  const groups = Math.min(MAX_GROUPS, Math.ceil(plants.length / PLANTS_PER_RUN));
+  const groups = Math.ceil(plants.length / PLANTS_PER_RUN);
   // Sorted, so a plant stays in its group from one run to the next even if
   // the vendor lists them in a different order.
   const sorted = [...plants].sort((a, b) => a.id.localeCompare(b.id));

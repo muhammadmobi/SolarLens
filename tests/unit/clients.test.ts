@@ -178,6 +178,24 @@ describe('SolisCloudProvider', () => {
     ]);
   });
 
+  it('reads every page of plants and of inverters, not only the first fifty', async () => {
+    const records = (n: number, from: number) => Array.from({ length: n }, (_, i) => ({ id: from + i, capacity: 1, capacityStr: 'kWp' }));
+    // Fifty-three plants: a full page, then the three after it.
+    const calls = stubFetch([
+      ['userStationList', (_u, init) => {
+        const { pageNo } = jsonBody(init);
+        return { success: true, data: { page: { total: 53, records: pageNo === 1 ? records(50, 1) : records(3, 51) } } };
+      }],
+      // Fifty inverters exactly: the total says there is no second page to ask for.
+      ['inverterList', () => ({ success: true, data: { page: { total: 50, records: records(50, 1) } } })],
+    ]);
+    const provider = new SolisCloudProvider(creds);
+    expect((await provider.listPlants()).map((p) => p.id)).toEqual(Array.from({ length: 53 }, (_, i) => String(i + 1)));
+    expect(await provider.listInverters('55')).toHaveLength(50);
+    expect(calls.map((c) => `${c.url.split('/').pop()} ${jsonBody(c.init).pageNo}`)).toEqual(['userStationList 1', 'userStationList 2', 'inverterList 1']);
+    expect(jsonBody(calls[2].init)).toMatchObject({ pageSize: 50, stationId: '55' });
+  });
+
   it('falls back to the plant id when the vendor sends no name', async () => {
     stubFetch([['userStationList', () => ({
       success: true, data: { page: { records: [{ id: 77, capacity: 1, capacityStr: 'kWp' }] } },

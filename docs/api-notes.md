@@ -27,6 +27,10 @@ Unit convention everywhere: a numeric field `X` is paired with `XStr` giving its
 - Rate limit 3 calls / 5 s per IP; clock skew > 15 min → HTTP 408.
 - Endpoints: `/v1/api/userStationList`, `/v1/api/stationDetail`, `/v1/api/inverterList`, `/v1/api/inverterDetail`.
 - Response envelopes and field names mirror the web portal (`data.page.records`, `power`/`powerStr`, …).
+- `userStationList` and `inverterList` are paged: `pageNo` from 1 and `pageSize` in the body, and
+  `data.page.total` beside the records. SolarLens asks for 50 a page and reads on until it has the
+  total or a page comes back short, twenty pages at most. Until 3.0 it read the first page only,
+  so a fifty-first plant or inverter was never seen.
 - Keys are self-service (Basic Settings → API Management → Activate Now) **only after** Solis
   support enables "API access" on the account — submit a Service Center ticket of type
   *API Request - System Owner*. Response times vary from days to never; see the relay agent.
