@@ -701,10 +701,12 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 export default {
   fetch: app.fetch,
   /** The five-minute cron (wrangler.jsonc triggers): poll every vendor, then judge notifications. */
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     // Notifications are judged after the poll, against what it just stored. A
     // failure there is logged and dropped: it must never cost a reading.
-    ctx.waitUntil(pollAll(env).then(async () => {
+    // The run's own slot, not the moment it started: which plants a run reads
+    // when there are many is decided by it (./poll plantsThisRun).
+    ctx.waitUntil(pollAll(env, controller.scheduledTime).then(async () => {
       try {
         await announce(env);
         await forgetOldMessages(env.DB);

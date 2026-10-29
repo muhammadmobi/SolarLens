@@ -49,6 +49,14 @@ live database after 2.10.0.
 | Everything else the datalogger reports: link type, signal bars, time since restart and in total, make date | ● | ◐ | ● a card per logger on the Devices tab — SolarMan's list says less, and nothing is invented for it |
 | A datalogger's link over time: online, offline, signal | ○ | ○ | ● the last seven days as a strip, a summary and a signal line — neither app keeps this |
 
+### More than one system
+
+| Feature | SolisCloud | SolarMan | SolarLens |
+|---|:--:|:--:|---|
+| Many plants in one account | ● | ● | ● any number, from both vendors on one page |
+| Compare plants on one scale | ◐ a ranking by kWh | ◐ | ● kWh per kWp, today and this month |
+| Tell plants apart at a glance | ○ | ○ | ● a colour per system, used everywhere |
+
 ### Access
 
 | Feature | SolisCloud | SolarMan | SolarLens |

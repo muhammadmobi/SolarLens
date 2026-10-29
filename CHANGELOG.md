@@ -18,28 +18,49 @@ checkout of any tag says which release it is.
 
 ### Added
 
+- **Any number of systems.** Each system has a colour of its own, used
+  wherever it appears, where colour used to come from the vendor - so two
+  plants on SolarMan were both blue. A **Compare** tab, with two systems or
+  more, sets them side by side on one scale: kWh per kWp today and this month,
+  and a table of size, output, today, month, year and lifetime. With three
+  systems or more the Overview adds a strip listing them all and scrolls
+  instead of squeezing them onto one screen; TV mode shows three at a time and
+  takes turns every twenty seconds; and a plant with more than one inverter
+  shows each of them on its system page.
+
+- **Polling that grows with the fleet.** Past four plants a vendor, each
+  five-minute run reads a share of them in turn, so every plant is still read
+  at least every fifteen minutes - inside the 25 after which the page calls a
+  system offline - without one run making every vendor call there is.
+
 - **An owner login, and a dashboard that can be private.** Set up once under
   Settings (the new gear in the header) with the setup code - `API_TOKEN` - and
   a password, and add passkeys on your phones and computers. Then turn on
   **Require sign-in to view**: the readings need a sign-in from then on. It is
   off until you turn it on, and cannot be turned on before there is a way to
   sign in.
+
 - **Signed in once, signed in for good.** A one-hour session and a year-long
   refresh token; the Worker renews both on the way through whenever the hour is
   up, so the dashboard, the TV and the service worker never see the sign-in
   page again. The refresh token rotates at every renewal and the one before is
   remembered: a copy used later signs the device out. Two tabs renewing at once
   do not. Only hashes are stored.
+
 - **Passkeys**, verified in the Worker itself (ES256 and RS256, no library),
   and never locked out.
+
 - **Settings**: every signed-in device with sign-out for one or all others,
   taking effect at once; the password changed or removed; and **Share to
   view** - a view-only link for a day, a week, a month or until taken back.
+
 - **A lockout**: five wrong tries from one address lock it for fifteen
   minutes; thirty from everywhere in an hour pause password sign-in for an
   hour.
+
 - **`GET /api/status`**: how fresh each feed is and nothing else, open even on
   a private dashboard, for a monitor and the deploy's smoke test.
+
 - **Everything each datalogger reports, and its week.** The Devices tab opens
   with a card per datalogger: how it connects, its signal and signal bars, how
   often it uploads, its last contact, how long it has run since its last
@@ -48,20 +69,40 @@ checkout of any tag says which release it is.
   not. Beneath, its last seven days: a strip of online, offline and not heard
   from, how often and how long it dropped, and its signal as a line on a fixed
   scale. The system page's link card names the link and the last restart.
+
 - **Link history, kept small.** Each device's status and signal are recorded
   in a new `device_samples` table when either changes, or hourly while
   nothing does - a steady logger writes 24 rows a day rather than 288 - and
   kept 90 days. `GET /api/devices/history` serves the last 1 to 30 days.
+
 - **A datalogger's network handles are kept, and kept back.** Its mobile
   operator and cell, or its MAC address, are stored for the owner and never
   part of a public answer: either can place a logger on a map. They live in a
   table of their own, so even a Worker rolled back to 2.10 - which serves
   every column of the devices table it does not know to strip - cannot serve
   them.
+
 - **A roadmap to 3.0.** `docs/roadmap.md` sets out the twelve phases of the
   next release - the owner login, any number of inverters, a public demo,
   weather and expected output with a site map, savings, questions answered in
   the app and an MCP server - and what was left out on purpose.
+
+### Changed
+
+- **Reads send `Cache-Control: no-store`** rather than a minute of public
+  caching: an answer now depends on who is asking, and no cache may go on
+  showing it after a sign-out.
+
+- **`/auth?t=<API_TOKEN>` signs the browser in with a proper session** instead
+  of leaving the token itself in a cookie. That 2.x cookie is no longer
+  accepted, and is cleared when seen, since nothing could sign it out: a
+  browser that had it signs in once.
+
+- **The deploy's smoke test** reads freshness from `/api/status`, and on a
+  private dashboard checks that a signed-out caller is asked to sign in.
+
+- **Replacing `API_TOKEN`** now keeps every signed-in device signed in, but the
+  password must be set again, since it is keyed with the token.
 
 ### Fixed
 
@@ -128,17 +169,6 @@ notice when a newer version is out.
 
 ### Changed
 
-- **Reads send `Cache-Control: no-store`** rather than a minute of public
-  caching: an answer now depends on who is asking, and no cache may go on
-  showing it after a sign-out.
-- **`/auth?t=<API_TOKEN>` signs the browser in with a proper session** instead
-  of leaving the token itself in a cookie. That 2.x cookie is no longer
-  accepted, and is cleared when seen, since nothing could sign it out: a
-  browser that had it signs in once.
-- **The deploy's smoke test** reads freshness from `/api/status`, and on a
-  private dashboard checks that a signed-out caller is asked to sign in.
-- **Replacing `API_TOKEN`** now keeps every signed-in device signed in, but the
-  password must be set again, since it is keyed with the token.
 - **The code explains itself.** Every source file now opens with what it is for
   and how it fits with the others - the Worker's routes and cron, the database
   layer, each vendor's client, the relay agent, the scripts - and each function

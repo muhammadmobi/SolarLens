@@ -52,6 +52,18 @@
     --local: #6b4fbb;
     --local-ink: #5b3fa8;
     --total: #17191a;
+    /* One colour per system, used wherever that system appears: its chart
+       line, its card's accent, its name. Assigned by the system's place (s1,
+       s2...), so it stays put between visits; eight before any repeats. The
+       ink half is the text shade, each at least 4.5:1 on the light surface. */
+    --sys1: #2f6fde; --sys1-ink: #2a62c4;
+    --sys2: #db6b1c; --sys2-ink: #a44f0e;
+    --sys3: #1f9d55; --sys3-ink: #177a42;
+    --sys4: #7c4dcc; --sys4-ink: #6a3db8;
+    --sys5: #0f9a9a; --sys5-ink: #0b7575;
+    --sys6: #d6336c; --sys6-ink: #b0254f;
+    --sys7: #c99100; --sys7-ink: #8a6400;
+    --sys8: #5b6b7c; --sys8-ink: #4a5866;
     --shadow: 0 1px 2px rgba(20, 24, 30, .05), 0 10px 28px -12px rgba(20, 24, 30, .16);
     --shadow-lift: 0 2px 6px rgba(20, 24, 30, .07), 0 18px 40px -16px rgba(20, 24, 30, .22);
     --r: 18px;
@@ -80,6 +92,14 @@
       --local: #a78bfa;
       --local-ink: #a78bfa;
       --total: #edeee9;
+      --sys1: #6fa0f0; --sys1-ink: #6fa0f0;
+      --sys2: #f0913f; --sys2-ink: #f0913f;
+      --sys3: #4ade80; --sys3-ink: #4ade80;
+      --sys4: #a78bfa; --sys4-ink: #a78bfa;
+      --sys5: #2dd4bf; --sys5-ink: #2dd4bf;
+      --sys6: #f472b6; --sys6-ink: #f472b6;
+      --sys7: #facc15; --sys7-ink: #facc15;
+      --sys8: #94a3b8; --sys8-ink: #94a3b8;
       --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
       --shadow-lift: 0 2px 6px rgba(0,0,0,.5), 0 18px 40px -16px rgba(0,0,0,.7);
     }
@@ -91,6 +111,14 @@
     --bad: #f87171; --bad-bg: #2a1616;
     --solis: #f0913f; --solarman: #6fa0f0; --local: #a78bfa; --total: #edeee9;
     --solis-ink: #f0913f; --solarman-ink: #6fa0f0; --local-ink: #a78bfa;
+    --sys1: #6fa0f0; --sys1-ink: #6fa0f0;
+    --sys2: #f0913f; --sys2-ink: #f0913f;
+    --sys3: #4ade80; --sys3-ink: #4ade80;
+    --sys4: #a78bfa; --sys4-ink: #a78bfa;
+    --sys5: #2dd4bf; --sys5-ink: #2dd4bf;
+    --sys6: #f472b6; --sys6-ink: #f472b6;
+    --sys7: #facc15; --sys7-ink: #facc15;
+    --sys8: #94a3b8; --sys8-ink: #94a3b8;
     --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 28px -12px rgba(0,0,0,.6);
     --shadow-lift: 0 2px 6px rgba(0,0,0,.5), 0 18px 40px -16px rgba(0,0,0,.7);
   }
@@ -498,6 +526,38 @@
     body.ovfit footer { margin: 10px 0 12px; }
   }
 
+  /* ---------- many systems ---------- */
+  /* Above the cards once there are three or more: every system on one line,
+     so the question "is everything all right?" has one place to look. */
+  .ovstrip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .ovstrip a {
+    display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--line); color: var(--ink); text-decoration: none;
+    font-size: 13.5px; font-variant-numeric: tabular-nums;
+  }
+  .ovstrip a:hover { border-color: var(--accent); }
+  .ovstrip a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ovstrip .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
+  .ovstrip .nm { font-weight: 700; color: var(--accent-ink); }
+  .ovstrip .off { color: var(--bad); font-weight: 700; }
+
+  /* The Compare view: a table, and bars on a per-kWp scale. */
+  .cmp td.num, .cmp th.num { text-align: right; }
+  .cmp .sysname { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: var(--accent-ink); }
+  .cmp .sysname i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
+  .cmpbars { display: flex; flex-direction: column; gap: 10px; }
+  .cmpbar { display: grid; grid-template-columns: minmax(90px, 180px) 1fr auto; gap: 12px; align-items: center; font-size: 13.5px; }
+  .cmpbar .track { height: 14px; border-radius: 7px; background: var(--line-soft); overflow: hidden; }
+  /* A span, so display:block, or its width is ignored and the bar draws empty. */
+  .cmpbar .fill { display: block; height: 100%; border-radius: 7px; background: var(--accent); }
+  .cmpbar .n { font-weight: 700; color: var(--accent-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cmpbar .v { font-variant-numeric: tabular-nums; min-width: 7ch; text-align: right; }
+
+  /* TV mode with more systems than fit: which screenful is showing. */
+  .tvpages { display: flex; gap: 8px; justify-content: center; margin-top: 1.5vh; }
+  .tvpages i { width: 12px; height: 12px; border-radius: 50%; background: var(--line); }
+  .tvpages i.on { background: var(--ink); }
+
   .chartgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px 22px; }
   .chartmini { min-width: 0; }
   .chartmini .combined { height: 200px; }
@@ -707,6 +767,7 @@
   .sharelink input { flex: 1; font-family: var(--mono); font-size: 12.5px; }
   .settingsbtn .gearicon { display: block; }
   .stack { display: flex; flex-direction: column; gap: 18px; }
+  .subhead { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 22px 0 10px; }
 </style>
 </head>
 <body>
@@ -714,9 +775,9 @@
   <div class="inner">
     <a class="brand" href="#/"><img class="mark" src="/icon.svg" alt="" width="28" height="28">SolarLens</a>
     <div class="fleet">
-      <div class="fitem" title="Both systems added together. An offline system counts as zero, and is named underneath."><span class="flabel">Producing now</span><span class="num" id="fleet-power">—</span><span class="quiet" id="fleet-quiet" hidden></span></div>
+      <div class="fitem" title="Every system added together. An offline system counts as zero, and is named underneath."><span class="flabel">Producing now</span><span class="num" id="fleet-power">—</span><span class="quiet" id="fleet-quiet" hidden></span></div>
       <span class="sep"></span>
-      <div class="fitem" title="Both systems added together, since midnight"><span class="flabel">Produced today</span><span class="num small" id="fleet-today">—</span></div>
+      <div class="fitem" title="Every system added together, since midnight"><span class="flabel">Produced today</span><span class="num small" id="fleet-today">—</span></div>
       <span class="sep"></span>
       <div class="fitem" title="What the houses used today"><span class="flabel">Consumed today</span><span class="num small" id="fleet-used">—</span></div>
       <span class="sep" id="wx-sep" hidden></span>
@@ -732,6 +793,7 @@
     <nav id="nav">
       <a href="#/">Overview</a>
       <a href="#/power">Power</a>
+      <a href="#/compare" id="comparetab" hidden>Compare</a>
       <a href="#/history">Historical Data</a>
       <a href="#/alerts">Alerts<span class="navbadge" id="alertbadge" hidden></span></a>
       <a href="#/devices">Devices</a>
@@ -764,7 +826,8 @@
     charts           sparklines, one system's day curve, the shared chart
     energy flow      the solar / house / grid / battery diagram
     power            the Power tab
-    overview         the Overview tab
+    overview         the Overview tab, and its strip when there are three systems or more
+    compare          the Compare tab: every system side by side, per kWp
     alerts           the Alerts tab: what is wrong now, and fault history
     historical data  the Historical Data tab
     devices          the Devices tab: each datalogger and its week, hardware, SolisCloud relays
@@ -824,8 +887,24 @@
   // the poll log, and which chart lines the reader has switched off.
   const state = { latest: null, series: null, devices: [], deviceHistory: null, health: null, error: null, hidden: savedHidden };
 
-  // Each vendor's colour, for chart lines and accents.
-  const colorFor = (p) => ({ soliscloud: 'var(--solis)', solarman: 'var(--solarman)', local: 'var(--local)' }[p] || 'var(--muted)');
+  /**
+   * Each system's colour, for its chart line, its card and its name.
+   *
+   * By system rather than by vendor: two plants on SolarMan are two lines, and
+   * both blue would be one. The Worker names systems s1, s2... by a stable
+   * order (src/public-view.ts aliasFor), so the number in the name picks the
+   * colour, and a system keeps its colour from one visit to the next. Past
+   * eight, the palette comes round again.
+   */
+  const SYSTEM_COLOURS = 8;
+  const sysNo = (inv) => {
+    const m = /^s(\d+)$/.exec(String(inv?.id ?? ''));
+    if (m) return Number(m[1]);
+    const i = (state.latest?.inverters ?? []).findIndex((x) => x.id === inv?.id);
+    return i >= 0 ? i + 1 : 1;
+  };
+  const colorOf = (inv) => `var(--sys${((sysNo(inv) - 1) % SYSTEM_COLOURS) + 1})`;
+  const inkOf = (inv) => `var(--sys${((sysNo(inv) - 1) % SYSTEM_COLOURS) + 1}-ink)`;
 
   // ---------- history as a file ----------
   /**
@@ -1139,7 +1218,6 @@
   // ---------- formatting ----------
   // The same vendor in a colour that can be read as small bold type: axe
   // measured the brand orange at 3.42:1 against white, and 4.5 is the bar.
-  const inkFor = (p) => ({ soliscloud: 'var(--solis-ink)', solarman: 'var(--solarman-ink)', local: 'var(--local-ink)' }[p] || 'var(--muted)');
   const providerName = (p) => p === 'soliscloud' ? 'SolisCloud' : p === 'solarman' ? 'SolarMan' : p;
 
   // Watts as [number, unit] - "8.47", "kW" - so a view can set the unit
@@ -1370,7 +1448,7 @@
   function flowSvg(inv, m) {
     const CX = 500;
     const battery = hasBattery(inv, m);
-    const accent = colorFor(inv.provider);
+    const accent = colorOf(inv);
     // A hybrid needs room under the house for the pack. An on-grid system has
     // nothing to put there, so its box is simply shorter rather than carrying
     // an empty third of a diagram around.
@@ -1511,7 +1589,7 @@
     const bare = !!(opts && opts.bare);
     const W = 1000, H = viewH, L = 62, R = 16, T = bare ? 12 : 26, B = 30;
     const [t0, t1] = dayWindow(inv, pts);
-    const c = colorFor(inv.provider);
+    const c = colorOf(inv);
     if (pts.length < 2) return `<svg class="combined" viewBox="0 0 ${W} ${H}"><text class="axis" x="${W / 2}" y="${H / 2}" text-anchor="middle">${
       pts.length === 1 ? 'One sample so far today - a curve needs two' : 'No samples yet today'}</text></svg>`;
     const max = Math.max(200, ...pts.map((p) => p.ac_power_w || 0));
@@ -1592,7 +1670,7 @@
       const [v, u] = fmtW(inv.ac_power_w);
       return `<details class="syssec" open>
         <summary>
-          <span class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="vendor" style="color:${inkOf(inv)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
           <span class="snow">${v}<small> ${u}</small></span>
           <span class="pill ${st.cls}"${st.stale && st.lastWord ? ` title="Last word from the vendor: ${esc(st.lastWord)}"` : ''}><i></i>${esc(st.text)}</span>
@@ -1636,7 +1714,7 @@
     // "this system has no samples". So does the fleet sum, always, or turning
     // everything off would take its own switch away with it.
     const legend = () => {
-      const l = invs.map((i) => legendItem(i.id, colorFor(i.provider), i.name,
+      const l = invs.map((i) => legendItem(i.id, colorOf(i), i.name,
         todayOf(i, byInv[i.id]).length === 0 ? 'no samples today'
           : todayOf(i, byInv[i.id]).length === 1 ? 'one sample so far' : null));
       if (invs.length > 1) l.push(legendItem(TOTAL_KEY, 'var(--total)', 'Fleet total'));
@@ -1674,7 +1752,7 @@
     for (const inv of invs) {
       const pts = todayOf(inv, byInv[inv.id]);
       if (state.hidden.has(inv.id) || pts.length < 2) continue;
-      out += `<path d="${line(pts)}" fill="none" stroke="${colorFor(inv.provider)}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+      out += `<path d="${line(pts)}" fill="none" stroke="${colorOf(inv)}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
     }
     if (invs.length > 1 && !state.hidden.has(TOTAL_KEY) && totalPts.length > 1) {
       out += `<path d="${line(totalPts)}" fill="none" stroke="var(--total)" stroke-width="1.6" stroke-dasharray="5 4" opacity="0.75" vector-effect="non-scaling-stroke"/>`;
@@ -1898,7 +1976,7 @@
       // the way the whole card was before: a reader who wants more about a
       // figure clicks the figure, not a title bar above it. The chart is the
       // exception and goes to Power, where it is drawn full width.
-      return `<section class="ovsys" style="--accent:${colorFor(inv.provider)};--accent-ink:${inkFor(inv.provider)}">
+      return `<section class="ovsys" style="--accent:${colorOf(inv)};--accent-ink:${inkOf(inv)}">
         <a class="ovmain" href="#/system/${encodeURIComponent(inv.id)}" title="Open ${esc(inv.name)}">
           <div class="ovhead">
             <span class="ovname">${esc(inv.name)}</span>
@@ -1922,7 +2000,78 @@
       </section>`;
     }).join('');
 
-    $('view').innerHTML = `<div class="ovgrid">${cols}</div>`;
+    $('view').innerHTML = `${invs.length >= 3 ? summaryStrip(invs) : ''}<div class="ovgrid">${cols}</div>`;
+  }
+
+  /**
+   * Every system on one line: its colour, its name, what it is producing and
+   * has made today, and "offline" where it is. Each is a link to that system.
+   */
+  function summaryStrip(invs) {
+    return `<nav class="ovstrip" aria-label="Every system at a glance">${invs.map((inv) => {
+      const st = statusOf(inv);
+      return `<a href="#/system/${encodeURIComponent(inv.id)}" style="--accent:${colorOf(inv)};--accent-ink:${inkOf(inv)}">
+        <span class="dot"></span><span class="nm">${esc(inv.name)}</span>
+        ${st.offline ? '<span class="off">offline</span>' : `<span>${esc(fmtWs(inv.ac_power_w))}</span>`}
+        <span class="faint">${esc(fmtKwh(inv.today_kwh))} today</span></a>`;
+    }).join('')}</nav>`;
+  }
+
+  // ---------- compare ----------
+  /**
+   * Systems side by side, on one scale.
+   *
+   * Kilowatt-hours alone reward the biggest array. Per kilowatt-peak of panels
+   * - the "specific yield" - asks the fairer question: how well is each one
+   * doing with what it has? The same sun on the same tilt gives the same kWh
+   * per kWp, so a system well below the others is the one to look at.
+   */
+  function renderCompare() {
+    const invs = state.latest?.inverters ?? [];
+    if (invs.length < 2) {
+      $('view').innerHTML = '<div class="card"><div class="empty">Comparing needs two systems or more. This dashboard has one.</div></div>';
+      return;
+    }
+    const kwp = (inv) => (inv.capacity_w ? inv.capacity_w / 1000 : null);
+    const per = (kwh, inv) => (kwh != null && kwp(inv) ? kwh / kwp(inv) : null);
+    const n2 = (v) => (v == null ? '—' : v.toFixed(2));
+    const rows = invs.map((inv) => {
+      const m = parse(inv.metrics) ?? {};
+      const st = statusOf(inv);
+      const share = inv.capacity_w && !st.offline ? Math.round(((inv.ac_power_w || 0) / inv.capacity_w) * 100) : null;
+      return `<tr style="--accent:${colorOf(inv)};--accent-ink:${inkOf(inv)}">
+        <td><a class="sysname" href="#/system/${encodeURIComponent(inv.id)}"><i></i>${esc(inv.name)}</a>
+          ${st.offline ? '<span class="pill warn"><i></i>offline</span>' : ''}</td>
+        <td class="num">${kwp(inv) ? esc(kwp(inv).toFixed(1)) : '—'}</td>
+        <td class="num">${st.offline ? '—' : esc(fmtWs(inv.ac_power_w))}${share != null ? ` <small class="faint">${share}%</small>` : ''}</td>
+        <td class="num">${esc(fmtKwh(inv.today_kwh))}</td>
+        <td class="num"><strong>${n2(per(inv.today_kwh, inv))}</strong></td>
+        <td class="num">${esc(fmtKwh(m.genMonthKwh))}</td>
+        <td class="num">${n2(per(m.genMonthKwh, inv))}</td>
+        <td class="num">${esc(fmtKwh(m.genYearKwh))}</td>
+        <td class="num">${n2(per(m.genYearKwh, inv))}</td>
+        <td class="num">${esc(fmtKwh(inv.total_kwh))}</td>
+      </tr>`;
+    }).join('');
+    const bars = (title, pick) => {
+      const vals = invs.map((inv) => ({ inv, v: per(pick(inv), inv) })).filter((x) => x.v != null);
+      if (!vals.length) return '';
+      const max = Math.max(...vals.map((x) => x.v), 0.01);
+      return `<section class="card"><h2>${esc(title)}</h2><div class="body"><div class="cmpbars">${vals.map(({ inv, v }) =>
+        `<div class="cmpbar" style="--accent:${colorOf(inv)};--accent-ink:${inkOf(inv)}"><span class="n">${esc(inv.name)}</span>
+          <span class="track" role="img" aria-label="${esc(inv.name)}: ${v.toFixed(2)} kWh per kWp"><span class="fill" style="width:${((v / max) * 100).toFixed(1)}%"></span></span>
+          <span class="v">${v.toFixed(2)}</span></div>`).join('')}</div>
+        <p class="cardnote">kWh per kWp of panels. The same sun on the same tilt gives the same figure, so a system well below the others is the one to look at.</p></div></section>`;
+    };
+    $('view').innerHTML = `<div class="stack">
+      ${bars('Today, per kWp', (inv) => inv.today_kwh)}
+      ${bars('This month, per kWp', (inv) => (parse(inv.metrics) ?? {}).genMonthKwh ?? null)}
+      <section class="card"><h2>Side by side</h2><div class="tablewrap" tabindex="0" role="region" aria-label="Every system side by side, scrolls sideways">
+        <table class="devices cmp"><thead><tr><th>System</th><th class="num">kWp</th><th class="num">Now</th>
+          <th class="num">Today</th><th class="num">per kWp</th><th class="num">This month</th><th class="num">per kWp</th>
+          <th class="num">This year</th><th class="num">per kWp</th><th class="num">Lifetime</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></section>
+    </div>`;
   }
 
   // ---------- alerts ----------
@@ -2273,7 +2422,7 @@
            </div>`;
       return `<details class="syssec" open>
         <summary>
-          <span class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="vendor" style="color:${inkOf(inv)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
           <span class="snow"><small>${rows.length ? `${rows.length} to look at` : 'clear'}</small></span>
           <span class="pill ${worst === 'bad' ? 'bad' : worst === 'warn' ? 'warn' : 'ok'}"><i></i>${esc(st.text)}</span>
@@ -2494,7 +2643,7 @@
       const m = parse(inv.metrics) ?? {};
       if (!mine.length) {
         return `<details class="syssec" open><summary>
-            <span class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+            <span class="vendor" style="color:${inkOf(inv)}">${esc(providerName(inv.provider))}</span>
             <span class="sname">${esc(inv.name)}</span></summary>
           <div class="secbody"><div class="empty">No days recorded yet for this system.</div></div></details>`;
       }
@@ -2539,14 +2688,14 @@
 
       return `<details class="syssec" open>
         <summary>
-          <span class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</span>
+          <span class="vendor" style="color:${inkOf(inv)}">${esc(providerName(inv.provider))}</span>
           <span class="sname">${esc(inv.name)}</span>
           <span class="snow">${fmtKwh(totals.yield)}<small> in ${group === 'day'
             ? `${mine.length} day${mine.length === 1 ? '' : 's'}`
             : `${mine.length} ${group}${mine.length === 1 ? '' : 's'}`}</small></span>
         </summary>
         <div class="secbody">
-          <section class="card"><div class="body">${dailyBars(mine, colorFor(inv.provider), 'hb' + i, group)}</div></section>
+          <section class="card"><div class="body">${dailyBars(mine, colorOf(inv), 'hb' + i, group)}</div></section>
           ${shortfall}
           ${usesVendor ? `<p class="cardnote" style="margin:0 20px 4px">Figures are ${esc(providerName(inv.provider))}'s own
             ${group} totals, which cover the whole ${group} including any part before SolarLens began collecting.
@@ -2932,6 +3081,26 @@
     </div>`;
   }
 
+  /**
+   * A plant with more than one inverter: the first one's cards are above, as
+   * for any system; each further one gets its own identity, strings and AC
+   * output here, so a second inverter's fault is not hidden behind the first.
+   */
+  function moreInverters(devs, accent, offline) {
+    const inverters = devs.filter((d) => d.kind === 'inverter');
+    if (inverters.length < 2) return '';
+    return inverters.slice(1).map((d, i) => `<h3 class="subhead">Inverter ${i + 2} of ${inverters.length}</h3>
+      <div class="blocks">${kvCard('Identity & hardware', [
+        ['Status', `<span class="pill ${d.status === 'online' ? 'ok' : d.status === 'alarm' ? 'bad' : 'warn'}"><i></i>${esc(d.status ?? 'unknown')}</span>`],
+        d.model ? ['Model', esc(d.model)] : null,
+        d.sn ? ['Serial', esc(d.sn), true] : null,
+        d.firmware ? ['Firmware', esc(d.firmware), true] : null,
+        d.rated_power_w ? ['Rated', fmtWs(d.rated_power_w)] : null,
+        d.temp_c != null ? ['Temperature', `${d.temp_c} °C`] : null,
+        ['Last contact', esc(d.last_seen ? ago(d.last_seen) : '—')],
+      ])}${stringsCard(d, accent, offline)}${acCard(d)}</div>`).join('');
+  }
+
   /** The PV strings card: each MPPT string's power, voltage and current. */
   function stringsCard(invDev, accent, offline) {
     // strings === null means the vendor reports no per-string registers at all;
@@ -3057,7 +3226,7 @@
     const devs = devicesFor(inv);
     const invDev = devs.find((d) => d.kind === 'inverter');
     const logger = devs.find((d) => d.kind === 'datalogger');
-    const accent = colorFor(inv.provider);
+    const accent = colorOf(inv);
     const [pv, pu] = fmtW(inv.ac_power_w);
     // Temperature is per-device telemetry, so the station snapshot rarely has it.
     const tempC = inv.temp_c ?? invDev?.temp_c ?? null;
@@ -3168,7 +3337,7 @@
     return {
       header: `<div class="sys-head" style="margin-bottom:18px">
         <div>
-          <div class="vendor" style="color:${inkFor(inv.provider)}">${esc(providerName(inv.provider))}</div>
+          <div class="vendor" style="color:${inkOf(inv)}">${esc(providerName(inv.provider))}</div>
           <div class="sys-name" style="font-size:26px">${esc(inv.name)}</div>
         </div>
         <div style="text-align:right">
@@ -3178,7 +3347,7 @@
         </div>
       </div>`,
       flow: `<section class="card" style="margin-bottom:16px"><div class="body">${flowSvg(inv, m)}</div></section>`,
-      blocks: `<div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent, st.offline)}${acCard(invDev)}${battery}${diagnostics}</div>`,
+      blocks: `<div class="blocks">${identity}${link}${live}${counters}${stringsCard(invDev, accent, st.offline)}${acCard(invDev)}${battery}${diagnostics}</div>${moreInverters(devs, accent, st.offline)}`,
       raw: rawCard(inv),
     };
   }
@@ -3501,7 +3670,8 @@
     const tab = (href, name) => `<a href="${href}">${name}</a>`;
     const rows = [
       ['See what each system is producing right now', tab('#/', 'Overview')],
-      ['Compare both systems on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
+      ['Which system is doing best, for its size', `${tab('#/compare', 'Compare')} - kWh per kWp, today and this month (with two systems or more)`],
+      ['See every system on one chart, or hide one', `${tab('#/power', 'Power')} - tap a name in the legend to hide or show it`],
       ['See one system on its own, in full', `${tab('#/', 'Overview')} - tap the system`],
       ['Daily, monthly or yearly totals', `${tab('#/history', 'Historical Data')} - Day, Month or Year at the top`],
       ["One system's history on its own",`${tab('#/history', 'Historical Data')} - pick the system at the top; All systems shows both`],
@@ -3556,7 +3726,7 @@
         <dd>Every system at a glance: what it is producing now, what it has made today, where the power is going -
           the house, the grid, the battery - and today's curve with its peak. Tap a system to open it on its own.</dd>
         <dt>${tab('#/power', 'Power')}</dt>
-        <dd>Both systems on one chart, plus each system in full, one below the other: energy today, this month, this
+        <dd>Every system on one chart, plus each system in full, one below the other: energy today, this month, this
           year and in total; grid in and out; the battery; each PV string and AC phase; and the raw telemetry.</dd>
         <dt>${tab('#/history', 'Historical Data')}</dt>
         <dd>The record, by day, month or year - back to installation for months and years, from each vendor's own totals.
@@ -3625,6 +3795,8 @@
       return;
     }
     if (!state.latest) return; // first paint waits for data
+    // Compare means nothing with one system, so its tab appears with the second.
+    $('comparetab').hidden = (state.latest.inverters?.length ?? 0) < 2;
     const sys = hash.match(/^#\/system\/(.+)$/);
     if (sys) return renderSystem(decodeURIComponent(sys[1]));
     if (tv) return renderTv();
@@ -3635,6 +3807,7 @@
     // old bookmark should still land somewhere sensible.
     if (hash === '#/flow') { location.replace('#/'); return overviewRoute(); }
     if (hash === '#/power') return renderPower();
+    if (hash === '#/compare') return renderCompare();
     overviewRoute();
   }
 
@@ -3647,11 +3820,25 @@
    * is not decoration: on a display nobody touches, it is the only way to tell
    * a live page from a frozen one at a glance.
    */
+  /**
+   * How many systems TV mode shows at once, and how long each screenful stays.
+   * Three is what a wall display across a room can still be read at; past
+   * that, the screens take turns rather than the figures shrinking.
+   */
+  const TV_PER_SCREEN = 3;
+  const TV_TURN_MS = 20_000;
+  const tvScreen = (n) => (n > TV_PER_SCREEN ? Math.floor(Date.now() / TV_TURN_MS) % Math.ceil(n / TV_PER_SCREEN) : 0);
+  let tvShown = 0;
+
   function renderTv() {
-    const invs = (state.latest?.inverters ?? []).filter((i) => i.ts);
+    const all = (state.latest?.inverters ?? []).filter((i) => i.ts);
+    const screens = Math.ceil(all.length / TV_PER_SCREEN);
+    tvShown = tvScreen(all.length);
+    // The total is the whole fleet's, whichever screenful is showing.
+    const invs = all.length > TV_PER_SCREEN ? all.slice(tvShown * TV_PER_SCREEN, (tvShown + 1) * TV_PER_SCREEN) : all;
     const byInv = {};
     for (const p of state.series?.points ?? []) (byInv[p.inverter_id] ||= []).push(p);
-    const [tw, tu] = fmtW(invs.reduce((a, i) => a + (i.ac_power_w || 0), 0));
+    const [tw, tu] = fmtW(all.reduce((a, i) => a + (i.ac_power_w || 0), 0));
     const panels = invs.map((inv, i) => {
       const m = parse(inv.metrics) ?? {};
       const st = statusOf(inv);
@@ -3662,7 +3849,7 @@
         inv.load_power_w != null && !st.offline ? ['House', fmtWs(inv.load_power_w)] : null,
         inv.grid_power_w != null && !st.offline ? ['Grid', gridText(inv.grid_power_w)] : null,
       ].filter(Boolean);
-      return `<section class="tvsys" style="--accent:${colorFor(inv.provider)};--accent-ink:${inkFor(inv.provider)}">
+      return `<section class="tvsys" style="--accent:${colorOf(inv)};--accent-ink:${inkOf(inv)}">
         <div class="tvname"><span>${esc(inv.name)}</span><span class="pill ${st.cls}"><i></i>${esc(st.text)}</span></div>
         <div class="tvnow${st.offline ? ' off' : ''}">${pw}<small>${pu}</small></div>
         <div class="tvfigs">${figs.map(([k, v]) => `<div><span class="k">${esc(k)}</span>${esc(v)}</div>`).join('')}</div>
@@ -3671,10 +3858,11 @@
     }).join('');
     $('view').innerHTML = `<div class="tvwrap">
       <div class="tvhead">
-        <div><div class="k">Producing now, both systems</div><div class="tvtotal">${tw}<small>${tu}</small></div></div>
+        <div><div class="k">Producing now, ${all.length === 2 ? 'both systems' : all.length > 2 ? `all ${all.length} systems` : 'the system'}</div><div class="tvtotal">${tw}<small>${tu}</small></div></div>
         <div class="tvclock"><div class="t" id="tvclock"></div><div class="k" id="tvago"></div></div>
       </div>
       <div class="tvgrid">${panels || '<div class="empty">No system has reported yet.</div>'}</div>
+      ${screens > 1 ? `<div class="tvpages" aria-label="Screen ${tvShown + 1} of ${screens}">${Array.from({ length: screens }, (_, i) => `<i class="${i === tvShown ? 'on' : ''}"></i>`).join('')}</div>` : ''}
     </div>`;
     tvTick();
   }
@@ -3682,6 +3870,9 @@
   /** The clock and the data's age, once a second, without refetching. */
   function tvTick() {
     if (!document.body.classList.contains('tv')) return;
+    // Time for the next screenful: draw it, which ticks again itself.
+    const n = (state.latest?.inverters ?? []).filter((i) => i.ts).length;
+    if (tvScreen(n) !== tvShown) { renderTv(); return; }
     const c = $('tvclock'), a = $('tvago');
     if (c) c.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
     const newest = Math.max(0, ...(state.latest?.inverters ?? []).map((i) => i.ts || 0));
@@ -3714,8 +3905,15 @@
    * route and comes off for the rest - a body locked to 100vh on the Devices
    * tab would simply hide rows.
    */
+  /**
+   * The Overview, fitted to one screenful where that works: one or two systems
+   * side by side on a large window. Three or more cannot share one screen at a
+   * readable size, so the page scrolls instead, under a strip that lists them
+   * all.
+   */
   function overviewRoute() {
-    document.body.classList.add('ovfit');
+    const n = state.latest?.inverters?.length ?? 0;
+    document.body.classList.toggle('ovfit', n <= 2);
     renderOverview();
   }
 

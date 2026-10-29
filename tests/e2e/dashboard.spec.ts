@@ -742,7 +742,8 @@ test.describe('Energy flow on the overview', () => {
   test('the flow tab is gone and an old #/flow link lands on the overview', async ({ page }) => {
     await stubApi(page);
     await page.goto('/');
-    await expect(page.locator('nav a')).toHaveText([/Overview/, /Power/, /Historical Data/, /Alerts/, /Devices/]);
+    // Compare is there because the fixtures hold two systems.
+    await expect(page.locator('nav#nav a:visible')).toHaveText([/Overview/, /Power/, /Compare/, /Historical Data/, /Alerts/, /Devices/]);
     await page.goto('/#/flow');
     await expect(page.locator('.ovsys')).toHaveCount(2);
   });

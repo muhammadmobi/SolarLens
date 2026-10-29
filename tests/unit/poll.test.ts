@@ -47,7 +47,7 @@ vi.mock('../../src/providers/solarman-web', async (orig) => ({
   SolarmanWebProvider: class { constructor() { const p = new StubProvider(); p.id = 'solarman' as never; solarmanWeb.instances.push(p); return p; } },
 }));
 
-const { buildProviders, plantFilter, pollAll, pollExtras, yearsFromMonths } = await import('../../src/poll');
+const { buildProviders, plantFilter, plantsThisRun, pollAll, pollExtras, yearsFromMonths, PLANTS_PER_RUN, MAX_GROUPS } = await import('../../src/poll');
 
 let d1: TestD1;
 const envWith = (over: Partial<Env> = {}): Env => ({ DB: d1.db, ASSETS: {} as Fetcher, ...over });
@@ -247,5 +247,65 @@ describe('yearsFromMonths', () => {
   it('null plus null stays null: a figure the vendor never reported is not zero', () => {
     const [year] = yearsFromMonths([month('2026-01', null), month('2026-02', null)] as never);
     expect(year.yieldKwh).toBeNull();
+  });
+});
+
+/**
+ * Many plants: each run reads a share of them, so a fleet can grow without
+ * one cron run making every vendor call there is. Every plant must still be
+ * read well inside the 25 minutes after which the page calls it offline.
+ */
+describe('plantsThisRun', () => {
+  const plants = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `p${String(i).padStart(2, '0')}` }));
+
+  it('reads every plant every run while there are four or fewer', () => {
+    for (const run of [0, 1, 2]) expect(plantsThisRun(plants(PLANTS_PER_RUN), run)).toHaveLength(PLANTS_PER_RUN);
+  });
+
+  it('deals more into groups, one group a run, every plant once per round', () => {
+    const all = plants(9);
+    const seen: string[] = [];
+    for (let run = 0; run < MAX_GROUPS; run++) {
+      const got = plantsThisRun(all, run);
+      expect(got).toHaveLength(3);
+      seen.push(...got.map((p) => p.id));
+    }
+    expect(seen.sort()).toEqual(all.map((p) => p.id));
+    // The next round starts again with the first group.
+    expect(plantsThisRun(all, MAX_GROUPS)).toEqual(plantsThisRun(all, 0));
+  });
+
+  it('reads each plant at least every fifteen minutes, however many there are', () => {
+    for (const n of [5, 8, 12, 20]) {
+      const all = plants(n);
+      const lastSeen = new Map<string, number>();
+      let worst = 0;
+      for (let run = 0; run < 12; run++) {
+        for (const p of plantsThisRun(all, run)) {
+          if (lastSeen.has(p.id)) worst = Math.max(worst, run - lastSeen.get(p.id)!);
+          lastSeen.set(p.id, run);
+        }
+      }
+      expect(lastSeen.size, `${n} plants`).toBe(n);
+      expect(worst * 5, `${n} plants`).toBeLessThanOrEqual(15);
+    }
+  });
+
+  it('keeps a plant in its group whatever order the vendor lists them in', () => {
+    const all = plants(7);
+    const shuffled = [...all].reverse();
+    for (const run of [0, 1]) expect(plantsThisRun(shuffled, run)).toEqual(plantsThisRun(all, run));
+  });
+
+  it('is used by the cron: a run reads one group, and says so in the log', async () => {
+    const nine = Array.from({ length: 9 }, (_, i) => ({ id: `plant-${i}`, name: `Plant ${i}`, capacityW: 1000 }));
+    const spy = vi.spyOn(StubProvider.prototype, 'listPlants').mockResolvedValue(nine as never);
+    const env = envWith({ SOLIS_KEY_ID: 'id', SOLIS_KEY_SECRET: 'secret' });
+    await pollAll(env, 0);
+    const p = solis.instances[0];
+    expect(p.calls.filter((c) => c.startsWith('listInverters:'))).toHaveLength(3);
+    const [logged] = await recentPolls(env.DB);
+    expect(logged.detail).toMatch(/^plants=3 of 9 /);
+    spy.mockRestore();
   });
 });
