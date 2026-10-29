@@ -835,7 +835,7 @@ sends:
 | `push.spec.ts` | Notifications to a closed browser: on, off, the key asked for and never stored, every refusal explained |
 | `export-and-notify.spec.ts` | Download CSV, and the while-open notification switch |
 | `daylight-saving.spec.ts` | The morning the clocks go back: the day's first hour kept, and times shown on the clock they were read under |
-| `phone-width.spec.ts` | No view wider than a phone, and the last tab reachable |
+| `phone-width.spec.ts` | No view wider than a phone - with the footer's feed lines as long as a relay's - and the last tab reachable |
 | `page-coverage.spec.ts` | Walks the dashboard and measures how much of its script ran (below) |
 
 One retry is allowed locally (two on CI): the suite drives two real Chrome projects in parallel and a page load occasionally overruns the timeout on a loaded laptop. A genuine break still fails twice.

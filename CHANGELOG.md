@@ -312,6 +312,10 @@ checkout of any tag says which release it is.
   not send - the raw payload was one - or lacks one it does. The rows also use
   the aliases the Worker really publishes (`s1`, `s2`) rather than vendor ids.
 
+- **The footer's feed lines fit a phone.** As long as a relay's really are, they
+  made the page wider than the screen too; their detail now gives way, cut
+  short, to fit.
+
 ## [2.11.0] — 2026-10-19
 
 SolisCloud readings again after the portal moved its plant page, a relay that

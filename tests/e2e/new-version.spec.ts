@@ -15,7 +15,7 @@ const json = (body: unknown) => ({ status: 200, contentType: 'application/json',
 /** One system, so the page loads normally; the tests are about the page, not the data. */
 async function stubApi(page: Page) {
   await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters: [
-    { id: 's1', name: 'Solis Ongrid', provider: 'soliscloud', capacity_w: 12_000, ts: NOW - 60, ac_power_w: 8000, status: 'normal', source: 'soliscloud-relay', metrics: null },
+    { id: 's1', name: 'Riverside Ongrid', provider: 'soliscloud', capacity_w: 12_000, ts: NOW - 60, ac_power_w: 8000, status: 'normal', source: 'soliscloud-relay', metrics: null },
   ] })));
   for (const path of ['**/api/series**', '**/api/devices', '**/api/alarms**', '**/api/periods', '**/api/health', '**/api/history**']) {
     await page.route(path, (r) => r.fulfill(json({ now: NOW, points: [], devices: [], alarms: [], periods: [], polls: [], feeds: [], relays: [], rows: [] })));

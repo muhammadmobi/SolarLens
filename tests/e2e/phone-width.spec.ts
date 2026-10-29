@@ -16,8 +16,8 @@ const json = (body: unknown) => ({ status: 200, contentType: 'application/json',
 
 test('no view is wider than the screen', async ({ page }) => {
   await page.route('**/api/latest', (r) => r.fulfill(json({ now: NOW, inverters: [
-    { id: 's1', name: 'Solis Ongrid', provider: 'soliscloud', capacity_w: 12_000, ts: NOW - 60, ac_power_w: 8000, today_kwh: 40, status: 'normal', source: 'soliscloud-relay', metrics: null },
-    { id: 's2', name: 'Nitrox Hybrid', provider: 'solarman', capacity_w: 3500, ts: NOW - 60, ac_power_w: 1200, battery_soc: 70, battery_power_w: -200, grid_power_w: 100, load_power_w: 900, status: 'normal', source: 'solarman', metrics: null },
+    { id: 's1', name: 'Riverside Ongrid', provider: 'soliscloud', capacity_w: 12_000, ts: NOW - 60, ac_power_w: 8000, today_kwh: 40, status: 'normal', source: 'soliscloud-relay', metrics: null },
+    { id: 's2', name: 'Orchard Hybrid', provider: 'solarman', capacity_w: 3500, ts: NOW - 60, ac_power_w: 1200, battery_soc: 70, battery_power_w: -200, grid_power_w: 100, load_power_w: 900, status: 'normal', source: 'solarman', metrics: null },
   ] })));
   await page.route('**/api/devices', (r) => r.fulfill(json({ now: NOW, devices: [
     { id: 'd1', provider: 'soliscloud', plant_id: 's1', kind: 'inverter', sn: '••••1234', name: 'Inverter', model: 'S5-GR3P10K',
@@ -27,9 +27,14 @@ test('no view is wider than the screen', async ({ page }) => {
     { inverter_id: 's1', day: '2026-09-08', yield_kwh: 55, peak_w: 9000, load_kwh: null, import_kwh: null, export_kwh: null,
       batt_charge_kwh: null, batt_discharge_kwh: null, samples: 200, first_ts: NOW - 86_400, last_ts: NOW },
   ] })));
-  for (const path of ['**/api/series**', '**/api/alarms**', '**/api/periods', '**/api/health']) {
+  for (const path of ['**/api/series**', '**/api/alarms**', '**/api/periods']) {
     await page.route(path, (r) => r.fulfill(json({ now: NOW, points: [], devices: [], alarms: [], periods: [], polls: [], feeds: [], relays: [], rows: [] })));
   }
+  // The footer's feed lines, as long as a relay's really are: they once pushed the page wider than a phone.
+  await page.route('**/api/health', (r) => r.fulfill(json({ now: NOW, polls: [], relays: [], feeds: [
+    { provider: 'soliscloud', ok: true, ts: NOW - 120, detail: 'plants=1 inverters=1 new=0 via soliscloud-relay' },
+    { provider: 'solarman', ok: true, ts: NOW - 300, detail: 'plants=1 inverters=1 new=1 devices=2 alarms=0 via solarman-web' },
+  ] })));
 
   const wide: string[] = [];
   // What each view draws once it has its data. Waiting only for #view to be
