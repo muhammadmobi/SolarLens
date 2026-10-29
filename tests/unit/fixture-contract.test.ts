@@ -248,6 +248,14 @@ describe('the demo matches what the Worker sends', () => {
     expect(realGraph.results[0].tool).toBe('chart');
     expect(fields(graph.results[0])).toEqual(fields(realGraph.results[0]));
     expect((graph.results[0].rows as unknown[]).length).toBeGreaterThan(2);
+    // An analysis is the analysis tool's result: findings, what to do, and the evidence as sections.
+    const analyse = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'analyse my system' }] }) };
+    const realAnalysis = (await (await h.fetch('/api/chat', analyse)).json()) as { kind: string; results: Record<string, unknown>[] };
+    const analysis = box.SolarLensDemo!.demoChat({ messages: [{ role: 'user', content: 'analyse my system' }] }, Math.floor(Date.now() / 1000)) as { kind: string; results: Record<string, unknown>[] };
+    expect(realAnalysis.results[0].tool).toBe('analysis');
+    expect([analysis.kind, realAnalysis.kind]).toEqual(['report', 'report']);
+    expect(fields(analysis.results[0])).toEqual(fields(realAnalysis.results[0]));
+    expect(analysis.results[0].columns).toEqual(realAnalysis.results[0].columns);
   });
 
   it("its one-question answers - a question, and \"Why?\" - have the Worker's shape", async () => {

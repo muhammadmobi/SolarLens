@@ -4,8 +4,9 @@
  * Held to src/agents.ts: the health check flags a system slowly making less
  * for its sunlight, by the figures alone, and that becomes an alert told once;
  * the weekly report is written by the model when there is one and held to the
- * figures, and by SolarLens itself otherwise; both run once a week, and the
- * report goes out with the weekly summary. Workers AI is a script of replies.
+ * figures, and by SolarLens itself otherwise, and says what the week's analysis
+ * found needs a look and what to do; both run once a week, and the report goes
+ * out with the weekly summary. Workers AI is a script of replies.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { latestReports, runWeeklyAgents } from '../../src/agents';
@@ -14,7 +15,7 @@ import { announce, pushEvents } from '../../src/push';
 import { sendWeekly } from '../../src/summary';
 import { createShare, setRequired } from '../../src/auth/sessions';
 import { bearer, createHarness, type Harness } from '../helpers/worker';
-import { addDay, addSun, addSystem, dayNumber, isoOf } from '../helpers/solar-days';
+import { addDay, addFault, addSun, addSystem, dayNumber, isoOf } from '../helpers/solar-days';
 
 /** Monday 28 September 2026, 09:00 UTC: the week before is 21 to 27 September. */
 const NOW = Date.UTC(2026, 8, 28, 9) / 1000;
@@ -70,6 +71,23 @@ describe('the weekly agents', () => {
     expect(weekly!.body).toContain('The lowest day was Mon 21 Sep 2026: Roof made 16 kWh');
     expect(weekly!.body).toContain('Roof: for its sunlight it is making 20% less');
     expect(JSON.stringify({ weekly, health: health.map(({ data, ...rest }) => rest) })).not.toMatch(/station|alpha|beta/);
+  });
+
+  it('say what needs a look, and what to do about it, from the week analysed', async () => {
+    h = createHarness();
+    await quarter(h.env.DB);
+    // Both reporting this morning, and a fault on Garage since Thursday, still active.
+    for (const id of [ROOF, GARAGE]) {
+      await h.env.DB.prepare("INSERT INTO readings (inverter_id, ts, source, ac_power_w, today_kwh, metrics, tz_offset_sec) VALUES (?1, ?2, 'test', 800, 0.4, '{}', 0)").bind(id, NOW - 120).run();
+    }
+    await addFault(h.env.DB, GARAGE, 'f-garage', NOW - 4 * 86400, null, 'Grid overvoltage');
+    await runWeeklyAgents(h.env, NOW);
+    const { weekly } = await latestReports(h.env.DB, NOW);
+    expect(weekly!.body).toContain("Needs a look: 1 fault is still active: Grid overvoltage on Garage. What to do: See what each one means, and the vendor's advice, on the Alerts tab.");
+    // Roof slowly making less is the health check's to say, once.
+    expect(weekly!.body.match(/making 20% less/g)).toHaveLength(1);
+    const kept = await h.env.DB.prepare("SELECT data FROM agent_reports WHERE kind = 'weekly'").first<{ data: string }>();
+    expect(JSON.parse(kept!.data).analysis).toContainEqual(expect.objectContaining({ stands: 'Needs a look', area: 'Faults' }));
   });
 
   it('run once a week, and again the next Monday', async () => {

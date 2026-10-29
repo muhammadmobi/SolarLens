@@ -9,8 +9,9 @@ https://<your SolarLens>/mcp
 
 Settings (the gear) → **Connected apps** shows it, with a Copy button.
 
-The app gets the same fourteen read-only tools as the assistant on the Ask tab
-(see [ask-solarlens.md](ask-solarlens.md#the-tools)): what each system is doing
+The app gets the same fifteen read-only tools as the assistant on the Ask tab
+(see [ask-solarlens.md](ask-solarlens.md#the-tools)): an analysis of any period -
+what stands out, why, and what to do - what each system is doing
 now, whether it is offline, since when and why, what the inverter itself shows
 (its strings, the grid side, the battery's own readings), energy over any
 period with the money saved and the share used at home, a day's power hour by
@@ -61,7 +62,7 @@ Changing `API_TOKEN` does not disconnect apps: their tokens are their own.
 
 ## What an app can do - and cannot
 
-It can read, through the fourteen tools, and nothing more. It cannot change a
+It can read, through the fifteen tools, and nothing more. It cannot change a
 setting, sign anyone out, poll a vendor, or read a password, a token, a
 channel's secret or where the systems are. Its token opens `/mcp` and nothing
 else - not the dashboard's own `/api` routes.

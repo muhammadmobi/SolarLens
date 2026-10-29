@@ -415,10 +415,81 @@
   }
 
   /**
-   * The assistant in the demo, where there is no model: a report, a word on
-   * using the app, a graph of today, or the last seven days - each from the
-   * sample's own made-up figures, said to be the demo's, and in the shape the
-   * Worker answers.
+   * An analysis in the demo, of its own made-up week: what each system made and
+   * how it stands for its sunlight, the systems per kWp, the hybrid's house and
+   * battery, and the week's fault - in the shape the Worker's analysis answers,
+   * what needs a look first, with what to do.
+   */
+  function demoAnalysis(now) {
+    const data = sample(now);
+    const rows = data['/api/history'].rows;
+    const health = data['/api/agents'].health;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    const hh = (h) => `${String(h).padStart(2, '0')}:00`;
+    // The last seven whole days: today is still being made.
+    const days = [...new Set(rows.map((r) => r.day))].sort().reverse().slice(1, 8);
+    const week = (s) => rows.filter((r) => r.inverter_id === s.id && days.includes(r.day));
+    const found = [];
+    SYSTEMS.forEach((s, i) => {
+      const mine = week(s);
+      const total = mine.reduce((a, r) => a + r.yield_kwh, 0);
+      const falling = health[i].data.verdict === 'declining';
+      found.push({
+        stands: falling ? 'Needs a look' : 'Fine', area: 'Production',
+        said: `${s.name} made ${Math.round(total)} kWh over ${mine.length} whole days, ${r1(total / mine.length)} kWh on an average day; for its sunlight it is `
+          + `${falling ? `making ${Math.abs(health[i].data.change_pct)}% less over the last 4 weeks than in the 8 before` : 'steady'}.`,
+        todo: falling ? `Look at ${s.name}'s panels for dirt or new shade, and at its strings for one down: cleaning often brings the output back.` : null,
+      });
+    });
+    const per = SYSTEMS.map((s) => ({ s, v: week(s).reduce((a, r) => a + r.yield_kwh, 0) / week(s).length / s.kwp })).sort((a, b) => b.v - a.v);
+    const gap = Math.round((1 - per[per.length - 1].v / per[0].v) * 100);
+    found.push({
+      stands: gap >= 25 ? 'Needs a look' : 'Worth knowing', area: 'Systems compared',
+      said: `Per kWp of panels, ${per[per.length - 1].s.name} made ${gap}% less than ${per[0].s.name} on an average whole day (${r2(per[per.length - 1].v)} against ${r2(per[0].v)} kWh per kWp).`,
+      todo: `If the two face the same way under the same sky, look for shade, dirt or a string down on ${per[per.length - 1].s.name}; a different tilt or direction explains some of it.`,
+    });
+    // The hybrid's house, hour by hour, from the demo's own house: its always-on load and its evening.
+    const hybrid = SYSTEMS.find((s) => s.battery);
+    const hours = Array.from({ length: 24 }, (_, h) => [0, 1, 2].reduce((a, k) => a + houseLoad(0, h * 3600 + k * 1200), 0) / 3);
+    const base = Math.min(...hours);
+    const peakAt = hours.indexOf(Math.max(...hours));
+    const share = Math.round((base / (hours.reduce((a, w) => a + w, 0) / 24)) * 100);
+    found.push({
+      stands: 'Worth knowing', area: 'The house',
+      said: `${hybrid.name}'s house never draws less than about ${Math.round(base)} W on an average day - ${r1((base * 24) / 1000)} kWh a day, ${share}% of what it uses - and draws most at ${hh(peakAt)} (${r2(hours[peakAt] / 1000)} kW), when the sun is down.`,
+      todo: 'Find what is always on - an old fridge or freezer, a water pump or heater, devices left on standby: every 100 W on all day is 2.4 kWh a day.',
+    });
+    const battery = week(hybrid);
+    const lows = battery.map((r) => r.soc_min).sort((a, b) => a - b);
+    found.push({
+      stands: 'Fine', area: 'The battery',
+      said: `${hybrid.name}'s battery went between ${lows[0]}% and 100% - down to ${lows[Math.floor(lows.length / 2)]}% on a typical day - and was full on ${battery.length} of ${battery.length} days `
+        + `and gave out ${r1(battery.reduce((a, r) => a + r.batt_discharge_kwh, 0))} kWh: it is being used.`,
+      todo: null,
+    });
+    found.push({ stands: 'Worth knowing', area: 'Faults', said: '1 fault was recorded and none is still active.', todo: null });
+    const order = ['Needs a look', 'Worth knowing', 'Fine'];
+    found.sort((a, b) => order.indexOf(a.stands) - order.indexOf(b.stands));
+    const count = (w) => found.filter((f) => f.stands === w).length;
+    const todos = [...new Set(found.map((f) => f.todo).filter(Boolean))];
+    const label = `the last 7 days (${days[6]} to ${days[0]})`;
+    return {
+      tool: 'analysis', title: 'Analysis', period: { from: days[6], to: days[0], label },
+      columns: ['How it stands', 'Area', 'What stands out', 'What to do'], rows: found.map((f) => [f.stands, f.area, f.said, f.todo]),
+      facts: { needs_a_look: count('Needs a look'), worth_knowing: count('Worth knowing'), fine: count('Fine') },
+      notes: ['A demo analysis, from made-up figures.'],
+      summary: [`In the demo, every analysis is this one, of the made-up systems over ${label}: ${count('Needs a look')} thing to look at, ${count('Worth knowing')} worth knowing.`,
+        ...found.map((f) => `- ${f.said}`), 'What to do:', ...todos.map((t) => `- ${t}`)].join('\n'),
+      freshness: { newest: now - 60, offline: [] },
+      sections: [demoChart(now), demoAsk({ question: '' }, now).result],
+    };
+  }
+
+  /**
+   * The assistant in the demo, where there is no model: an analysis, a report,
+   * a word on using the app, a graph of today, or the last seven days - each
+   * from the sample's own made-up figures, said to be the demo's, and in the
+   * shape the Worker answers.
    */
   function demoChat(body, now) {
     const messages = Array.isArray(body.messages) ? body.messages : [];
@@ -427,6 +498,11 @@
     const reply = (kind, answer, results, calls) => ({
       answer, worded: 'solarlens', understood: 'solarlens', kind, calls, results, errors: [], used: 0, limit: 100, model: null, provider: null,
     });
+    // An analysis first, as the Worker reads it: "how can I improve" is not how to use the app.
+    if (/\b(analy\w*|insights?|improve|recommend\w*|suggest\w*|advice|what should (i|we) do|how (is|are) (my|the|our) (solar|system|systems)s? doing)\b/.test(question)) {
+      const analysis = demoAnalysis(now);
+      return reply('report', analysis.summary, [analysis], [{ tool: 'analysis', args: {} }]);
+    }
     if (/\b(how (do|can|to)|where|set ?up|turn on|enable|connect)\b/.test(question)) {
       const said = 'In the demo, the guide answers questions like this one: open Settings (the gear) and look for the card named after what you want - Alerts elsewhere for Telegram or Discord, Home Assistant, Connected apps for Claude.';
       return reply('help', said, [{

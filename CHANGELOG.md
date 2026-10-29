@@ -20,7 +20,7 @@ checkout of any tag says which release it is.
 
 - **SolarLens as an MCP server**, at `/mcp`: AI apps outside SolarLens -
   Claude, an IDE, anything that speaks the Model Context Protocol - ask the
-  same fourteen read-only questions as the assistant, from the same tools, whether
+  same fifteen read-only questions as the assistant, from the same tools, whether
   the relay laptops are on or off, and so work as a chatbot over the owner's
   systems. Streamable HTTP with JSON answers; protocol
   versions 2025-06-18, 2025-03-26 and 2024-11-05. Protected by OAuth 2.1 tied to
@@ -51,7 +51,7 @@ checkout of any tag says which release it is.
   question about tomorrow is told plainly that there is no forecast. Read
   without a model, a question may name a time of day, a system by one word of
   its name, and carry typing slips in the words it is routed on. A model
-  chooses up to three of fourteen read-only tools and fills in their arguments, which are checked like
+  chooses up to three of fifteen read-only tools and fills in their arguments, which are checked like
   any input; the Worker computes every figure; the model words them, and words
   stating a number the figures do not hold are replaced by the tools' own. Each
   answer shows its tables, a chart where one helps - lines for a graph, bars
@@ -68,6 +68,23 @@ checkout of any tag says which release it is.
   `POST /api/ask` for one question, `GET /api/ask/status`, and `GET
   /api/tools`, `/api/tools/<name>`, which run a tool with no model. See
   docs/ask-solarlens.md.
+
+- **An analysis, for any period.** "Analyse the last 30 days", "how is my system
+  doing?", "how can I improve?" read the figures together and say what stands
+  out, why, and what to do: each system against the days before and for its
+  sunlight - a fall the weather explains told from one the system does - the
+  systems per kWp on an average whole day, the lowest day and its likely cause,
+  how much of the power each house used and when it buys (with what a kWh
+  moved to midday is worth by the tariff), the always-on load and the peak,
+  whether a battery runs the house at night or is kept full while the nights
+  are bought, whether a system is down now and why, days not wholly recorded,
+  faults still active or coming back, and weak strings. Each finding needs a
+  look, is worth knowing or is fine; the house's average day, energy day by day,
+  the systems per kWp, the weeks for the sunlight, the battery and the faults
+  follow as its evidence, and it downloads as a report. The Worker reads each
+  kind of record once for all of it, so an analysis stays inside the free
+  plan's limits. The weekly report now carries the week's analysis: what needs
+  a look, and what to do, to the Ask tab and every place alerts go.
 
 - **The agents.** A weekly health check sets each system's output against the
   sunlight on its panels over twelve weeks and flags a fall of 8% or more, which

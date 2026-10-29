@@ -3,6 +3,8 @@
 The **Ask** tab is a conversation with SolarLens. Ask in plain words, and follow
 up:
 
+- *"Analyse the last 30 days: what should I do?"*, *"How is my system doing?"*,
+  *"How can I use more of my own power?"* - what stands out, why, and what to do
 - *"How much did I export last week?"* … *"and the week before?"*
 - *"Which month produced the most this year?"*
 - *"How much did I make between 2pm and 4pm today?"*, *"How steady was the power today?"*
@@ -19,11 +21,30 @@ up:
 - *"How do I get alerts on Telegram?"* - how to do something in the app, and where
 
 Every answer comes with the figures it came from. Beside the conversation are
-two things that run on their own every Monday: a **weekly report**, and a
-**health check** that watches each system for slowly making less.
+two things that run on their own every Monday: a **weekly report**, which
+analyses the week and says what needs a look, and a **health check** that
+watches each system for slowly making less.
 
-All of it runs inside the SolarLens Worker. The model is Cloudflare's Workers
-AI by default, with nothing to host. It can instead be any server that speaks
+## The chatbot, the assistant and the agents
+
+It is one AI seen three ways, and all of it is there to answer and to analyse:
+
+- **The chatbot** is the conversation: questions in plain words and their
+  follow-ups, on the Ask tab - or in Claude, or any app that speaks MCP.
+- **The assistant** does the work a question asks for: an analysis of any
+  period, a report, a graph of any measure, statistics, a comparison, a day
+  explained - each with its figures and charts, and a page to download.
+- **The agents** work on their own. Every Monday the health check watches each
+  system for slowly making less, and the weekly report analyses the week and
+  says what needs a look and what to do - on the Ask tab, and wherever the
+  alerts go. "Why?" beside a low day on Historical Data explains that day.
+
+All of it runs on Cloudflare, inside the SolarLens Worker - the model too, by
+default. Nothing of it runs on a laptop: the SolisCloud relay is the one piece
+that does, and only to fetch SolisCloud's figures.
+
+The model is Cloudflare's Workers AI by default, with nothing to host. It can
+instead be any server that speaks
 OpenAI's chat API - OpenAI, Groq, OpenRouter, or a model on your own computer.
 Without any model, SolarLens reads each question itself and answers from the
 figures. AI apps outside SolarLens, Claude among them, can ask the same
@@ -62,7 +83,9 @@ reading and the wording - the model, or SolarLens itself.
 With no model set up, or no calls left today, or for someone not signed in,
 SolarLens reads the question itself. It works out:
 
-- the kind of question from its words: a report, statistics, a comparison,
+- the kind of question from its words: an analysis (*analyse*, *analytics*,
+  *insights*, *how is my system doing*, *how can I improve*, *what should I
+  do*, *anything unusual*), a report, statistics, a comparison,
   faults, why a day was low, a slow decline, right now, energy made, sold,
   bought or used, the money saved, how much was used at home, how steady the
   power was, the battery, a graph (*graph*, *chart*, *plot*, *draw*), the usual
@@ -108,6 +131,7 @@ period and changes the system. The answer is the figures' own sentences.
 | `faults` | the faults the vendors recorded over a period, which are still active, and the most common |
 | `day_report` | why a day was low: each system's energy against a usual day, the sunlight against usual, what that sunlight should have made, stretches with no readings, faults - and the likely cause |
 | `performance_trend` | whether a system is slowly losing output: energy made against the sunlight on its panels, week by week |
+| `analysis` | an analysis of a period - the last 30 days unless named, a year at most - that reads the figures together and says what stands out, why, and what to do: each system against the days before and for its sunlight, the systems per kWp, the lowest day and its likely cause, the power used at home and when it is bought, the always-on load, the battery, whether a system is down now and why, days not wholly recorded, faults and weak strings. Each finding needs a look, is worth knowing, or is fine, with its figures; the evidence follows as its parts (see *Analysis* below) |
 | `report` | a full report on a period, in one: the headline figures, then energy, the systems side by side (with more than one), the statistics, the faults and the health check, each as its own part |
 | `app_help` | how to do something in SolarLens, and on which tab - from the guide written into the Worker (`src/help.ts`), never made up by a model |
 
@@ -116,8 +140,8 @@ the last 7 or 30 days, the last 12 months - or two dates. Weeks run Monday to
 Sunday, and days are the plants' own. With no period named, `energy` and
 `compare_systems` cover this month, `faults` and `stats` the last 30 days,
 `outages` and `battery` the last 7 days, a `chart` today (a point a day, the
-last 30 days; a week, the last twelve; the average day, the last 7 days), and a
-`report` last month; `power_day` takes one day, today unless
+last 30 days; a week, the last twelve; the average day, the last 7 days), an
+`analysis` the last 30 days, and a `report` last month; `power_day` takes one day, today unless
 named, and times of day as HH:MM on the plant's clock; `inverter` takes no
 period, since it reads the latest record. The same tools are served without a
 model at `GET /api/tools` and `GET /api/tools/<name>?<arguments>`. The MCP
@@ -156,6 +180,54 @@ readings - is kept as each inverter last reported it, not through the day. So
 was read, but a graph of a string's voltage over a day cannot be drawn: the
 vendors' records are only ever the newest.
 
+### Analysis
+
+*"Analyse the last 30 days"*, *"how is my system doing?"*, *"how can I improve?"*,
+*"any insights for last month?"* each run the `analysis` tool. Where a report
+sets out a period's figures, an analysis reads them together, and says what
+stands out, why, and what to do. Every finding is worked out by the Worker from
+SolarLens's own record, and every figure in it can be checked against the
+evidence that follows it:
+
+- **Each system**: what it made on an average whole day against as many days
+  before, and - from the health check's twelve weeks - whether it is steady for
+  its sunlight. A fall with the ratio steady is the weather or the season; with
+  the ratio falling, the system itself, and it needs a look.
+- **The systems side by side**, per kWp on an average whole day, which stays
+  fair when one of them missed days. 15% below the best is worth knowing; 25%,
+  a look.
+- **The lowest day**, from the days every system recorded whole, and why: less
+  sun than usual; one system low alone, which is that system's own day; a
+  system short of what its sunlight usually gives; a fault.
+- **Each house**: how much of what it made it used, and when it buys - by the
+  hour, from its average day - so power sold at midday and bought at night is
+  plain, with the hours to move what can wait to, and what each kWh is worth by
+  the tariff. Its always-on load, which is the lowest hour of that average day,
+  and its peak.
+- **Each battery**: whether it runs the house at night, runs low, or is kept
+  full - full every day and hardly lower on a typical one - while the nights
+  are bought, which is how an inverter set to keep the battery for power cuts
+  looks.
+- **Whether each system is reporting now**, and if not, why - its datalogger,
+  or the SolisCloud relay and its login - and the days it was not wholly
+  recorded, so its figures are short.
+- **Faults** still active, or coming back; **strings** making far less than the
+  others; and **the money**, with a tariff set.
+
+A whole day here is recorded from the morning (by 09:00) into the afternoon
+(from 15:00) on the plant's clock, as well as having 60 readings: a relay
+started at 15:00 leaves plenty of readings, and a day short of most of its sun.
+The average day, hour by hour, is from every reading of the period's last 30
+days. The analysis reads each kind of record once, so a year of it stays well
+inside the Worker's and the database's free allowances.
+
+A finding **needs a look** when something may be wrong or costing you, is
+**worth knowing** when it explains the figures or shows what could be better,
+and is **fine** otherwise. The answer leads with what needs a look, then what to
+do; the evidence follows - each house's average day as two charts, energy day
+by day, the systems per kWp, the weeks for the sunlight, the battery day by day,
+the faults. It downloads as a report does.
+
 ### Reports
 
 *"A report on last month"*, *"summarise this year"*, *"write me a report on the
@@ -193,10 +265,12 @@ none of it. A message is at most 500 characters.
   told once to the phones and the places under *Alerts elsewhere*. The ratio
   moves a little with the season, which is why it takes 8% to flag.
 - **The weekly report**, every Monday after the health check: last week against
-  the one before, the week's lowest day and its likely cause, and the health
-  check, in three to five sentences by the model - held to the figures like any
-  answer, and written by SolarLens itself when there is no model or no call
-  left. It is shown on the Ask tab and goes out with the weekly summary.
+  the one before, the week's lowest day and its likely cause, the health check,
+  and the week analysed - what needs a look, and what to do about it - in three
+  to five sentences by the model, held to the figures like any answer, and
+  written by SolarLens itself when there is no model or no call left. It is
+  shown on the Ask tab and goes out with the weekly summary, so the week's
+  analysis reaches ntfy, Telegram, Discord or a webhook without anyone asking.
 
 ## Who can ask, and what it costs
 
