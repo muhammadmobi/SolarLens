@@ -13,10 +13,9 @@
  */
 import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
-import { CallQueue } from './queue';
-import { num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
+import { CALL_TIMEOUT_MS, CallQueue } from './queue';
+import { locationOf, num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
 import { linkOf, loggerDetail, loggerNetwork } from './logger';
-import { locationOf } from '../weather';
 
 export interface SolisCredentials {
   keyId: string;
@@ -99,7 +98,7 @@ async function call<T>(creds: SolisCredentials, path: string, payload: unknown):
   const body = JSON.stringify(payload);
   const headers = await signedHeaders(creds, path, body);
   return queue.run(async () => {
-    const res = await fetch(BASE_URL + path, { method: 'POST', headers, body });
+    const res = await fetch(BASE_URL + path, { method: 'POST', headers, body, signal: AbortSignal.timeout(CALL_TIMEOUT_MS) });
     if (res.status === 408) {
       throw new Error('soliscloud: HTTP 408 - clock skew >15 min between caller and SolisCloud');
     }

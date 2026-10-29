@@ -308,19 +308,36 @@ export async function pushEvents(db: D1Database, now = nowSec()): Promise<PushEv
   });
 
   // --- a vendor that has stopped answering --------------------------------
-  // The run of failures since each vendor last answered, whole: its length, when
-  // it began, and the newest failure's words. One grouped read, over the week
-  // the poll log keeps.
-  const { results: runs } = await db
-    .prepare(
-      `SELECT p.provider, COUNT(*) AS failed, MIN(p.ts) AS since,
-              (SELECT detail FROM poll_log WHERE provider = p.provider ORDER BY ts DESC LIMIT 1) AS detail
-       FROM poll_log p
-       WHERE p.provider != 'none' AND p.ok = 0
-         AND p.ts > COALESCE((SELECT MAX(ts) FROM poll_log WHERE provider = p.provider AND ok = 1), 0)
-       GROUP BY p.provider`,
-    )
-    .all<{ provider: string; failed: number; since: number; detail: string | null }>();
+  // First, which vendors failed their newest poll: the last two hours of the
+  // log, a range on its time index - a few dozen rows. This rule used to group
+  // the whole week the log keeps, every five minutes, which read a million rows
+  // a day to find what is nearly always nothing. A vendor still being polled
+  // has logged in the last two hours, so none is missed; one that has not is
+  // the stopped-reporting rule's.
+  const { results: recent } = await db
+    .prepare(`SELECT provider, ok FROM poll_log WHERE ts > ?1 AND provider != 'none' ORDER BY ts DESC`)
+    .bind(now - 2 * 3600)
+    .all<{ provider: string; ok: number }>();
+  const newest = new Map<string, number>();
+  for (const r of recent) if (!newest.has(r.provider)) newest.set(r.provider, r.ok);
+  // Then, for each of those only, the run of failures since it last answered,
+  // whole: its length, when it began, and the newest failure's words - each a
+  // seek on the (provider, ts) index.
+  const runs: { provider: string; failed: number; since: number; detail: string | null }[] = [];
+  for (const [provider, ok] of newest) {
+    if (ok) continue;
+    const run = await db
+      .prepare(
+        `SELECT COUNT(*) AS failed, MIN(ts) AS since,
+                (SELECT detail FROM poll_log WHERE provider = ?1 ORDER BY ts DESC LIMIT 1) AS detail
+         FROM poll_log
+         WHERE provider = ?1 AND ok = 0
+           AND ts > COALESCE((SELECT MAX(ts) FROM poll_log WHERE provider = ?1 AND ok = 1), 0)`,
+      )
+      .bind(provider)
+      .first<{ failed: number; since: number | null; detail: string | null }>();
+    if (run?.since != null) runs.push({ provider, failed: run.failed, since: run.since, detail: run.detail });
+  }
   for (const r of runs) {
     if (r.failed < 3 || now - r.since < 15 * 60) continue;
     out.push({
@@ -464,10 +481,13 @@ export async function wake(env: Env, sub: Subscription, now = nowSec()): Promise
         Urgency: 'high',
         'Content-Length': '0',
       },
+      // A push service that does not answer must not hold up the devices after it, or the channels.
+      signal: AbortSignal.timeout(10_000),
     });
     status = res.status;
   } catch (e) {
-    error = String(e);
+    // Only the kind of failure: a network error's message can carry the endpoint, which is the one secret here.
+    error = e instanceof Error ? e.name : 'Error';
   }
   // Gone: the browser threw the subscription away.
   if (status === 404 || status === 410) {

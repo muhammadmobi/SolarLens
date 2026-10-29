@@ -214,6 +214,9 @@ async function checkRp(auth: AuthData, rp: RelyingParty): Promise<void> {
     throw new Error('the passkey is for a different site');
   }
   if (!auth.userPresent) throw new Error('nobody touched the authenticator');
+  // Asked for as "required" (../auth/routes), and checked here too: what the
+  // browser was asked is not proof of what the authenticator did.
+  if (!auth.userVerified) throw new Error('the passkey was not unlocked with a fingerprint, face or PIN');
 }
 
 /** What the browser sends back from navigator.credentials.create(). */

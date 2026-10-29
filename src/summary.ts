@@ -25,6 +25,11 @@ export const SEND_DOW = 1;
 export const SEND_HOUR = 8;
 /** Where the last week sent is remembered, as the day number of its Monday. */
 const SENT_KEY = 'summary:week';
+/**
+ * How long past its time the summary waits for the week's report (./agents),
+ * which it carries: long enough for the agents' tries, an hour apart.
+ */
+export const REPORT_WAIT_S = 3 * 3600;
 
 /** One system's week. */
 export interface SystemWeek {
@@ -242,10 +247,14 @@ export function weekSlot(now: number, off: number): number {
 
 /**
  * Send the weekly summary to every channel that takes it, once a week, from
- * the first cron run after Monday 08:00 on the first system's clock - so a
+ * the first hourly run after Monday 08:00 on the first system's clock - so a
  * Worker that was down then sends it at the next run rather than skipping a
  * week. The first time any channel takes it, the week is only marked: the
  * first summary comes the next Monday, not the moment a channel is added.
+ *
+ * It carries the week's report, so it waits for it: until the agents have
+ * written it (./agents, which run first, and are tried again an hour later if
+ * they fail), or REPORT_WAIT_S past its time, when it goes without.
  *
  * The week is claimed before anything is posted, in one conditional write, so
  * two runs at once cannot both send it; a channel that fails is not retried,
@@ -254,7 +263,8 @@ export function weekSlot(now: number, off: number): number {
 export async function sendWeekly(env: Env, now = nowSec()): Promise<boolean> {
   const rows = await channelsFor(env.DB, 'weekly');
   if (!rows.length) return false;
-  const slot = weekSlot(now, await zoneOf(env.DB));
+  const off = await zoneOf(env.DB);
+  const slot = weekSlot(now, off);
   const seen = await env.DB.prepare('SELECT v FROM kv WHERE k = ?1').bind(SENT_KEY).first<{ v: string }>();
   const forever = now + 100 * 365 * 86400;
   if (!seen) {
@@ -262,6 +272,9 @@ export async function sendWeekly(env: Env, now = nowSec()): Promise<boolean> {
     return false;
   }
   if (Number(seen.v) >= slot) return false;
+  const due = slot * 86400 + SEND_HOUR * 3600 - off;
+  const report = await env.DB.prepare("SELECT 1 FROM agent_reports WHERE kind = 'weekly' AND week = ?1").bind(slot).first();
+  if (!report && now < due + REPORT_WAIT_S) return false;
   const claimed = await env.DB
     .prepare('UPDATE kv SET v = ?2 WHERE k = ?1 AND CAST(v AS INTEGER) < ?3')
     .bind(SENT_KEY, String(slot), slot)

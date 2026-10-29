@@ -33,11 +33,11 @@ async function makeKey(): Promise<string> {
 const fromB64url = (s: string) =>
   Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
 
-/** The push services: every POST is recorded, and answered with `status`. */
+/** The push services: every POST is recorded - with whether it could time out - and answered with `status`. */
 function stubPushServices(status = 201) {
-  const sent: Array<{ url: string; headers: Record<string, string> }> = [];
+  const sent: Array<{ url: string; headers: Record<string, string>; timed: boolean }> = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    sent.push({ url: String(input), headers: Object.fromEntries(new Headers(init?.headers).entries()) });
+    sent.push({ url: String(input), headers: Object.fromEntries(new Headers(init?.headers).entries()), timed: init?.signal instanceof AbortSignal });
     return new Response(null, { status });
   }));
   return sent;
@@ -219,6 +219,27 @@ describe('what is worth waking a phone for', () => {
     expect(events[0].body).toMatch(/^Every read for 20 min has failed: /);
     expect(events[0].body).toMatch(/refresh refused/);
   });
+
+  it('counts a long run of failures whole, while reading only the last two hours to find it', async () => {
+    const log = (ts: number, provider: string, ok: number) =>
+      h.env.DB.prepare('INSERT INTO poll_log (ts, provider, ok, detail) VALUES (?1, ?2, ?3, ?4)').bind(ts, provider, ok, ok ? 'ok' : 'HTTP 503').run();
+    // A week of good polls, then five hours of failures.
+    for (let t = NOW - 7 * 86400; t < NOW - 5 * 3600; t += 3600) await log(t, 'solarman', 1);
+    for (let t = NOW - 5 * 3600; t <= NOW; t += 300) await log(t, 'solarman', 0);
+    const events = await pushEvents(h.env.DB, NOW);
+    expect(events.find((e) => e.key === 'poll:solarman')?.body).toMatch(/^Every read for 300 min has failed/);
+    // Back: one good poll, and the rule has nothing to say.
+    await log(NOW + 60, 'solarman', 1);
+    expect((await pushEvents(h.env.DB, NOW + 120)).some((e) => e.key === 'poll:solarman')).toBe(false);
+  });
+
+  it('says nothing of a vendor that has logged nothing for two hours - that is the stopped-reporting rule', async () => {
+    const log = (ts: number, ok: number) => h.env.DB.prepare("INSERT INTO poll_log (ts, provider, ok, detail) VALUES (?1, 'solarman', ?2, 'x')").bind(ts, ok).run();
+    await log(NOW - 5 * 3600, 0);
+    await log(NOW - 4 * 3600, 0);
+    await log(NOW - 3 * 3600, 0);
+    expect((await pushEvents(h.env.DB, NOW)).some((e) => e.key === 'poll:solarman')).toBe(false);
+  });
 });
 
 // ------------------------------------------------------------------ sending
@@ -251,6 +272,8 @@ describe('announcing', () => {
     expect(sent.map((s) => s.url)).toEqual([FCM, 'https://updates.push.services.mozilla.com/wpush/v2/two']);
     expect(sent[0].headers.authorization).toMatch(/^vapid t=.+, k=.+$/);
     expect(sent[0].headers.ttl).toBe(String(24 * 3600));
+    // Each wake gives up after a while: a push service that never answers must not hold up the devices after it.
+    expect(sent.every((s) => s.timed)).toBe(true);
 
     const found = await recentMessages(h.env.DB, await audienceOf(FCM), NOW);
     expect(found).toEqual({ messages: [expect.objectContaining({ title: 'Test Plant: stopped reporting' })], more: false });
@@ -635,7 +658,8 @@ describe('a failed delivery', () => {
 
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down'); }));
     await wake(h.env, sub, NOW);
-    expect(JSON.parse(warn.mock.calls[1][0] as string)).toMatchObject({ push: 'failed', host: 'fcm.googleapis.com', status: 0, error: 'Error: network down' });
+    // Only the kind of failure: an error's message can carry the endpoint.
+    expect(JSON.parse(warn.mock.calls[1][0] as string)).toMatchObject({ push: 'failed', host: 'fcm.googleapis.com', status: 0, error: 'Error' });
 
     stubPushServices(410);
     await wake(h.env, sub, NOW);

@@ -43,8 +43,12 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      # The version reaches the script through the environment, as in the steps
+      # below: an input written into a run line is pasted into the shell as text.
       - name: The version, the changelog and the tag must agree
-        run: node scripts/ci/release-notes.mjs "${{ inputs.version }}" --out release-notes.md
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node scripts/ci/release-notes.mjs "$VERSION" --out release-notes.md
 
       # The notes are published to a public page, so they go through the same
       # check as the code.

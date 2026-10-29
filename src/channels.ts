@@ -18,8 +18,8 @@
  *   budget of outbound requests per run, and a chat does not want ten pings.
  * - **The secret stays secret.** A bot token, a webhook address, a topic on a
  *   public ntfy server: each lets anyone who has it post as the owner. It is
- *   sealed before it is stored (../auth/crypto seal, a key derived from
- *   API_TOKEN) and never sent back. The page is shown a label with the secret
+ *   sealed before it is stored (../auth/crypto seal, a key derived from the
+ *   key secret: SECRET_KEY, or API_TOKEN without one) and never sent back. The page is shown a label with the secret
  *   parts left out, and a failure is recorded as a status and a few words,
  *   never the address.
  * - **Only https, only the internet.** The Worker posts to an address the owner
@@ -29,7 +29,7 @@
  *   written, never as markup: Discord is told to ping nobody, Telegram's HTML
  *   is escaped, and ntfy is sent plain text.
  */
-import { randomToken, seal, unseal } from './auth/crypto';
+import { keySecret, previousKeySecret, randomToken, seal, unseal } from './auth/crypto';
 import { nowSec, type Env } from './db';
 import type { PushEvent } from './push';
 
@@ -231,14 +231,15 @@ export async function alertChannelCount(db: D1Database): Promise<number> {
 }
 
 /**
- * Keep a new channel, its config sealed. The limit is decided by the insert
- * itself, in one statement, so two channels added at the same moment cannot
- * both slip under it. `origin` is the dashboard's own address, from the
- * request that added it, for the link each message carries.
+ * Keep a new channel, its config sealed under `keys`, the key secret
+ * (../auth/crypto keySecret). The limit is decided by the insert itself, in
+ * one statement, so two channels added at the same moment cannot both slip
+ * under it. `origin` is the dashboard's own address, from the request that
+ * added it, for the link each message carries.
  */
-export async function addChannel(db: D1Database, apiToken: string, c: NewChannel, origin: string, now = nowSec()): Promise<ChannelRow | 'full'> {
+export async function addChannel(db: D1Database, keys: string, c: NewChannel, origin: string, now = nowSec()): Promise<ChannelRow | 'full'> {
   const id = randomToken(9);
-  const secret = await seal(apiToken, SEAL_LABEL, JSON.stringify(c.config));
+  const secret = await seal(keys, SEAL_LABEL, JSON.stringify(c.config));
   const res = await db
     .prepare(
       `INSERT INTO channels (id, kind, name, label, secret, origin, alerts, weekly, created_at, failures)
@@ -371,12 +372,34 @@ async function refusal(kind: ChannelKind, res: Response): Promise<string> {
   return typeof said === 'string' ? said.replace(/[^\w .,:'()-]/g, '').slice(0, 80).trim() : '';
 }
 
-/** A channel's config, unsealed, or null when it can no longer be read. */
+/**
+ * A channel's config, unsealed, or null when it can no longer be read. One
+ * sealed under API_TOKEN before SECRET_KEY was set is read with that, and
+ * sealed again under the key secret on the spot - so each channel moves over
+ * the first time it is read, and a later change of API_TOKEN cannot strand it.
+ */
 async function configOf(env: Env, row: ChannelRow): Promise<ChannelConfig | null> {
-  if (!env.API_TOKEN) return null;
-  const text = await unseal(env.API_TOKEN, SEAL_LABEL, row.secret);
+  const keys = keySecret(env);
+  if (!keys) return null;
+  let text = await unseal(keys, SEAL_LABEL, row.secret);
+  const before = previousKeySecret(env);
+  if (!text && before) {
+    text = await unseal(before, SEAL_LABEL, row.secret);
+    if (text) await env.DB.prepare('UPDATE channels SET secret = ?2 WHERE id = ?1').bind(row.id, await seal(keys, SEAL_LABEL, text)).run();
+  }
   if (!text) return null;
   try { return JSON.parse(text) as ChannelConfig; } catch { return null; }
+}
+
+/**
+ * Move every channel still sealed under API_TOKEN over to SECRET_KEY, run
+ * hourly: a channel that takes only the weekly summary is read once a week,
+ * and should not wait that long to stop depending on API_TOKEN. Nothing to do,
+ * and no read at all, until SECRET_KEY is set.
+ */
+export async function resealChannels(env: Env): Promise<void> {
+  if (!previousKeySecret(env)) return;
+  for (const row of await listChannels(env.DB)) await configOf(env, row);
 }
 
 /**
@@ -388,7 +411,7 @@ export async function deliver(env: Env, row: ChannelRow, msg: Message, now = now
   const config = await configOf(env, row);
   let why: string;
   if (!config) {
-    why = 'cannot be read: API_TOKEN has changed since it was added - remove it and add it again';
+    why = 'cannot be read: the key it was sealed with has changed since it was added (SECRET_KEY, or API_TOKEN without one) - remove it and add it again';
   } else {
     const { url, init } = requestFor(config, msg, row.origin);
     let status = 0;

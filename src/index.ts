@@ -34,39 +34,46 @@
  * its own - it is the same file as in the public repository - so it is served
  * to anyone, and asks for a sign-in when the API says one is needed.
  *
- * The cron (scheduled, at the very end) polls every vendor the secrets allow,
- * then decides whether anything is worth a phone notification.
+ * The crons (scheduled, at the very end): every five minutes, poll every vendor
+ * the secrets allow, then decide whether anything is worth a notification;
+ * once an hour, the week's agents and summary when due, the weather and the
+ * housekeeping (./cron hourly).
  */
 import { Hono, type Context, type Next } from 'hono';
 import { cors } from 'hono/cors';
 import { getCookie } from 'hono/cookie';
 import type { Env } from './db';
 import { auth, applyCookies, openShareLink, type AuthVars } from './auth/routes';
-import { REFRESH_COOKIE, SESSION_COOKIE, type Caller, deviceLabel, identify, openShare, owner, startDevice } from './auth/sessions';
-import { timingSafeEqual } from './auth/crypto';
-import { locationOf, locations, refreshWeather, upsertLocation, weatherSince } from './weather';
+import { REFRESH_COOKIE, SESSION_COOKIE, type Caller, identify, openShare, owner } from './auth/sessions';
+import { keySecret, timingSafeEqual } from './auth/crypto';
+import { locationOf, locations, upsertLocation, weatherSince } from './weather';
 import { expectedToday } from './expected';
 import { getGroups, getTariff, parseGroups, parseTariff, setGroups, setTariff } from './settings';
 import { MAX_CHANNELS, addChannel, channelsFor, deliver, getChannel, listChannels, parseChannel, publicChannel, removeChannel, testMessage, updateChannel } from './channels';
-import { buildSummary, currentSlot, sendWeekly, summaryMessage, withReport } from './summary';
+import { buildSummary, currentSlot, summaryMessage, withReport } from './summary';
 import { aiModel, callsUsed, dailyCalls, hasAi, providerOf } from './ai';
 import { ask } from './ask';
 import { converse } from './assistant';
-import { latestReports, runWeeklyAgents } from './agents';
-import { TOOLS, jsonSchemaOf, runTool } from './tools';
+import { latestReports } from './agents';
+import { ANONYMOUS_DAYS, TOOLS, jsonSchemaOf, runTool, type ToolLimits } from './tools';
 import {
   appForToken, approve, authorizationServer, checkAuthorization, connectedApps, consentPage, deny, errorPage,
   protectedResource, register, registration, revokeGrant, revokeToken, signInPage, token,
 } from './oauth';
 import { handleMcp } from './mcp';
+import { HOURLY, hourly } from './cron';
 import { sensors } from './sensors';
-import { daily, deviceNetworks, deviceSamples, earliestDayStart, forgetOldDeviceSamples, insertReading, inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay } from './db';
+import {
+  daily, dbBytes, deviceNetworks, deviceSamples, earliestDayStart, insertHistory, insertReading,
+  inverterIds, latest, latestPerProvider, listAlarms, listDevices, listPeriods, listRelays, logPoll, nowSec, recentPolls, series,
+  upsertAlarms, upsertDevice, upsertInverter, upsertPeriods, upsertRelay,
+} from './db';
 import { solisAlarm, solisPeriods } from './providers/events';
 import { tzNameOf, tzOffsetSec } from './providers/units';
 import { aliasFor, deviceAliasFor, publicAlarms, publicDeviceSamples, publicDevices, publicInverters, publicRelays, publicRows } from './public-view';
 import { parseRelayStatus } from './relays';
 import { plantFilter, pollAll } from './poll';
-import { announce, forgetOldMessages, forgetToldIfAlone, isPushEndpoint, needsPriming, recentMessages, subscribe, tellOne, unsubscribe, vapidKey, vapidPublicKey } from './push';
+import { announce, forgetToldIfAlone, isPushEndpoint, needsPriming, recentMessages, subscribe, tellOne, unsubscribe, vapidKey, vapidPublicKey } from './push';
 import type { Inverter, Reading } from './providers/types';
 import {
   deviceFromCollector,
@@ -93,19 +100,25 @@ const app = new Hono<{ Bindings: Env; Variables: AuthVars }>();
  *
  * The page loads one web font from Google, and - on the owner's site map only -
  * Leaflet from cdnjs (integrity-checked) and tiles from OpenStreetMap; the policy is
- * strict about everything but those - and, more usefully, about where anything
- * may be *sent*. `connect-src 'self'` means injected script could not
- * exfiltrate a reading even if it ran, and `frame-ancestors 'none'` keeps the
- * page out of somebody else's iframe.
+ * strict about everything but those, and about where the page may send data:
+ * `connect-src 'self'` stops a script from posting a reading to another site
+ * with fetch, and `form-action 'none'` with a form. It does not stop a script
+ * that runs from navigating the page away with data in the address, which no
+ * policy can - the defence against that is the page never letting one run
+ * (every value it shows is escaped). `frame-ancestors 'none'` keeps the page
+ * out of somebody else's iframe.
  *
  * Kept identical to public/_headers, which covers the same page when the edge
- * serves it without invoking this Worker at all.
+ * serves it without invoking this Worker at all (scripts/ci/check-headers.mjs).
  *
  * `'unsafe-inline'` is unavoidable while the script and styles live in the
  * HTML; that is the deliberate trade for having no build step.
  *
- * `Referrer-Policy: no-referrer` matters more than it looks: the one-time
- * `/auth?t=<token>` link would otherwise put the token in a Referer header.
+ * `Strict-Transport-Security` keeps a browser from ever trying plain http once it
+ * has been here, where a network could read a session on its way; a year, and
+ * this host only - a custom domain's other hosts are not this Worker's to
+ * decide. `Permissions-Policy` turns off the device features the page never
+ * uses, so nothing that got into it could ask for a camera or a location.
  */
 app.use('*', async (c, next) => {
   await next();
@@ -133,6 +146,8 @@ app.use('*', async (c, next) => {
   h.set('Referrer-Policy', 'no-referrer');
   h.set('Cross-Origin-Opener-Policy', 'same-origin');
   h.set('X-Frame-Options', 'DENY');
+  h.set('Strict-Transport-Security', 'max-age=31536000');
+  h.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
   c.res = res;
 });
 
@@ -170,7 +185,8 @@ const identifyCaller = async (c: Context<{ Bindings: Env; Variables: AuthVars }>
     const session = getCookie(c, SESSION_COOKIE);
     const refresh = getCookie(c, REFRESH_COOKIE);
     if (session || refresh) {
-      const found = await identify(c.env.DB, secret, { session, refresh }, nowSec());
+      // Signed under the key secret (./auth/crypto keySecret): SECRET_KEY, or API_TOKEN without one.
+      const found = await identify(c.env.DB, keySecret(c.env)!, { session, refresh }, nowSec());
       caller = found.caller;
       applyCookies(c, found.set);
     }
@@ -181,16 +197,51 @@ const identifyCaller = async (c: Context<{ Bindings: Env; Variables: AuthVars }>
 for (const path of ['/api/*', '/auth', '/auth/*', '/s/*', '/oauth/authorize']) app.use(path, identifyCaller);
 
 /**
- * /auth?t=<API_TOKEN>: the 2.x way to unlock a device, kept as a back door
- * that needs no password. It now signs the browser in as the owner with a
- * proper session, rather than leaving the token itself in a cookie as 2.x did.
+ * Callers who are not signed in, held to Cloudflare's rate limiting binding
+ * (RATE_LIMIT) when the Worker has one - per address, so one visitor asking
+ * too fast is slowed without anyone else noticing.
+ *
+ * The expensive answers are reads anyone may ask for while the dashboard is
+ * open to all - a year of history, a report - and on D1's free plan a day's
+ * reads are a fixed allowance for everything, the poller's included, until
+ * midnight UTC. Signed-in callers are never held back, nor the relays, which
+ * carry their own token. Without the binding nothing changes: it is added in
+ * wrangler.jsonc ("ratelimits", see the README), as not every plan has it.
  */
-app.get('/auth', async (c) => {
-  const token = c.env.API_TOKEN;
-  const given = c.req.query('t') ?? '';
-  if (!token || !timingSafeEqual(given, token)) return c.text('forbidden', 403);
-  applyCookies(c, await startDevice(c.env.DB, token, 'owner', deviceLabel(c.req.header('user-agent')), nowSec()));
-  return c.redirect('/');
+const rateLimited = async (c: Context<{ Bindings: Env; Variables: AuthVars }>, next: Next) => {
+  const limiter = c.env.RATE_LIMIT;
+  if (!limiter || c.get('caller')?.role || c.req.path.startsWith('/api/ingest')) return next();
+  const { success } = await limiter.limit({ key: c.req.header('cf-connecting-ip') ?? 'unknown' });
+  if (success) return next();
+  c.header('Retry-After', '60');
+  return c.json({ error: 'Too many requests from this address. Wait a minute, or sign in.' }, 429);
+};
+for (const path of ['/api/*', '/auth/*', '/oauth/register']) app.use(path, rateLimited);
+
+/** A whole number from a query parameter, inside its range; the default for anything that is not a number. */
+function intParam(value: string | undefined, fallback: number, min: number, max: number): number {
+  const n = Number(value ?? fallback);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
+}
+
+/** A request's JSON body, or null when it is not JSON: a malformed body is the sender's mistake, answered 400, never a crash. */
+const jsonOf = <T>(c: Context): Promise<T | null> => c.req.json<T>().catch(() => null);
+
+/** What a caller not signed in may ask of the tools (./tools ANONYMOUS_DAYS); a signed-in one, anything. */
+const toolLimits = (c: Context<{ Bindings: Env; Variables: AuthVars }>): ToolLimits => (c.get('caller').role ? {} : { maxDays: ANONYMOUS_DAYS });
+
+/**
+ * /auth?t=<API_TOKEN>, the 2.x way to unlock a device, signs nothing in any
+ * more. A link carrying the key to everything travels badly: into the
+ * browser's history, into request logs, onto whatever it is pasted into. The
+ * same key typed as the setup code on the sign-in page (POST /auth/setup) does
+ * the same job without leaving it anywhere, and a share link signs a device in
+ * to view. So the address only says where to go instead, whatever it carries,
+ * and never whether the token given was right.
+ */
+app.get('/auth', (c) => {
+  c.header('Cache-Control', 'no-store');
+  return c.text('This link no longer signs a browser in. Open SolarLens and sign in with a passkey, the password, or the setup code (your API_TOKEN).', 410);
 });
 
 app.route('/auth', auth);
@@ -235,9 +286,11 @@ app.use('/api/*', async (c, next) => {
     return next();
   }
 
+  // Without API_TOKEN nobody can be the owner, so nothing may be written. This
+  // used to let every write through, with a line in the log: a deploy that lost
+  // the secret became one anyone could change.
   if (!c.env.API_TOKEN) {
-    console.warn('API_TOKEN is not set: the write endpoints under /api/* are unauthenticated');
-    return next();
+    return c.json({ error: 'This server has no API_TOKEN, so nothing on it can be changed. Set one: npm run cf -- secret put API_TOKEN' }, 503);
   }
   if (caller.role === 'owner') return next();
   return c.json({ error: 'unauthorized' }, 401);
@@ -488,7 +541,7 @@ app.get('/api/ask/status', async (c) => {
  * Anyone else is answered by SolarLens reading the question itself.
  */
 app.post('/api/ask', async (c) => {
-  const out = await ask(c.env, await c.req.json().catch(() => null), !!c.get('caller').role);
+  const out = await ask(c.env, await c.req.json().catch(() => null), !!c.get('caller').role, nowSec(), toolLimits(c));
   c.header('Cache-Control', 'no-store');
   return c.json(out.body, out.status as 200);
 });
@@ -500,7 +553,7 @@ app.post('/api/ask', async (c) => {
  */
 app.post('/api/chat', async (c) => {
   const body = (await c.req.json().catch(() => null)) as { messages?: unknown } | null;
-  const out = await converse(c.env, { messages: body?.messages }, !!c.get('caller').role);
+  const out = await converse(c.env, { messages: body?.messages }, !!c.get('caller').role, nowSec(), toolLimits(c));
   c.header('Cache-Control', 'no-store');
   return c.json(out.body, out.status as 200);
 });
@@ -514,10 +567,11 @@ app.get('/api/tools', (c) => {
 /**
  * One tool, run with its arguments as the query string, answered in its own
  * words: no model, and so a read like any other - open, or with sign-in
- * required, for the owner and a share link.
+ * required, for the owner and a share link. A caller not signed in may ask
+ * for a year of dates at most (./tools ANONYMOUS_DAYS).
  */
 app.get('/api/tools/:name', async (c) => {
-  const out = await runTool(c.env.DB, c.req.param('name'), c.req.query());
+  const out = await runTool(c.env.DB, c.req.param('name'), c.req.query(), nowSec(), toolLimits(c));
   c.header('Cache-Control', CACHE);
   if ('error' in out) return c.json({ error: out.error }, TOOLS.some((t) => t.name === c.req.param('name')) ? 400 : 404);
   return c.json(out);
@@ -663,8 +717,8 @@ app.delete('/api/settings/apps/:id', async (c) => {
 
 // ---------- the places alerts are posted to (./channels) ----------
 
-/** Channels need API_TOKEN: what posting to them needs is sealed with a key derived from it. */
-const NO_TOKEN = 'Set API_TOKEN first: what these need is kept encrypted with a key derived from it.';
+/** Channels need a key secret: what posting to them needs is sealed with a key derived from it (./auth/crypto keySecret). */
+const NO_TOKEN = 'Set API_TOKEN first (and ideally SECRET_KEY): what these need is kept encrypted with a key derived from them.';
 
 /**
  * The channels, for the owner's Settings: what each takes, where it posts with
@@ -674,7 +728,7 @@ const NO_TOKEN = 'Set API_TOKEN first: what these need is kept encrypted with a 
 app.get('/api/settings/channels', async (c) => {
   if (c.get('caller').role !== 'owner') return c.json({ error: 'owner only' }, 401);
   c.header('Cache-Control', CACHE);
-  return c.json({ channels: (await listChannels(c.env.DB)).map(publicChannel), max: MAX_CHANNELS, ready: !!c.env.API_TOKEN });
+  return c.json({ channels: (await listChannels(c.env.DB)).map(publicChannel), max: MAX_CHANNELS, ready: !!keySecret(c.env) });
 });
 
 /**
@@ -684,12 +738,12 @@ app.get('/api/settings/channels', async (c) => {
  * everything already wrong.
  */
 app.post('/api/settings/channels', async (c) => {
-  const token = c.env.API_TOKEN;
-  if (!token) return c.json({ error: NO_TOKEN }, 503);
+  const keys = keySecret(c.env);
+  if (!keys) return c.json({ error: NO_TOKEN }, 503);
   const parsed = parseChannel(await c.req.json().catch(() => null));
   if ('error' in parsed) return c.json({ error: parsed.error }, 400);
   const now = nowSec();
-  const row = await addChannel(c.env.DB, token, parsed, new URL(c.req.url).origin, now);
+  const row = await addChannel(c.env.DB, keys, parsed, new URL(c.req.url).origin, now);
   if (row === 'full') return c.json({ error: `At most ${MAX_CHANNELS} places can be told. Remove one first.` }, 409);
   if (row.alerts && (await needsPriming(c.env.DB))) await announce(c.env, now, true);
   const test = await deliver(c.env, row, testMessage(row, now), now);
@@ -698,8 +752,8 @@ app.post('/api/settings/channels', async (c) => {
 
 /** Change what a channel takes, or its name. Turning alerts on for the first listener primes, as adding one does. */
 app.patch('/api/settings/channels/:id', async (c) => {
-  // Without API_TOKEN every write under /api/ is open (see the middleware), and these must not be.
-  if (!c.env.API_TOKEN) return c.json({ error: NO_TOKEN }, 503);
+  // Without API_TOKEN the middleware already refuses every write; this says what a channel needs, should that ever change.
+  if (!keySecret(c.env)) return c.json({ error: NO_TOKEN }, 503);
   const body = ((await c.req.json().catch(() => null)) ?? {}) as { alerts?: unknown; weekly?: unknown; name?: unknown };
   const row = await updateChannel(c.env.DB, c.req.param('id'), body);
   if (!row) return c.json({ error: 'There is no such channel.' }, 404);
@@ -711,7 +765,7 @@ app.patch('/api/settings/channels/:id', async (c) => {
 
 /** Remove a channel. The last listener to go takes the told-state with it. */
 app.delete('/api/settings/channels/:id', async (c) => {
-  if (!c.env.API_TOKEN) return c.json({ error: NO_TOKEN }, 503);
+  if (!keySecret(c.env)) return c.json({ error: NO_TOKEN }, 503);
   const removed = await removeChannel(c.env.DB, c.req.param('id'));
   await forgetToldIfAlone(c.env.DB);
   return removed ? c.json({ ok: true }) : c.json({ error: 'There is no such channel.' }, 404);
@@ -719,7 +773,7 @@ app.delete('/api/settings/channels/:id', async (c) => {
 
 /** Post a test to one channel, and say how it went. */
 app.post('/api/settings/channels/:id/test', async (c) => {
-  if (!c.env.API_TOKEN) return c.json({ error: NO_TOKEN }, 503);
+  if (!keySecret(c.env)) return c.json({ error: NO_TOKEN }, 503);
   const row = await getChannel(c.env.DB, c.req.param('id'));
   if (!row) return c.json({ error: 'There is no such channel.' }, 404);
   const now = nowSec();
@@ -731,7 +785,7 @@ app.post('/api/settings/channels/:id/test', async (c) => {
  * way to see one without waiting for Monday. The Monday one still goes out.
  */
 app.post('/api/settings/summary', async (c) => {
-  if (!c.env.API_TOKEN) return c.json({ error: NO_TOKEN }, 503);
+  if (!keySecret(c.env)) return c.json({ error: NO_TOKEN }, 503);
   const rows = await channelsFor(c.env.DB, 'weekly');
   if (!rows.length) return c.json({ error: 'No channel takes the weekly summary.' }, 409);
   const now = nowSec();
@@ -742,14 +796,18 @@ app.post('/api/settings/summary', async (c) => {
 });
 
 /**
- * How fresh each feed is, and nothing else: open to anyone even when sign-in is
- * required, so an uptime monitor - and the deploy's own smoke test - can tell
- * that readings are arriving without being able to read them.
+ * How fresh each feed is, and how large the database has grown, and nothing
+ * else: open to anyone even when sign-in is required, so an uptime monitor -
+ * the deploy's own smoke test, and the watcher (scripts/ci/watch.mjs), which
+ * also warns before the database reaches its plan's limit - can tell that
+ * readings are arriving without being able to read them. A size in bytes says
+ * nothing about whose systems these are.
  */
 app.get('/api/status', async (c) => {
-  const feeds = latestPerProvider(await recentPolls(c.env.DB, 200)).map((f) => ({ provider: f.provider, ok: f.ok, ts: f.ts }));
+  const [polls, size] = await Promise.all([recentPolls(c.env.DB, 200), dbBytes(c.env.DB)]);
+  const feeds = latestPerProvider(polls).map((f) => ({ provider: f.provider, ok: f.ok, ts: f.ts }));
   c.header('Cache-Control', 'public, max-age=60');
-  return c.json({ now: nowSec(), feeds });
+  return c.json({ now: nowSec(), feeds, db_bytes: size });
 });
 
 app.get('/api/health', async (c) => {
@@ -782,7 +840,7 @@ app.get('/api/health', async (c) => {
  * owner - and the system it belongs to is named by its alias.
  */
 app.get('/api/alarms', async (c) => {
-  const days = Math.min(3650, Math.max(1, Number(c.req.query('days') ?? 730)));
+  const days = intParam(c.req.query('days'), 730, 1, 3650);
   const since = nowSec() - days * 86400;
   const [rows, ids] = await Promise.all([listAlarms(c.env.DB, since), inverterIds(c.env.DB)]);
   c.header('Cache-Control', CACHE);
@@ -797,7 +855,7 @@ app.get('/api/periods', async (c) => {
 });
 
 app.get('/api/history', async (c) => {
-  const days = Math.min(400, Math.max(1, Number(c.req.query('days') ?? 30)));
+  const days = intParam(c.req.query('days'), 30, 1, 400);
   const tz = Number(c.req.query('tz') ?? 0);
   if (!Number.isFinite(tz) || Math.abs(tz) > 900) return c.json({ error: 'tz out of range' }, 400);
   const to = nowSec();
@@ -812,28 +870,73 @@ app.post('/api/poll', async (c) => {
 });
 
 /**
- * Push endpoint for the local Modbus agent (and anything else on your side of
- * the LAN). Same normalised Reading shape, tagged with whatever `source` the
- * sender declares, so the UI treats it as just another feed.
+ * Push endpoint for a local agent - the Modbus agent on the roadmap, or
+ * anything else on your side of the LAN. Same normalised Reading shape, tagged
+ * with whatever `source` the sender declares, so the UI treats it as just
+ * another feed.
+ *
+ * Nothing sends to it yet, and it takes a reading as given rather than a vendor
+ * payload to normalise, so it checks what it is given as the other ingest
+ * routes' normalisers would: each field of its type, text of a sensible length,
+ * and the same INCLUDE_PLANTS rule, so a token cannot bring in a plant the
+ * dashboard should ignore.
  */
 app.post('/api/ingest', async (c) => {
-  const token = c.env.INGEST_TOKEN;
-  if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);
-  const given = bearer(c.req.header('Authorization')) ?? '';
-  if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
+  const refused = ingestRefusal(c);
+  if (refused) return c.json({ error: refused.error }, refused.status);
+  const body = await jsonOf<{ inverter: Inverter; reading: Omit<Reading, 'inverterId'> }>(c);
+  const problem = localPushProblem(body);
+  if (problem) return c.json({ error: problem }, 400);
+  if (body!.inverter.plantId && !plantFilter(c.env)(String(body!.inverter.plantId))) {
+    return c.json({ stored: false, skipped: 'not in INCLUDE_PLANTS' });
+  }
 
-  const body = (await c.req.json()) as { inverter: Inverter; reading: Omit<Reading, 'inverterId'> };
-  if (!body?.inverter?.id || !body?.reading) return c.json({ error: 'inverter and reading required' }, 400);
-
-  await upsertInverter(c.env.DB, body.inverter);
+  // Every field a push leaves out is stored as not known (null): D1 refuses to
+  // bind a value that is missing, and a partial reading used to be a 500.
+  const i = body!.inverter;
+  const r = body!.reading;
+  await upsertInverter(c.env.DB, {
+    id: i.id, provider: i.provider, vendorId: i.vendorId ?? i.id, serial: i.serial ?? null, name: i.name ?? i.id,
+    plantId: i.plantId ?? '', plantName: i.plantName ?? '', capacityW: i.capacityW ?? null,
+    tzOffsetSec: i.tzOffsetSec ?? null, tzName: i.tzName ?? null,
+  });
   const stored = await insertReading(c.env.DB, {
-    ...body.reading,
-    inverterId: body.inverter.id,
-    ts: body.reading.ts || nowSec(),
-    source: body.reading.source || 'local',
+    inverterId: i.id,
+    ts: r.ts || nowSec(),
+    source: r.source || 'local',
+    acPowerW: r.acPowerW ?? null, dcPowerW: r.dcPowerW ?? null, todayKwh: r.todayKwh ?? null, totalKwh: r.totalKwh ?? null,
+    batterySoc: r.batterySoc ?? null, batteryPowerW: r.batteryPowerW ?? null, gridPowerW: r.gridPowerW ?? null, loadPowerW: r.loadPowerW ?? null,
+    tempC: r.tempC ?? null, status: r.status ?? null, metrics: r.metrics ?? null, raw: r.raw ?? null,
   });
   return c.json({ stored });
 });
+
+/** The providers a local push may name. */
+const LOCAL_PROVIDERS = new Set(['soliscloud', 'solarman', 'local']);
+/** A reading's measured fields: each a number, or null. */
+const READING_NUMBERS = ['acPowerW', 'dcPowerW', 'todayKwh', 'totalKwh', 'batterySoc', 'batteryPowerW', 'gridPowerW', 'loadPowerW', 'tempC'] as const;
+
+/** What is wrong with a local push - `{ inverter, reading }` - or null when nothing is. */
+function localPushProblem(body: { inverter?: unknown; reading?: unknown } | null): string | null {
+  const inv = body?.inverter as Record<string, unknown> | undefined;
+  const r = body?.reading as Record<string, unknown> | undefined;
+  if (!inv || typeof inv !== 'object' || !r || typeof r !== 'object') return 'inverter and reading required';
+  if (typeof inv.id !== 'string' || !/^[\w.:-]{1,120}$/.test(inv.id)) return 'inverter.id is 1 to 120 letters, digits, dots, colons, dashes or underscores';
+  if (typeof inv.provider !== 'string' || !LOCAL_PROVIDERS.has(inv.provider)) return `inverter.provider is one of ${[...LOCAL_PROVIDERS].join(', ')}`;
+  for (const k of ['name', 'plantId', 'plantName', 'serial', 'vendorId'] as const) {
+    if (inv[k] != null && (typeof inv[k] !== 'string' || (inv[k] as string).length > 120)) return `inverter.${k} is text of at most 120 characters`;
+  }
+  if (inv.capacityW != null && (typeof inv.capacityW !== 'number' || !Number.isFinite(inv.capacityW))) return 'inverter.capacityW is a number';
+  if (r.ts != null && (typeof r.ts !== 'number' || !Number.isInteger(r.ts) || r.ts < 0)) return 'reading.ts is whole seconds since 1970';
+  for (const k of READING_NUMBERS) {
+    if (r[k] != null && (typeof r[k] !== 'number' || !Number.isFinite(r[k] as number))) return `reading.${k} is a number, or null`;
+  }
+  for (const k of ['source', 'status'] as const) {
+    if (r[k] != null && (typeof r[k] !== 'string' || (r[k] as string).length > 40)) return `reading.${k} is text of at most 40 characters`;
+  }
+  if (r.metrics != null && (typeof r.metrics !== 'object' || Array.isArray(r.metrics))) return 'reading.metrics is an object, or null';
+  return null;
+}
 
 /**
  * Raw push for the local relay agent: it hands over a vendor station payload
@@ -847,24 +950,26 @@ app.post('/api/ingest', async (c) => {
  * here, so the agent stays a dumb pipe and the field mapping stays testable.
  */
 app.post('/api/ingest/devices', async (c) => {
-  const token = c.env.INGEST_TOKEN;
-  if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);
-  const given = bearer(c.req.header('Authorization')) ?? '';
-  if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
+  const refused = ingestRefusal(c);
+  if (refused) return c.json({ error: refused.error }, refused.status);
 
-  const body = (await c.req.json()) as {
+  const body = await jsonOf<{
     provider: 'soliscloud';
     plantId: string;
     inverters?: Record<string, unknown>[];
     collectors?: Record<string, unknown>[];
     /** inverter/detail payloads: per-string V/A, per-phase AC, temperature. */
     details?: Record<string, unknown>[];
-  };
+  }>(c);
   if (body?.provider !== 'soliscloud' || !body?.plantId) {
     return c.json({ error: 'provider=soliscloud and plantId required' }, 400);
   }
   const plantId = String(body.plantId);
   if (!plantFilter(c.env)(plantId)) return c.json({ stored: 0, skipped: 'not in INCLUDE_PLANTS' });
+  // A plant's hardware is a handful of records; a push far larger is not a device list.
+  if ((body.inverters?.length ?? 0) + (body.collectors?.length ?? 0) + (body.details?.length ?? 0) > 50) {
+    return c.json({ error: 'too many devices' }, 400);
+  }
 
   const devices = [
     ...(body.inverters ?? []).map((r) => deviceFromInverter(r, plantId)),
@@ -912,19 +1017,17 @@ app.get('/api/devices/history', async (c) => {
 });
 
 app.post('/api/ingest/station', async (c) => {
-  const token = c.env.INGEST_TOKEN;
-  if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);
-  const given = bearer(c.req.header('Authorization')) ?? '';
-  if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
+  const refused = ingestRefusal(c);
+  if (refused) return c.json({ error: refused.error }, refused.status);
 
-  const body = (await c.req.json()) as {
+  const body = await jsonOf<{
     provider: 'soliscloud' | 'solarman';
     plantId: string;
     name?: string;
     capacityW?: number | null;
     source?: string;
     raw: Record<string, unknown>;
-  };
+  }>(c);
   if (!body?.provider || !body?.plantId || !body?.raw) {
     return c.json({ error: 'provider, plantId and raw required' }, 400);
   }
@@ -1011,8 +1114,8 @@ app.post('/api/ingest/relay', async (c) => {
 app.post('/api/ingest/alarms', async (c) => {
   const refused = ingestRefusal(c);
   if (refused) return c.json({ error: refused.error }, refused.status);
-  const body = (await c.req.json()) as { provider?: string; plantId?: string | number; records?: unknown[] };
-  if (body?.provider !== 'soliscloud' || !body.plantId || !Array.isArray(body.records)) {
+  const body = await jsonOf<{ provider?: string; plantId?: string | number; records?: unknown[] }>(c);
+  if (!body || body.provider !== 'soliscloud' || !body.plantId || !Array.isArray(body.records)) {
     return c.json({ error: 'provider soliscloud, plantId and records required' }, 400);
   }
   const plantId = String(body.plantId);
@@ -1038,11 +1141,11 @@ app.post('/api/ingest/alarms', async (c) => {
 app.post('/api/ingest/periods', async (c) => {
   const refused = ingestRefusal(c);
   if (refused) return c.json({ error: refused.error }, refused.status);
-  const body = (await c.req.json()) as {
+  const body = await jsonOf<{
     provider?: string; plantId?: string | number; which?: string; points?: unknown[];
-  };
+  }>(c);
   const which = body?.which;
-  if (body?.provider !== 'soliscloud' || !body.plantId || !Array.isArray(body.points)
+  if (!body || body.provider !== 'soliscloud' || !body.plantId || !Array.isArray(body.points)
     || (which !== 'month' && which !== 'year' && which !== 'all')) {
     return c.json({ error: 'provider soliscloud, plantId, which (month|year|all) and points required' }, 400);
   }
@@ -1069,12 +1172,10 @@ app.post('/api/ingest/periods', async (c) => {
 });
 
 app.post('/api/ingest/history', async (c) => {
-  const token = c.env.INGEST_TOKEN;
-  if (!token) return c.json({ error: 'INGEST_TOKEN not configured' }, 503);
-  const given = bearer(c.req.header('Authorization')) ?? '';
-  if (!timingSafeEqual(given, token)) return c.json({ error: 'unauthorized' }, 401);
+  const refused = ingestRefusal(c);
+  if (refused) return c.json({ error: refused.error }, refused.status);
 
-  const body = (await c.req.json()) as { provider?: string; plantId?: string | number; raw?: unknown };
+  const body = await jsonOf<{ provider?: string; plantId?: string | number; raw?: unknown }>(c);
   if (!body?.provider || !body?.plantId || body.raw === undefined) {
     return c.json({ error: 'provider, plantId and raw required' }, 400);
   }
@@ -1117,15 +1218,8 @@ app.post('/api/ingest/history', async (c) => {
     }, 422);
   }
 
-  let stored = 0;
-  for (const p of points) {
-    if (await insertReading(c.env.DB, {
-      inverterId, ts: p.ts, source,
-      acPowerW: p.acPowerW, dcPowerW: null, todayKwh: null, totalKwh: null,
-      batterySoc: null, batteryPowerW: null, gridPowerW: null, loadPowerW: null,
-      tempC: null, status: null, metrics: null, raw: null,
-    })) stored++;
-  }
+  // Only the points newer than the last one stored, in batches (../db insertHistory): the relay sends the whole day every time.
+  const stored = await insertHistory(c.env.DB, inverterId, source, points);
   return c.json({ stored, points: points.length });
 });
 
@@ -1134,43 +1228,34 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch,
-  /** The five-minute cron (wrangler.jsonc triggers): poll every vendor, then judge notifications. */
+  /**
+   * The crons (wrangler.jsonc triggers): every five minutes, poll every vendor,
+   * then judge notifications against what was just stored; once an hour, the
+   * slower work (./cron hourly). Any other expression is taken as the
+   * five-minute one.
+   */
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    // Notifications are judged after the poll, against what it just stored. A
-    // failure there is logged and dropped: it must never cost a reading.
-    // The run's own slot, not the moment it started: which plants a run reads
-    // when there are many is decided by it (./poll plantsThisRun).
-    ctx.waitUntil(pollAll(env, controller.scheduledTime).then(async () => {
+    if (controller.cron === HOURLY) {
+      ctx.waitUntil(hourly(env));
+      return;
+    }
+    ctx.waitUntil((async () => {
+      // The run's own slot, not the moment it started: which plants a run reads
+      // when there are many is decided by it (./poll plantsThisRun).
+      try {
+        await pollAll(env, controller.scheduledTime);
+      } catch (e) {
+        console.error('poll:', String(e));
+      }
+      // Notifications are judged after the poll, against what it just stored -
+      // and still judged if the poll failed, since a vendor that has stopped
+      // answering is one of the things they tell. A failure here is logged and
+      // dropped: it must never cost a reading.
       try {
         await announce(env);
-        await forgetOldMessages(env.DB);
       } catch (e) {
         console.error('push:', String(e));
       }
-      // The week's agents, then the weekly summary that carries their report,
-      // on Monday mornings; see ./agents and ./summary.
-      try {
-        await runWeeklyAgents(env);
-      } catch (e) {
-        console.error('agents:', String(e));
-      }
-      try {
-        await sendWeekly(env);
-      } catch (e) {
-        console.error('summary:', String(e));
-      }
-      // Housekeeping, kept apart so a push failure never leaves it undone.
-      try {
-        await forgetOldDeviceSamples(env.DB);
-      } catch (e) {
-        console.error('housekeeping:', String(e));
-      }
-      // The weather, hourly per system; see ./weather.
-      try {
-        await refreshWeather(env.DB);
-      } catch (e) {
-        console.error('weather:', String(e));
-      }
-    }));
+    })());
   },
 } satisfies ExportedHandler<Env>;

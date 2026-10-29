@@ -41,8 +41,10 @@ jobs:
   # test runs locally against any URL: SOLARLENS_URL=<url> node scripts/ci/smoke.mjs
   deploy:
     name: Deploy to production
+    # A hand-started run deploys main only: "Run workflow" offers every branch,
+    # and a branch that never passed review must not reach the live dashboard.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.event == 'push')

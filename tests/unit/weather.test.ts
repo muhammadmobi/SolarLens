@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FIRST_DAYS, WEATHER_KEEP_S, fetchWeather, locationOf, locations, parseWeather, refreshWeather, storeWeather, upsertLocation, weatherSince } from '../../src/weather';
 import { TYPICAL_RATIO, expectedToday } from '../../src/expected';
 import { createTestD1, type TestD1 } from '../helpers/d1';
-import { bearer, createHarness } from '../helpers/worker';
+import { HOURLY, agentsDone, bearer, createHarness } from '../helpers/worker';
 
 // A made-up position, well away from any real plant.
 const HERE = { lat: 12.346, lng: -45.679 };
@@ -164,7 +164,8 @@ describe('positions and weather through the Worker', () => {
     await upsertLocation(h.env.DB, 'soliscloud:station:plant-9', HERE);
     const now = Math.floor(Date.now() / 1000);
     const stub = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ hourly: { time: [now - 3600], shortwave_radiation: [700] } })));
-    await h.cron();
+    await agentsDone(h.env.DB);
+    await h.cron(HOURLY);
     expect((await weatherSince(h.env.DB, 0)).map((r) => r.ghi_wm2)).toEqual([700]);
     stub.mockRestore();
     h.close();

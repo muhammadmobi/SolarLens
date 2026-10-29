@@ -8,10 +8,9 @@
  * It can break whenever the portal changes; the refresh grant below is a
  * standard OAuth2 form and has not yet been exercised against the real server.
  */
-import { locationOf } from '../weather';
 import type { Device, Inverter, Plant, Provider, Reading } from './types';
-import { CallQueue } from './queue';
-import { num, offsetOfZoneAt, pick, toWatts, tzNameOf, tzOffsetSec } from './units';
+import { CALL_TIMEOUT_MS, CallQueue } from './queue';
+import { locationOf, num, offsetOfZoneAt, pick, toWatts, tzNameOf, tzOffsetSec } from './units';
 import { STATION_PREFIX, deviceFromRecord, deviceFromV3Detail, stationInverter, stationReading, type TokenStore } from './solarman';
 import { solarmanAdvice, solarmanAlert, solarmanOccurrences, solarmanPeriods, type Alarm, type Period } from './events';
 
@@ -55,6 +54,7 @@ export class SolarmanWebProvider implements Provider {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: form,
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });
       if (!res.ok) throw new Error(`solarman-web: refresh HTTP ${res.status}`);
       return (await res.json()) as Rec;
@@ -90,6 +90,7 @@ export class SolarmanWebProvider implements Provider {
           ...(payload !== undefined ? { 'Content-Type': 'application/json' } : {}),
         },
         body: payload !== undefined ? JSON.stringify(payload) : undefined,
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       }),
     );
     if (res.status === 401 && retry) {

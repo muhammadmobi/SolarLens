@@ -32,6 +32,10 @@ import { dayWords, isoDay, loadSystems, runTool, trendWords, trends, zoneOf, typ
 
 const WEEKS = 12;
 const DONE_KEY = 'agents:week';
+/** Where this week's tries are counted: "<week>:<tries>". */
+const TRIES_KEY = 'agents:tries';
+/** Tries a week gets: a run that fails is tried again an hour later, this many times in all. */
+export const MAX_TRIES = 3;
 const KEEP_S = 400 * 86400;
 
 const WEEKLY_PROMPT = [
@@ -57,26 +61,46 @@ export interface Report {
 }
 
 /**
- * Run the week's agents once, from the first cron run after Monday 08:00 on
- * the first system's clock - the same moment as the weekly summary, which the
- * report then goes out with. The week is claimed in one conditional write
- * first, so two runs at once cannot both do it. Returns whether it ran.
+ * Run the week's agents once, from the first hourly run after Monday 08:00 on
+ * the first system's clock; the weekly summary follows, and carries the report
+ * (./summary sendWeekly waits for it). Returns whether they ran.
+ *
+ * The week is marked done only once both reports are written. It used to be
+ * claimed first, so a run that failed part-way - a model that did not answer,
+ * a database that refused - lost the week's report and health check with no
+ * second try. Now a failed run is tried again the next hour, MAX_TRIES times in
+ * all: each try may spend a model call, and a fault that fails every time must
+ * not spend a day's calls finding that out. Doing it twice is harmless, as
+ * every report is written under its week's own id and replaces itself; the
+ * hourly runs never overlap.
  */
 export async function runWeeklyAgents(env: Env, now = nowSec()): Promise<boolean> {
   const systems = await loadSystems(env.DB);
   if (!systems.length) return false;
   const slot = weekSlot(now, zoneOf(systems));
   const forever = now + 100 * 365 * 86400;
-  const claim = await env.DB
+  const [done, tries] = await Promise.all([
+    env.DB.prepare('SELECT v FROM kv WHERE k = ?1').bind(DONE_KEY).first<{ v: string }>(),
+    env.DB.prepare('SELECT v FROM kv WHERE k = ?1').bind(TRIES_KEY).first<{ v: string }>(),
+  ]);
+  if (done && Number(done.v) >= slot) return false;
+  const [triedWeek, tried] = (tries?.v ?? '0:0').split(':').map(Number);
+  const count = triedWeek === slot ? tried : 0;
+  if (count >= MAX_TRIES) return false;
+  // The try is counted before the work, so one that fails still counts.
+  await env.DB
+    .prepare('INSERT INTO kv (k, v, expires_at) VALUES (?1, ?2, ?3) ON CONFLICT(k) DO UPDATE SET v = excluded.v')
+    .bind(TRIES_KEY, `${slot}:${count + 1}`, forever)
+    .run();
+  const health = await healthCheck(env, slot, now);
+  await weeklyReport(env, slot, health, now);
+  await env.DB
     .prepare(
       `INSERT INTO kv (k, v, expires_at) VALUES (?1, ?2, ?3)
        ON CONFLICT(k) DO UPDATE SET v = excluded.v WHERE CAST(kv.v AS INTEGER) < CAST(excluded.v AS INTEGER)`,
     )
     .bind(DONE_KEY, String(slot), forever)
     .run();
-  if (!claim.meta.changes) return false;
-  const health = await healthCheck(env, slot, now);
-  await weeklyReport(env, slot, health, now);
   await env.DB.prepare('DELETE FROM agent_reports WHERE created_at < ?1').bind(now - KEEP_S).run();
   return true;
 }

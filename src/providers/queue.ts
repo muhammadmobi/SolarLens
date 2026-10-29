@@ -1,4 +1,15 @@
 /**
+ * How long one vendor call may take before it is abandoned.
+ *
+ * Every call waits in the queue below for the one before it, so a call that
+ * never answered held up every call after it - and the queue is shared by the
+ * whole isolate, so possibly the next cron run's too. A vendor that has not
+ * answered in twenty seconds is down for this run; the poll log says so, and
+ * the next run tries again.
+ */
+export const CALL_TIMEOUT_MS = 20_000;
+
+/**
  * Serialised call queue with a minimum gap between calls.
  *
  * SolisCloud limits every IP to 3 calls per 5 seconds, and a Worker cron run

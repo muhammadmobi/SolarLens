@@ -1350,7 +1350,8 @@
   };
   // Every vendor string goes through esc() before it becomes HTML, so a plant
   // name can never be markup.
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // The apostrophe too, so text is safe in an attribute quoted either way - none is single-quoted today, and none will be caught out if one is.
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // ---------- time and days ----------
   const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000); };
   // Midnight where the panels are. A solar day ends when the sun sets on the
@@ -4807,7 +4808,7 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
     const field = (id, label, hint, attrs = '') => `<label>${label}${hint ? ` <small>${hint}</small>` : ''}<input id="${id}" autocomplete="off" spellcheck="false" ${attrs}></label>`;
     return `<section class="card"><h2>Alerts elsewhere</h2><div class="body">
       <p class="cardnote">The same alerts a phone gets - a system that stops, a fault, a SolisCloud login running out - and a summary every Monday morning, posted where you already look. No email.</p>
-      ${chans.ready ? '' : '<p class="autherr">This server has no API_TOKEN, which these need: what posting takes is kept encrypted with a key derived from it.</p>'}
+      ${chans.ready ? '' : '<p class="autherr">This server has no API_TOKEN, which these need: without it nothing can be changed, and what posting takes is kept encrypted with a key derived from it (or from SECRET_KEY, where that is set).</p>'}
       <ul class="authlist">${items || '<li><span class="faint">Nowhere yet.</span></li>'}</ul>
       ${list.some((c) => c.weekly) ? '<button type="button" class="rangebtn" id="summary-now">Send last week\'s summary now</button>' : ''}
       ${full ? `<p class="cardnote">That is the most there can be (${chans.max}): remove one to add another.</p>` : `
@@ -4828,7 +4829,7 @@ ${results.map((r) => `${part(r, 2)}${(r.sections ?? []).map((s) => part(s, 3)).j
         <fieldset class="kindfields" data-kind="webhook" hidden>${field('wh-url', 'Address', "https only; Home Assistant's looks like https://…/api/webhook/…", 'inputmode="url"')}</fieldset>
         ${field('chan-name', 'Name', 'optional', 'maxlength="40" placeholder="My phone"')}
         <label class="switchrow"><input type="checkbox" id="chan-alerts" checked><span><strong>Alerts</strong><small class="faint">Each told once, when it happens.</small></span></label>
-        <label class="switchrow"><input type="checkbox" id="chan-weekly" checked><span><strong>Weekly summary</strong><small class="faint">Mondays at 08:00: last week's energy against the week before, the savings and the faults.</small></span></label>
+        <label class="switchrow"><input type="checkbox" id="chan-weekly" checked><span><strong>Weekly summary</strong><small class="faint">Monday mornings, with the week's report: last week's energy against the week before, the savings and the faults.</small></span></label>
         <div class="formrow"><button type="submit" class="authbtn">Add, and send a test</button></div>
       </form></details>`}
       <p class="cardnote">A token or an address is kept encrypted and never shown again: each place above shows only a hint of where it posts. The messages name your systems and their faults.</p>

@@ -44,3 +44,6 @@ jobs:
         env:
           SOLARLENS_URL: ${{ secrets.SOLARLENS_URL }}
           GH_TOKEN: ${{ github.token }}
+          # The database size to warn at, in MB: unset is 400, for the free
+          # plan's 500 MB. On a paid plan (10 GB), set the repository variable higher.
+          DB_WARN_MB: ${{ vars.DB_WARN_MB }}

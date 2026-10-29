@@ -17,7 +17,7 @@ import {
   upsertInverter,
 } from '../../src/db';
 import { createTestD1, type TestD1 } from '../helpers/d1';
-import { bearer, createHarness, testInverter } from '../helpers/worker';
+import { HOURLY, agentsDone, bearer, createHarness, testInverter } from '../helpers/worker';
 
 describe('how a logger reaches the internet', () => {
   it('is read from the model name both vendors give', () => {
@@ -257,7 +257,8 @@ describe('GET /api/devices and /api/devices/history', () => {
   it('is pruned by the cron', async () => {
     const h = await withLogger();
     h.d1.raw.prepare('INSERT INTO device_samples (device_id, ts, status) VALUES (?, ?, ?)').run('soliscloud:datalogger:LOG0001SERIAL', 1, 'online');
-    await h.cron();
+    await agentsDone(h.env.DB);
+    await h.cron(HOURLY);
     const left = h.d1.raw.prepare('SELECT COUNT(*) AS n FROM device_samples WHERE ts = 1').get() as { n: number };
     expect(left.n).toBe(0);
     h.close();

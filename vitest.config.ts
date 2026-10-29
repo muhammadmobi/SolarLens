@@ -17,11 +17,11 @@ export default defineConfig({
     include: ['tests/unit/**/*.test.ts'],
     environment: 'node',
     reporters: 'default',
-    // node:sqlite is stable from Node 24 and behind a flag in 22, which is the
-    // version the checks run. Passed here rather than in an environment
-    // variable so `npx vitest` behaves the same as `npm test`, on any shell.
+    // Each test file in a child process of its own. node:sqlite, behind the D1
+    // test double, needs no flag from Node 22.13 on (package.json engines); the
+    // --experimental-sqlite this once passed sat in Vitest 4's poolOptions,
+    // which Vitest 5 no longer reads.
     pool: 'forks',
-    poolOptions: { forks: { execArgv: ['--experimental-sqlite'] } },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],

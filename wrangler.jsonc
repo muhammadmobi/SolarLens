@@ -5,12 +5,19 @@
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
-  "preview_urls": true,
+  // No preview address per uploaded version: each would be one more public
+  // host serving this Worker with the production database behind it. Deploys
+  // go straight to production (npm run deploy), which never needed them.
+  "preview_urls": false,
 
   // Poll both clouds every 5 minutes. SolisCloud itself only refreshes
   // roughly every 5 min, so faster polling buys nothing but rate-limit risk.
+  // Once an hour, at seven minutes past, the slower work: the week's agents and
+  // summary when due, the weather and the housekeeping (src/cron.ts hourly).
+  // The two expressions are named in src/cron.ts; src/index.ts scheduled tells
+  // them apart, so a change here is a change there too.
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["*/5 * * * *", "7 * * * *"]
   },
 
   "assets": {
@@ -44,6 +51,15 @@
   "ai": {
     "binding": "AI"
   },
+
+  // Optional: hold callers who are not signed in to a rate per address
+  // (src/index.ts rateLimited) - a flood of anonymous requests could otherwise
+  // spend D1's daily allowance. Uncomment if your plan offers Cloudflare's rate
+  // limiting binding; without it nothing is limited, as before. The namespace
+  // id is any number no other Worker on the account uses for a different limit.
+  // "ratelimits": [
+  //   { "name": "RATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } }
+  // ],
 
   "observability": {
     "enabled": true

@@ -84,25 +84,27 @@ describe('reads are open, writes are not', () => {
     h.close();
   });
 
-  it('accepts the API token as a bearer header or as the cookie /auth sets', async () => {
+  it('accepts the API token as a bearer header, or the session a sign-in sets', async () => {
     const h = createHarness();
     expect((await h.fetch('/api/poll', { method: 'POST', headers: bearer(API) })).status).toBe(200);
 
-    const auth = await h.fetch(`/auth?t=${API}`);
-    expect(auth.status).toBe(302);
-    const cookie = (auth.headers.get('set-cookie') ?? '');
-    expect(cookie).toContain('HttpOnly');
-    expect(cookie).toContain('Secure');
-    const viaCookie = await h.fetch('/api/poll', { method: 'POST', headers: { cookie: cookie.split(';')[0] } });
-    expect(viaCookie.status).toBe(200);
+    const setup = await h.fetch('/auth/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: API, password: null }) });
+    expect(setup.status).toBe(200);
+    const cookies = setup.headers.getSetCookie();
+    expect(cookies.join('\n')).toContain('HttpOnly');
+    expect(cookies.join('\n')).toContain('Secure');
+    const session = cookies.find((l) => l.startsWith('sl_session='))!.split(';')[0];
+    expect((await h.fetch('/api/poll', { method: 'POST', headers: { cookie: session } })).status).toBe(200);
     h.close();
   });
 
-  it('refuses /auth with the wrong token, and sets no cookie', async () => {
+  it('signs nothing in at /auth any more - the right token, a wrong one or none - and sets no cookie', async () => {
     const h = createHarness();
-    const res = await h.fetch('/auth?t=not-the-token');
-    expect(res.status).toBe(403);
-    expect(res.headers.get('set-cookie')).toBeNull();
+    for (const path of ['/auth?t=not-the-token', `/auth?t=${API}`, '/auth']) {
+      const res = await h.fetch(path);
+      expect(res.status, path).toBe(410);
+      expect(res.headers.get('set-cookie'), path).toBeNull();
+    }
     h.close();
   });
 

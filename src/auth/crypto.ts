@@ -8,14 +8,39 @@
  *   a WebAuthn challenge are random, and only a hash of a token is ever stored,
  *   so a copy of the database signs nobody in;
  * - signing: the one-hour session cookie is an HMAC over who it is for and when
- *   it ends, keyed from API_TOKEN, so it cannot be forged or stretched;
+ *   it ends, keyed from the key secret (below), so it cannot be forged or stretched;
  * - the password: PBKDF2, then an HMAC with a key the database never sees;
  * - sealing: what the Worker must keep and read back - a channel's bot token
  *   or webhook address (../channels) - is encrypted with AES-GCM under a key
- *   derived from API_TOKEN, so a copy of the database holds nothing usable.
+ *   derived from the key secret, so a copy of the database holds nothing usable
+ *   of it.
+ *
+ * Every key comes from one secret, the key secret: SECRET_KEY when it is set,
+ * else API_TOKEN, as before SECRET_KEY existed. API_TOKEN is also a credential -
+ * sent as a bearer token, typed in as the setup code - so a secret that only
+ * ever derives keys, and never travels, is the better root: with SECRET_KEY
+ * set, replacing API_TOKEN no longer resets the password, the channels or the
+ * signed-in devices. What was hashed or sealed under API_TOKEN before SECRET_KEY
+ * was added is still read, with previousKeySecret, and moved over as it is used.
  */
 
 const enc = new TextEncoder();
+
+/** The secrets a key can come from, as the Worker's settings name them. */
+export interface KeySecrets { SECRET_KEY?: string; API_TOKEN?: string }
+
+/** The secret every key is derived from: SECRET_KEY when set, else API_TOKEN; undefined with neither. */
+export function keySecret(env: KeySecrets): string | undefined {
+  return env.SECRET_KEY || env.API_TOKEN || undefined;
+}
+
+/**
+ * The key secret there was before SECRET_KEY was set - API_TOKEN - for reading a
+ * password hash or a sealed value made then; null when there is no older one.
+ */
+export function previousKeySecret(env: KeySecrets): string | null {
+  return env.SECRET_KEY && env.API_TOKEN && env.API_TOKEN !== env.SECRET_KEY ? env.API_TOKEN : null;
+}
 
 /** Bytes as base64url with no padding: what cookies, URLs and WebAuthn use. */
 export function b64url(bytes: ArrayBuffer | Uint8Array): string {

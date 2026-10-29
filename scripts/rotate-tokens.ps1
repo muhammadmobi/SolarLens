@@ -11,11 +11,13 @@
     -Ingest   The relay stops being able to push until it is restarted with
               the new value. This script restarts it for you.
 
-    -Api      API_TOKEN is also the sign-in setup code, and the owner's
-              password is keyed with it. Devices signed in with a session stay
-              signed in, and passkeys keep working - but the password stops
-              working until it is set again: Settings, "Forgot your
-              password?", with the new value as the setup code.
+    -Api      API_TOKEN is also the sign-in setup code. Devices signed in with
+              a session stay signed in, and passkeys keep working. With the
+              Worker's SECRET_KEY set, nothing else changes. Without it, the
+              owner's password and the alert channels are keyed with API_TOKEN:
+              the password stops working until it is set again (Settings,
+              "Forgot your password?", with the new value as the setup code),
+              and each channel has to be added again.
 
   Examples:
     .\scripts\rotate-tokens.ps1 -Ingest
@@ -123,15 +125,15 @@ try {
   }
 
   if ($Api) {
-    # Both read from .dev.vars rather than being written into this file: the
-    # repository is public, and a deployment URL is as personal as a token.
-    $token = (Get-Content $devVars -Encoding UTF8 | Where-Object { $_ -like 'API_TOKEN=*' }) -replace '^API_TOKEN=', ''
-    $url   = ((Get-Content $devVars -Encoding UTF8 | Where-Object { $_ -like 'SOLARLENS_URL=*' }) -replace '^SOLARLENS_URL=', '').TrimEnd('/')
-    Write-Host "`nSigned-in devices and passkeys keep working. The password does not:" -ForegroundColor Cyan
-    Write-Host "  set it again in Settings -> 'Forgot your password?', with the new API_TOKEN as the setup code." -ForegroundColor Cyan
-    Write-Host "To sign a device in without a password, open this on it once:" -ForegroundColor Cyan
-    Write-Host "  $url/auth?t=$token" -ForegroundColor Yellow
-    Write-Host '  (the link contains the token - do not post it anywhere)'
+    # 2.x printed a link here that signed a device in with the token in its
+    # address. 3.0 retired it: the token is typed as the setup code instead, so
+    # it never lands in a browser's history or a request log.
+    Write-Host "`nSigned-in devices and passkeys keep working." -ForegroundColor Cyan
+    Write-Host '  If the Worker has SECRET_KEY set, so do the password and the alert channels.' -ForegroundColor Cyan
+    Write-Host "  If not, set the password again in Settings -> 'Forgot your password?', with the new" -ForegroundColor Cyan
+    Write-Host '  API_TOKEN as the setup code, and add the alert channels again. Setting SECRET_KEY' -ForegroundColor Cyan
+    Write-Host '  (see .dev.vars.example) stops a new API_TOKEN resetting either.' -ForegroundColor Cyan
+    Write-Host 'To sign in a new device, use a passkey, the password, or the new API_TOKEN as the setup code.' -ForegroundColor Cyan
   }
 
   Write-Host "`nDone." -ForegroundColor Green

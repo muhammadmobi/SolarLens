@@ -19,7 +19,8 @@ to make, and can take back.
   commit. A half-done phase is never pushed.
 - **Database changes only add.** Each migration adds tables or columns and never
   drops or renames one, so rolling the Worker back to 2.10 still runs against
-  the 3.0 database.
+  the 3.0 database. (0022 drops an index that only repeated the readings' own
+  key: an index changes how fast a query is, never what it answers.)
 - **The login is built behind a switch** and turned on last, so it can be tried
   against the live site before it locks anything.
 - **The pull request is merged with "Rebase and merge"**, so `main` keeps one
@@ -287,6 +288,55 @@ periods set side by side, two or three questions in one message, a greeting's
 reply, and an answer for a question about the systems that no reading fits:
 how they are doing.
 
+### 14. A review of the whole repository, before release
+
+Not in the plan at the start. With the phases done, the whole tree was read as
+a stranger would read it - the architecture, security, the database's limits,
+the tests, the pipeline - and each finding checked against 2.x, to tell what
+was already live from what 3.0 brought.
+
+**As built:**
+
+- **The cron, counted.** Run through the real handler against the SQLite D1
+  with every statement counted, a Monday's five-minute run made some
+  ninety-five queries, where the free plan allows fifty in one invocation - and
+  it claimed the week before doing the week's work. The slower work moved to an
+  hourly cron (`src/cron.ts`), each step on its own; the agents are marked done
+  once they have finished, and tried again up to three times; the summary waits
+  for their report. A relay's history post, which cost several hundred
+  queries, stores only what is new, in batches. `tests/unit/budgets.test.ts`
+  counts every run: 35 for a five-minute one, at most 41 for an hourly one, 43
+  for a history post.
+- **The database's size.** Every reading kept its vendor payload - most of each
+  row - and nothing deleted a reading, so the free plan's 500 MB was about a
+  year away. The payload is kept 30 days now; `/api/status` reports the size,
+  and the production watcher warns at 400 MB.
+- **The keys.** `SECRET_KEY` derives every key, apart from `API_TOKEN` the
+  credential, so a new token resets nothing. Writes fail closed without
+  `API_TOKEN`; `/auth?t=` is retired; a passkey must be unlocked; sign-in
+  challenges are signed rather than stored; the setup code is kept out of the
+  lock for everyone; the vendors' cached tokens are sealed.
+- **The daily allowance.** A question from anyone not signed in covers a year
+  at most, an app registration nobody approves is cleared after an hour, and
+  an optional rate limit holds callers who are not signed in.
+- **The pipeline.** The wrangler wrapper hands wrangler every argument whole -
+  the deploy's rollback message would have been split, and the rollback
+  refused. The release's version reaches its script through the environment, a
+  deploy started by hand runs only from `main`, the PowerShell analyser is
+  pinned, the laptops install with `npm ci`, preview addresses are off, and
+  two headers are added: HSTS and a `Permissions-Policy`.
+- **The edges.** A timeout on every vendor call and push; SolarMan's plant list
+  read page by page; a body that is not JSON answered 400; a `days` that is
+  not a number read as the default; the generic ingest route checked field by
+  field - where the new tests found a partial reading answered with a 500.
+- **Who may change what.** `tests/unit/access.test.ts` reads every write route
+  from the source and holds each to its guard.
+
+**Left for later, on purpose**, each with its reason in docs/handoff.md,
+section 14: a daily rollup of the readings, splitting the two big files, a
+security policy without `'unsafe-inline'`, the relay laptops on release tags,
+and confirming the Cloudflare plan.
+
 ## Order
 
 - **1 first**: its fixture contract keeps the test data honest for every later phase.
@@ -295,6 +345,7 @@ how they are doing.
 - **11 before 12**: the MCP server reuses the tools Ask SolarLens builds.
 - **11 and 12 before 13**: the assistant grows out of Ask SolarLens, and its new
   tools reach apps through the MCP server with no change there.
+- **14 last**: the review reads the finished tree.
 
 ## Left out, on purpose
 

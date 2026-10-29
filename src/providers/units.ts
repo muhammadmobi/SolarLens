@@ -140,3 +140,28 @@ function offsetOfZone(zone: string, at: Date = new Date()): number | null {
     return null;
   }
 }
+
+// ---------------------------------------------------------------- where a plant is
+
+type Rec = Record<string, unknown>;
+
+/** A latitude or longitude, from a number or a numeric string, inside its range - or null. */
+function coord(v: unknown, limit: number): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
+}
+
+/**
+ * A plant's position from a vendor record, or null. 0,0 - in the ocean off
+ * West Africa - is what a record says when nobody filled the position in, and
+ * is read as no position at all.
+ */
+export function locationOf(rec: unknown): { lat: number; lng: number } | null {
+  if (!rec || typeof rec !== 'object') return null;
+  const r = rec as Rec;
+  const lat = coord(r.latitude ?? r.locationLat ?? r.lat, 90);
+  const lng = coord(r.longitude ?? r.locationLng ?? r.lng ?? r.lon, 180);
+  if (lat === null || lng === null || (lat === 0 && lng === 0)) return null;
+  return { lat, lng };
+}

@@ -9,7 +9,7 @@
  * agent/solis-relay.mjs). It appears here only once an official API key is set.
  */
 import type { Env } from './db';
-import { insertReading, isDue, logPoll, markDone, tokenStore, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods } from './db';
+import { insertReading, isDue, logPoll, markDone, safeDetail, tokenStore, upsertAlarms, upsertDevice, upsertInverter, upsertPeriods } from './db';
 import type { Period } from './providers/events';
 import { upsertLocation } from './weather';
 import { SolisCloudProvider } from './providers/soliscloud';
@@ -38,14 +38,14 @@ export function buildProviders(env: Env): Provider[] {
           email: env.SOLARMAN_EMAIL,
           passwordSha256: env.SOLARMAN_PASSWORD_SHA256,
         },
-        tokenStore(env.DB),
+        tokenStore(env.DB, env.SECRET_KEY),
       ),
     );
   } else if (env.SOLARMAN_WEB_REFRESH_TOKEN) {
     providers.push(
       new SolarmanWebProvider(
         { refreshToken: env.SOLARMAN_WEB_REFRESH_TOKEN, accessToken: env.SOLARMAN_WEB_ACCESS_TOKEN },
-        tokenStore(env.DB),
+        tokenStore(env.DB, env.SECRET_KEY),
       ),
     );
   }
@@ -131,8 +131,13 @@ async function pollProvider(env: Env, p: Provider, run: number): Promise<PollSum
       }
     }
     // Slow-moving extras, on their own schedules and never at the readings'
-    // expense: a failure here is logged by omission, not by failing the poll.
-    for (const plant of plants) await pollExtras(env, p, plant.id).catch(() => {});
+    // expense: a failure here is logged, not allowed to fail the poll. It used
+    // to be dropped in silence, so fault history could stop with no trace.
+    for (const plant of plants) {
+      await pollExtras(env, p, plant.id).catch((e) => {
+        console.warn(JSON.stringify({ poll: 'extras failed', provider: p.id, error: safeDetail(e instanceof Error ? e.message : String(e)).slice(0, 200) }));
+      });
+    }
     const of = plants.length < all.length ? ` of ${all.length}` : '';
     await logPoll(env.DB, p.id, true, `plants=${plants.length}${of} inverters=${inverters} new=${newReadings}`);
     return { provider: p.id, ok: true, inverters, newReadings };

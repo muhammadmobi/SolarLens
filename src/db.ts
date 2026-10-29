@@ -26,6 +26,7 @@ import type { TokenStore } from './providers/solarman';
 import type { Alarm, Period } from './providers/events';
 import { offsetOfZoneAt } from './providers/units';
 import type { RelayStatus } from './relays';
+import { seal, unseal } from './auth/crypto';
 
 /**
  * The Worker's bindings: the database, the static-assets service that serves
@@ -48,7 +49,20 @@ export interface Env {
   /** Comma-separated vendor plant ids to poll; unset = every plant the accounts can see. */
   INCLUDE_PLANTS?: string;
   API_TOKEN?: string;
+  /**
+   * The secret every key is derived from - sessions, the password's pepper, the
+   * channels' and vendor tokens' sealing - when set; API_TOKEN when not. It is
+   * never sent anywhere, so replacing API_TOKEN no longer resets what it keys.
+   * See ./auth/crypto keySecret.
+   */
+  SECRET_KEY?: string;
   INGEST_TOKEN?: string;
+  /**
+   * Cloudflare's rate limiting binding, when it is added to wrangler.jsonc
+   * ("ratelimits"): callers who are not signed in are held to it. Unset = no
+   * limit, as before; the README says how to add it.
+   */
+  RATE_LIMIT?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Web Push signing key, a private P-256 JWK. Unset = no notifications to a closed browser. */
   VAPID_KEY?: string;
   /**
@@ -190,6 +204,53 @@ export async function insertReading(db: D1Database, r: Reading): Promise<boolean
     )
     .run();
   return false;
+}
+
+/**
+ * The most backfilled points one post stores: forty inserts, and the two reads
+ * before them, keep a relay's post inside the Workers Free plan's fifty D1
+ * queries a request (tests/unit/budgets.test.ts holds it there).
+ */
+export const HISTORY_PER_POST = 40;
+
+/**
+ * Store a backfilled day curve's points - power at each moment, and nothing
+ * else - each once. Returns how many were new.
+ *
+ * The relay sends the whole of today's curve with every cycle, five minutes
+ * apart, so by the evening each post carries a hundred and fifty points the
+ * database already holds. Stored one by one through insertReading, each cost a
+ * read of the plant's zone, an insert that was ignored, and an update that
+ * changed nothing - some twenty thousand rows written a day, and several
+ * hundred queries a request, against D1's per-request and daily limits. So only
+ * the points after the newest one already stored for this system and source are
+ * written, the zone is read once, and they go in batches. The curve adds a
+ * point a cycle; the gap a sleeping laptop leaves is newer than the last point
+ * too, and is filled the moment it wakes - HISTORY_PER_POST points a post,
+ * oldest first, so a day slept through is taken over a few posts, five minutes
+ * apart, each inside a request's share of D1. A point the vendor revises after
+ * it was stored stays as first stored - a backfill is power alone, a line
+ * drawn through the hours nothing else recorded.
+ */
+export async function insertHistory(
+  db: D1Database, inverterId: string, source: string, points: { ts: number; acPowerW: number }[],
+): Promise<number> {
+  const [zone, last] = await Promise.all([
+    db.prepare('SELECT tz_name, tz_offset_sec FROM inverters WHERE id = ?1').bind(inverterId)
+      .first<{ tz_name: string | null; tz_offset_sec: number | null }>(),
+    db.prepare('SELECT MAX(ts) AS ts FROM readings WHERE inverter_id = ?1 AND source = ?2').bind(inverterId, source).first<{ ts: number | null }>(),
+  ]);
+  const fresh = points.filter((p) => p.ts > (last?.ts ?? 0)).sort((a, b) => a.ts - b.ts).slice(0, HISTORY_PER_POST);
+  // The offset in force at each point, as offsetForReading would give it: a curve can cross a change of clocks.
+  const offsetAt = (ts: number) => (zone?.tz_name ? offsetOfZoneAt(zone.tz_name, ts) ?? zone.tz_offset_sec : zone?.tz_offset_sec ?? null);
+  const stmts = fresh.map((p) => db
+    .prepare('INSERT OR IGNORE INTO readings (inverter_id, ts, source, ac_power_w, tz_offset_sec) VALUES (?1, ?2, ?3, ?4, ?5)')
+    .bind(inverterId, p.ts, source, p.acPowerW, offsetAt(p.ts)));
+  let stored = 0;
+  for (let i = 0; i < stmts.length; i += 50) {
+    for (const res of await db.batch(stmts.slice(i, i + 50))) stored += res.meta.changes ?? 0;
+  }
+  return stored;
 }
 
 export interface LatestRow {
@@ -422,9 +483,67 @@ export async function deviceSamples(db: D1Database, from: number): Promise<Devic
   return results;
 }
 
-/** Drop link history older than DEVICE_SAMPLES_KEEP_S. Run with each cron pass; it touches only what it deletes. */
+/** Drop link history older than DEVICE_SAMPLES_KEEP_S. Run with the hourly housekeeping; it touches only what it deletes. */
 export async function forgetOldDeviceSamples(db: D1Database, now = nowSec()): Promise<void> {
   await db.prepare('DELETE FROM device_samples WHERE ts < ?1').bind(now - DEVICE_SAMPLES_KEEP_S).run();
+}
+
+/** How long a reading keeps the vendor payload it was read from. */
+export const RAW_KEEP_S = 30 * 86400;
+/** How much of the backlog one run clears: a day of readings, a few hundred rows. */
+const RAW_STEP_S = 86400;
+/** Where the clearing has reached, in kv: every reading at or before it has had its payload cleared. */
+const RAW_CURSOR = 'housekeeping:raw-until';
+
+/**
+ * Clear the vendor payload (`raw`) from readings older than RAW_KEEP_S.
+ *
+ * Each reading kept the whole payload it came from - about five kilobytes,
+ * against a few hundred bytes for everything else in the row - and nothing ever
+ * deleted a reading, so the database grew by the better part of a gigabyte a
+ * year, when D1's free plan stops a database at 500 MB. The payload is for
+ * reading back what a normaliser did not know yet, which a month covers; the
+ * figures stay. Run hourly, a day of readings at a time from a cursor, so each
+ * run reads only the rows it clears however large the backlog: a first run
+ * starts at the oldest reading and catches up a day an hour. SQLite reuses the
+ * pages this frees for new rows, so the file stops growing rather than
+ * shrinking. Returns how many readings were cleared.
+ */
+export async function forgetOldRaw(db: D1Database, now = nowSec()): Promise<number> {
+  const until = now - RAW_KEEP_S;
+  const kept = await db.prepare('SELECT v FROM kv WHERE k = ?1').bind(RAW_CURSOR).first<{ v: string }>();
+  const oldest = kept ? null : await db.prepare('SELECT MIN(ts) AS ts FROM readings').first<{ ts: number | null }>();
+  const from = kept ? Number(kept.v) : (oldest?.ts ?? until) - 1;
+  if (!(from < until)) return 0;
+  const to = Math.min(until, from + RAW_STEP_S);
+  const res = await db.prepare('UPDATE readings SET raw = NULL WHERE ts > ?1 AND ts <= ?2 AND raw IS NOT NULL').bind(from, to).run();
+  await db
+    .prepare('INSERT INTO kv (k, v, expires_at) VALUES (?1, ?2, ?3) ON CONFLICT(k) DO UPDATE SET v = excluded.v')
+    .bind(RAW_CURSOR, String(to), now + 100 * 365 * 86400)
+    .run();
+  return res.meta.changes ?? 0;
+}
+
+/**
+ * Drop kv entries past their expiry. A job's "done until" (isDue), a day's
+ * count of model calls: each is only ever read to be compared with its expiry,
+ * and a missing entry reads as an expired one, so nothing changes but the size
+ * of the table. The told-state and the weeks' claims are kept far in the future
+ * on purpose, and stay.
+ */
+export async function forgetExpiredKv(db: D1Database, now = nowSec()): Promise<void> {
+  await db.prepare('DELETE FROM kv WHERE expires_at < ?1').bind(now).run();
+}
+
+/**
+ * The database's size in bytes, as D1 reports it with every answer; null where
+ * it is not reported (the tests' SQLite). For /api/status, so the watcher can
+ * warn well before the free plan's 500 MB stops every write.
+ */
+export async function dbBytes(db: D1Database): Promise<number | null> {
+  const res = await db.prepare('SELECT 1 AS one').all();
+  const size = (res.meta as { size_after?: unknown } | undefined)?.size_after;
+  return typeof size === 'number' && size > 0 ? size : null;
 }
 
 /** Every device, SolisCloud first, then inverters before dataloggers, then by serial. */
@@ -662,18 +781,36 @@ export async function recentPolls(db: D1Database, limit = 20) {
   return results;
 }
 
+const TOKEN_LABEL = 'solarlens vendor token v1';
+
 /**
  * A provider's bearer-token cache, kept in the tokens table so a token is
  * reused across cron runs instead of a fresh login every five minutes.
+ *
+ * With `sealKey` - SECRET_KEY, and only that - each token is sealed before it
+ * is stored, so a copy of the database holds no vendor login. Not API_TOKEN:
+ * SolarMan's web session rotates its refresh token and keeps only the newest
+ * here, so a token sealed under a secret that is later replaced would be lost,
+ * and polling with it. SECRET_KEY exists to stay put. Without it, tokens are
+ * kept as they come, as before; a token stored that way is still read once
+ * SECRET_KEY is set, and sealed at its next renewal.
  */
-export function tokenStore(db: D1Database): TokenStore {
+export function tokenStore(db: D1Database, sealKey?: string): TokenStore {
   return {
     async get(provider) {
       const row = await db
         .prepare(`SELECT access_token, expires_at FROM tokens WHERE provider = ?1`)
         .bind(provider)
         .first<{ access_token: string; expires_at: number }>();
-      return row ? { accessToken: row.access_token, expiresAt: row.expires_at } : null;
+      if (!row) return null;
+      if (!row.access_token.startsWith('v1.')) return { accessToken: row.access_token, expiresAt: row.expires_at };
+      const token = sealKey ? await unseal(sealKey, TOKEN_LABEL, row.access_token) : null;
+      if (!token) {
+        // Sealed under a SECRET_KEY that has since changed, or removed: the provider logs in afresh.
+        console.warn(JSON.stringify({ tokens: 'cannot unseal a stored vendor token', provider }));
+        return null;
+      }
+      return { accessToken: token, expiresAt: row.expires_at };
     },
     async set(provider, accessToken, expiresAt) {
       await db
@@ -681,7 +818,7 @@ export function tokenStore(db: D1Database): TokenStore {
           `INSERT INTO tokens (provider, access_token, expires_at) VALUES (?1, ?2, ?3)
            ON CONFLICT(provider) DO UPDATE SET access_token = excluded.access_token, expires_at = excluded.expires_at`,
         )
-        .bind(provider, accessToken, expiresAt)
+        .bind(provider, sealKey ? await seal(sealKey, TOKEN_LABEL, accessToken) : accessToken, expiresAt)
         .run();
     },
   };

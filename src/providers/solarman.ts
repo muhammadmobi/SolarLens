@@ -12,10 +12,9 @@
  */
 import type { Device, Inverter, Metrics, Plant, Provider, Reading } from './types';
 import { emptyMetrics } from './types';
-import { CallQueue } from './queue';
-import { num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
+import { CALL_TIMEOUT_MS, CallQueue } from './queue';
+import { locationOf, num, pick, toEpochSeconds, toKwh, toWatts, tzNameOf, tzOffsetSec } from './units';
 import { linkOf, loggerDetail, loggerNetwork } from './logger';
-import { locationOf } from '../weather';
 
 export interface SolarmanCredentials {
   appId: string;
@@ -332,6 +331,7 @@ export class SolarmanProvider implements Provider {
           email: this.creds.email,
           password: this.creds.passwordSha256,
         }),
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });
       if (!res.ok) throw new Error(`solarman: token HTTP ${res.status}`);
       return (await res.json()) as TokenResponse;
@@ -361,6 +361,7 @@ export class SolarmanProvider implements Provider {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `bearer ${bearer}` },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       }),
     );
     if (res.status === 401 && retry) {
@@ -382,13 +383,21 @@ export class SolarmanProvider implements Provider {
 
   private plants = new Map<string, Plant>();
 
-  /** Every plant the account can see, remembered so a device can be given its plant's zone. */
+  /**
+   * Every plant the account can see, remembered so a device can be given its
+   * plant's zone. Read a page of fifty at a time, until a page comes back short:
+   * an account with more than fifty plants used to see only the first fifty.
+   */
   async listPlants(): Promise<Plant[]> {
-    const json = await this.call<Envelope & { stationList?: Rec[] }>('/station/v1.0/list', {
-      page: 1,
-      size: 50,
-    });
-    const plants = (json.stationList ?? []).map((s) => ({
+    const stations: Rec[] = [];
+    // Twenty pages - a thousand plants - is past anything this dashboard watches, and a bound on a vendor that never runs out.
+    for (let page = 1; page <= 20; page++) {
+      const json = await this.call<Envelope & { stationList?: Rec[] }>('/station/v1.0/list', { page, size: 50 });
+      const got = json.stationList ?? [];
+      stations.push(...got);
+      if (got.length < 50) break;
+    }
+    const plants = stations.map((s) => ({
       id: String(s.id),
       name: String(pick(s, 'name') ?? s.id),
       // installedCapacity is reported in kW.

@@ -308,7 +308,7 @@
       '/api/periods': { now, periods },
       '/api/alarms': { now, days: 3650, alarms },
       '/api/health': { now, polls: feeds, feeds, relays: [{ name: 'Study laptop', state: 'ok', login_expires_at: now + 5 * 86400, last_seen: now - 70, first_seen: now - 60 * 86400, last_ok_at: now - 70 }] },
-      '/api/status': { now, feeds: feeds.map((f) => ({ provider: f.provider, ok: f.ok, ts: f.ts })) },
+      '/api/status': { now, feeds: feeds.map((f) => ({ provider: f.provider, ok: f.ok, ts: f.ts })), db_bytes: null },
       '/api/expected': { now, systems: expected },
       '/api/weather': { now, days: 2, from: now - 2 * 86400, hours: weatherHours },
       // Invented prices, so the money figures have something to show.

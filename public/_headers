@@ -8,9 +8,13 @@
 # The page loads one web font from Google, and - on the owner's site map only -
 # the Leaflet map library from cdnjs (with an integrity hash, so an altered copy
 # is refused) and map tiles from OpenStreetMap. The policy is strict about
-# everything except those - and, more usefully, about where anything may be
-# *sent*: connect-src 'self' means injected script could not exfiltrate a
-# reading even if it ran.
+# everything except those, and about where the page may send data: connect-src
+# 'self' stops a script posting a reading elsewhere with fetch, form-action
+# 'none' with a form. No policy stops a script that runs from navigating away
+# with data in the address; the defence there is that none runs - every value
+# the page shows is escaped. HSTS (a year, this host only) and a
+# Permissions-Policy that turns off the device features the page never uses
+# are explained in src/index.ts.
 #
 # That font is the one third-party request the dashboard makes, and it hands
 # Google the viewer's IP on every page view. Self-hosting it (Manrope is
@@ -25,6 +29,8 @@
   Referrer-Policy: no-referrer
   Cross-Origin-Opener-Policy: same-origin
   X-Frame-Options: DENY
+  Strict-Transport-Security: max-age=31536000
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
 
 # Chrome rejects a manifest that does not arrive as JSON, and the asset handler
 # has no mapping for .webmanifest of its own.

@@ -82,8 +82,10 @@ authorization server:
   PKCE instead of a secret - a desktop app cannot keep one. Answers go only to
   `https://` addresses, to `http://localhost`-style addresses on the same
   computer, or to a native app's own scheme; never `javascript:`, `data:` or a
-  `#fragment`. At most 100 registrations; one never approved is cleared after a
-  week.
+  `#fragment`. At most 100 registrations; one never approved is cleared after an
+  hour. An app registers and asks for approval in the same breath, and
+  registering is open to anyone, so a stranger who fills the list holds it an
+  hour at most, not the week it once was.
 - **Approval** at `/oauth/authorize`: only the owner, signed in on that
   browser, can allow an app - not a share link, not `API_TOKEN`. A link naming
   an unknown app, or an address the app did not register, is answered on the

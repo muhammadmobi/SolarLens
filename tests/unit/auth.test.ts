@@ -430,13 +430,12 @@ describe('writes', () => {
   });
 });
 
-describe('/auth?t=, the 2.x back door', () => {
-  it('signs the browser in with a proper session, not the token in a cookie', async () => {
+describe('/auth?t=, the 2.x unlock link, retired', () => {
+  it('signs nothing in, even with the right token, and says what to use instead', async () => {
     const res = await h.fetch(`/auth?t=${CODE}`);
-    expect(res.status).toBe(302);
-    const cookies = res.headers.getSetCookie();
-    expect(cookies.some((l) => l.startsWith('sl_refresh='))).toBe(true);
-    expect(cookies.join('\n')).not.toContain(CODE);
+    expect(res.status).toBe(410);
+    expect(res.headers.getSetCookie()).toEqual([]);
+    expect(await res.text()).toMatch(/setup code/);
   });
 });
 
@@ -579,7 +578,10 @@ describe('passkeys', () => {
     const opts = (await (await b.post('/auth/passkey/options', { purpose: 'login' })).json()) as { challenge: string };
     const signed = await a.sign(opts.challenge, origin, rpId);
     expect((await b.post('/auth/passkey/login', { id, response: signed })).status).toBe(200);
-    expect((await b.post('/auth/passkey/login', { id, response: await a.sign(opts.challenge, origin, rpId) })).status).toBe(400);
+    // The same challenge again verifies as a signature - it is spent, so it is refused.
+    const again = await b.post('/auth/passkey/login', { id, response: await a.sign(opts.challenge, origin, rpId) });
+    expect(again.status).toBe(401);
+    expect(((await again.json()) as { error: string }).error).toMatch(/already used/);
     const late = (await (await b.post('/auth/passkey/options', { purpose: 'login' })).json()) as { challenge: string };
     at(301);
     expect((await b.post('/auth/passkey/login', { id, response: await a.sign(late.challenge, origin, rpId) })).status).toBe(400);
@@ -652,5 +654,95 @@ describe('caching', () => {
     for (const path of ['/api/latest', '/api/devices', '/api/health', '/api/series', '/api/history', '/api/alarms', '/api/periods', '/api/devices/history', '/auth/status']) {
       expect((await b.get(path)).headers.get('cache-control'), path).toBe('no-store');
     }
+  });
+});
+
+// ---------------------------------------------------------------- held harder, after the 3.0 review
+
+describe('passkeys, held harder', () => {
+  const origin = 'https://dashboard.test';
+  const rpId = 'dashboard.test';
+  const fromB64u = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4)), (c) => c.charCodeAt(0));
+  const toB64u = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  async function addKey(owner: ReturnType<typeof browser>) {
+    const a = await authenticator();
+    const opts = (await (await owner.post('/auth/passkey/options', { purpose: 'register' })).json()) as { challenge: string; authenticatorSelection: { userVerification: string } };
+    expect(opts.authenticatorSelection.userVerification).toBe('required');
+    const res = await owner.post('/auth/passkey/register', { response: await a.register(opts.challenge, origin, rpId), name: 'My phone' });
+    expect(res.status).toBe(200);
+    return { a, id: ((await res.json()) as { id: string }).id };
+  }
+
+  it('hand out a sign-in challenge to anyone without writing anything', async () => {
+    const count = () => h.d1.raw.prepare('SELECT COUNT(*) AS n FROM auth_challenges').get();
+    const before = count();
+    for (let i = 0; i < 5; i++) {
+      const opts = (await (await browser(h, `203.0.113.${10 + i}`).post('/auth/passkey/options', { purpose: 'login' })).json()) as { challenge: string; userVerification: string };
+      expect(fromB64u(opts.challenge)).toHaveLength(52);
+      expect(opts.userVerification).toBe('required');
+    }
+    expect(count()).toEqual(before);
+  });
+
+  it('refuse a sign-in challenge this server did not sign', async () => {
+    const owner = await ownerSignedIn();
+    const { a, id } = await addKey(owner);
+    const b = browser(h, '203.0.113.97');
+    const opts = (await (await b.post('/auth/passkey/options', { purpose: 'login' })).json()) as { challenge: string };
+    const bytes = fromB64u(opts.challenge);
+    bytes[bytes.length - 1] ^= 1;
+    const res = await b.post('/auth/passkey/login', { id, response: await a.sign(toB64u(bytes), origin, rpId) });
+    expect(res.status).toBe(400);
+    expect(h.d1.raw.prepare("SELECT COUNT(*) AS n FROM auth_challenges WHERE kind = 'used'").get()).toEqual({ n: 0 });
+  });
+
+  it('refuse a passkey that was only touched, not unlocked with a fingerprint, face or PIN', async () => {
+    const owner = await ownerSignedIn();
+    const { a, id } = await addKey(owner);
+    const b = browser(h, '203.0.113.98');
+    const opts = (await (await b.post('/auth/passkey/options', { purpose: 'login' })).json()) as { challenge: string };
+    // Flags 0x01: the user was present, and not verified.
+    const res = await b.post('/auth/passkey/login', { id, response: await a.sign(opts.challenge, origin, rpId, { flags: 0x01 }) });
+    expect(res.status).toBe(401);
+    expect(((await res.json()) as { error: string }).error).toMatch(/fingerprint, face or PIN/);
+  });
+});
+
+describe('the setup code, while password sign-in is paused for everyone', () => {
+  it('still lets the owner in from their own address', async () => {
+    await ownerSignedIn();
+    // Thirty wrong passwords from thirty addresses pause password sign-in for everyone for an hour...
+    for (let i = 0; i < 30; i++) await browser(h, `192.0.2.${i}`).post('/auth/login', { password: 'not the password at all' });
+    const owner = browser(h, '198.51.100.44');
+    expect((await owner.post('/auth/login', { password: PASSWORD })).status).toBe(429);
+    // ...but not the setup code, which no guessing reaches: only the caller's own lock holds it.
+    expect((await owner.post('/auth/setup', { code: CODE, password: PASSWORD })).status).toBe(200);
+    expect((await status(owner)).role).toBe('owner');
+  });
+
+  it("holds a guesser of the setup code to their own address's lock", async () => {
+    const guesser = browser(h, '203.0.113.99');
+    for (let i = 0; i < 5; i++) expect((await guesser.post('/auth/setup', { code: `guess-${i}`, password: null })).status).toBe(401);
+    expect((await guesser.post('/auth/setup', { code: CODE, password: null })).status).toBe(429);
+    // Everyone else is untouched: the pause for everyone never started.
+    expect(h.d1.raw.prepare("SELECT COUNT(*) AS n FROM auth_attempts WHERE key = 'all'").get()).toEqual({ n: 0 });
+  });
+});
+
+describe('SECRET_KEY, the secret the keys come from', () => {
+  it('moves a password hashed under API_TOKEN over at its next use, and keeps it through a new API_TOKEN', async () => {
+    await ownerSignedIn();
+    h.env.SECRET_KEY = 'a-secret-key-that-never-travels';
+    expect((await browser(h, '198.51.100.45').post('/auth/login', { password: PASSWORD })).status).toBe(200);
+    // Hashed under SECRET_KEY now: a new API_TOKEN, which used to stop the password working, changes nothing.
+    h.env.API_TOKEN = 'a-brand-new-api-token';
+    expect((await browser(h, '198.51.100.46').post('/auth/login', { password: PASSWORD })).status).toBe(200);
+  });
+
+  it('without it, a new API_TOKEN still means setting the password again', async () => {
+    await ownerSignedIn();
+    h.env.API_TOKEN = 'a-brand-new-api-token';
+    expect((await browser(h, '198.51.100.47').post('/auth/login', { password: PASSWORD })).status).toBe(401);
   });
 });

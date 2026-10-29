@@ -245,9 +245,12 @@ try {
     Ok 'Dependencies already up to date - skipped'
   } else {
     Write-Host '    Installing (this takes a minute)'
-    Invoke-Native 'npm' @('install','--no-audit','--no-fund','--loglevel=error') 'npm install'
+    # npm ci, not npm install: exactly the versions package-lock.json records,
+    # never a newer one that happens to satisfy package.json. This code runs on
+    # a laptop holding a SolisCloud session, so what it installs is fixed.
+    Invoke-Native 'npm' @('ci','--no-audit','--no-fund','--loglevel=error') 'npm ci'
     if (-not (Test-Path (Join-Path $InstallDir 'node_modules\playwright-core'))) {
-      Die 'npm install finished but playwright-core is missing - run "npm install" here by hand to see why.'
+      Die 'npm ci finished but playwright-core is missing - run "npm ci" here by hand to see why.'
     }
     Ok 'Dependencies installed'
   }

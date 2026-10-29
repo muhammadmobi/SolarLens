@@ -12,7 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_BODY, MAX_CHANNELS, NTFY_DEFAULT, addChannel, alertMessage, deliver, getChannel, parseChannel,
-  publicHttpsUrl, requestFor, testMessage, type ChannelConfig, type Message, type NewChannel,
+  publicHttpsUrl, requestFor, resealChannels, testMessage, type ChannelConfig, type Message, type NewChannel,
 } from '../../src/channels';
 import { seal, unseal } from '../../src/auth/crypto';
 import { createShare } from '../../src/auth/sessions';
@@ -289,7 +289,7 @@ describe('posting', () => {
     const row = await add({ kind: 'webhook', url: HOOK });
     const sent = stubServices();
     const later = { ...h.env, API_TOKEN: 'a-new-api-token' };
-    expect((await deliver(later, row, testMessage(row, NOW), NOW)).error).toMatch(/API_TOKEN has changed/);
+    expect((await deliver(later, row, testMessage(row, NOW), NOW)).error).toMatch(/the key it was sealed with has changed/);
     expect(sent).toEqual([]);
   });
 
@@ -497,5 +497,42 @@ describe('a channel as a listener for alerts', () => {
     expect(await announce(h.env, NOW)).toBe(0);
     await h.fetch(`/api/settings/channels/${channel.id}`, json('DELETE'));
     expect(await told()).toBe(0);
+  });
+});
+
+// ------------------------------------------------------------------ SECRET_KEY
+
+describe('a channel, once SECRET_KEY is set', () => {
+  let h: Harness;
+  beforeEach(() => { h = createHarness(); });
+  afterEach(() => h.close());
+  const KEY = 'a-secret-key-that-never-travels';
+
+  it('is read under API_TOKEN, sealed again under SECRET_KEY, and so outlives a new API_TOKEN', async () => {
+    // Added before SECRET_KEY existed: sealed under API_TOKEN.
+    const row = await addChannel(h.env.DB, API, parseChannel({ kind: 'webhook', url: HOOK }) as NewChannel, ORIGIN, NOW);
+    if (row === 'full') throw new Error('full');
+    const sent = stubServices();
+    const withKey = { ...h.env, SECRET_KEY: KEY };
+    expect((await deliver(withKey, row, testMessage(row, NOW), NOW)).ok).toBe(true);
+    const moved = (await getChannel(h.env.DB, row.id))!;
+    expect(moved.secret).not.toBe(row.secret);
+    // API_TOKEN replaced: the channel, sealed under SECRET_KEY now, still posts.
+    expect((await deliver({ ...withKey, API_TOKEN: 'a-brand-new-api-token' }, moved, testMessage(moved, NOW), NOW)).ok).toBe(true);
+    expect(sent).toHaveLength(2);
+  });
+
+  it('is moved over by the hourly housekeeping, before anything is posted to it', async () => {
+    const row = await addChannel(h.env.DB, API, parseChannel({ kind: 'webhook', url: HOOK, alerts: false }) as NewChannel, ORIGIN, NOW);
+    if (row === 'full') throw new Error('full');
+    // Nothing to move from without SECRET_KEY: nothing read, nothing changed.
+    await resealChannels(h.env);
+    expect((await getChannel(h.env.DB, row.id))!.secret).toBe(row.secret);
+    await resealChannels({ ...h.env, SECRET_KEY: KEY });
+    const moved = (await getChannel(h.env.DB, row.id))!;
+    expect(moved.secret).not.toBe(row.secret);
+    const sent = stubServices();
+    expect((await deliver({ ...h.env, SECRET_KEY: KEY, API_TOKEN: 'a-brand-new-api-token' }, moved, testMessage(moved, NOW), NOW)).ok).toBe(true);
+    expect(sent).toHaveLength(1);
   });
 });

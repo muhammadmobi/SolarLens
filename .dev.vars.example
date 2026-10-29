@@ -37,6 +37,15 @@ INCLUDE_PLANTS=
 API_TOKEN=
 INGEST_TOKEN=
 
+# --- The secret every key is derived from (recommended) ---
+# Signs sessions, peppers the password, seals the alert channels and the vendor
+# tokens. Never sent anywhere, so replacing API_TOKEN no longer resets those.
+# Unset = API_TOKEN does this job, as before 3.0. Generate one long random
+# value and keep it: signed-in devices carry on through a change, but the
+# password, the alert channels and a SolarMan web session would each have to
+# be set again.
+SECRET_KEY=
+
 # --- The assistant's model (optional; see docs/ask-solarlens.md) ---
 # Unset: Workers AI, through the "ai" binding. Set AI_BASE_URL and AI_MODEL to
 # use any server that speaks OpenAI's chat API instead - https, or a model on
