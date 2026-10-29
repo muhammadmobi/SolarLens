@@ -98,6 +98,12 @@ export function dayWords(iso: string, weekday = false): string {
   return `${weekday ? `${WEEKDAYS[d.getUTCDay()]} ` : ''}${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
+/** Up to five days by name, and any more by count: "Sat 5 Sep 2026, Sun 6 Sep 2026 and 3 more". */
+function someDays(isos: string[]): string {
+  const named = isos.slice(0, 5).map((d) => dayWords(d, true));
+  return isos.length > 5 ? `${named.join(', ')} and ${isos.length - 5} more` : named.join(', ');
+}
+
 /** Two days as a span: "21 Sep 2026", "21 – 27 Sep 2026", "30 Nov 2025 – 3 Jan 2026". */
 export function spanWords(from: string, to: string): string {
   if (from === to) return dayWords(from, true);
@@ -468,7 +474,8 @@ const energy: Tool = {
       g.figs.push(...chosen.map((s) => table.get(k)!.get(s.id)!));
       grouped.set(gk, g);
     }
-    const sums = [...grouped.values()].map((g) => ({
+    const sums = [...grouped.entries()].map(([key, g]) => ({
+      key,
       label: g.label,
       ...(Object.fromEntries(MEASURES.map((m) => [m, sumOrNull(g.figs.map((f) => f[m]))])) as unknown as Figures),
     }));
@@ -479,7 +486,14 @@ const energy: Tool = {
     for (const m of present) facts[`total_${m}_kwh`] = r1(sums.reduce((a, s) => a + ((s[m] as number | null) ?? 0), 0));
     const measure = (args.measure as Measure | 'all' | undefined) ?? 'all';
     const focus: Measure = measure === 'all' ? 'made' : measure;
-    const withData = sums.filter((s) => s[focus] != null);
+    // Day by day, a day not wholly recorded for every system - a system's first
+    // evening, a relay off for most of it - is nobody's best or lowest day: its
+    // figure is only what was recorded. It stays in the table and the totals.
+    const partDays = group !== 'day' ? [] : sums.filter((s) => s[focus] != null && chosen.some((sys) => {
+      const row = days.find((d) => d.inverter_id === sys.id && d.day === s.key);
+      return !row || row.samples < MIN_SAMPLES;
+    })).map((s) => s.key);
+    const withData = sums.filter((s) => s[focus] != null && !partDays.includes(s.key));
     if (sums.length > 1 && withData.length) {
       const best = withData.reduce((b, s) => ((s[focus] as number) > (b[focus] as number) ? s : b));
       const low = withData.reduce((b, s) => ((s[focus] as number) < (b[focus] as number) ? s : b));
@@ -516,6 +530,9 @@ const energy: Tool = {
       if (blind.length && blind.length < chosen.length) notes.push(`${blind.map((s) => s.name).join(', ')} ${blind.length === 1 ? 'does' : 'do'} not report what ${m === 'used' ? 'the house used' : `was ${m === 'imported' ? 'bought' : 'sold'}`}.`);
     }
     if (facts.saved_is_upper_bound) notes.push('Some of the saving counts every kWh at the price of one bought, since the export was not reported: an upper bound.');
+    if (partDays.length && facts[`highest_${focus}_period`] !== undefined) {
+      notes.push(`Not wholly recorded, so left out of the best and lowest day: ${someDays(partDays)}.`);
+    }
 
     const who = chosen.length === 1 ? chosen[0].name : 'Your systems';
     const verb: Record<Measure, string> = { made: 'made', used: 'used', imported: 'bought', exported: 'sold' };
@@ -874,8 +891,8 @@ const performanceTrend: Tool = {
 
 const statsTool: Tool = {
   name: 'stats',
-  description: "Statistics of each system's daily energy over a period: days recorded, the total, the average and median day, the best and worst day, "
-    + 'how much days vary, kWh per kWp, capacity factor, low days, and the total against the same length of time just before. For "statistics", "average day", "how consistent".',
+  description: "Statistics of each system's daily energy over a period, from whole days: days recorded, their total, the average and median day, the best and worst day, "
+    + 'how much days vary, kWh per kWp, capacity factor, low days, and the average day against the same length of time just before. For "statistics", "average day", "how consistent".',
   params: { ...periodParams, system: systemParam },
   async run({ db, now }, args) {
     const all = await loadSystems(db);
@@ -892,8 +909,14 @@ const statsTool: Tool = {
 
     const facts: ToolResult['facts'] = {};
     const lines: string[] = [];
+    const partial: string[] = [];
+    // A day with too few readings to be whole - a system's first evening, a relay
+    // off for most of it - says nothing of a usual day: it is left out, and named.
+    const whole = (r: DayRow) => r.yield_kwh != null && r.samples >= MIN_SAMPLES;
     const table = chosen.map((s) => {
-      const days = rows.filter((r) => r.inverter_id === s.id && r.yield_kwh != null)
+      const part = rows.filter((r) => r.inverter_id === s.id && r.yield_kwh != null && !whole(r)).map((r) => r.day).sort();
+      if (part.length) partial.push(`${s.name}: ${someDays(part)}`);
+      const days = rows.filter((r) => r.inverter_id === s.id && whole(r))
         .map((r) => ({ day: r.day, kwh: r.yield_kwh as number })).sort((a, b) => a.day.localeCompare(b.day));
       const k = chosen.length === 1 ? '' : `${s.alias}_`;
       if (!days.length) {
@@ -910,8 +933,10 @@ const statsTool: Tool = {
       const perKwp = s.kwp ? total / s.kwp : null;
       const cf = s.kwp ? (total / (s.kwp * 24 * n)) * 100 : null;
       const low = days.filter((d) => d.kwh < 0.5 * mid).length;
-      const prevTotal = prev.filter((r) => r.inverter_id === s.id).reduce((a, r) => a + (r.yield_kwh ?? 0), 0);
-      const change = prevTotal > 0 ? Math.round((total / prevTotal - 1) * 100) : null;
+      // The average whole day against the days before: a total would count the days each period happened to record.
+      const earlier = prev.filter((r) => r.inverter_id === s.id && whole(r));
+      const prevMean = earlier.length ? earlier.reduce((a, r) => a + (r.yield_kwh as number), 0) / earlier.length : 0;
+      const change = prevMean > 0 ? Math.round((mean / prevMean - 1) * 100) : null;
       Object.assign(facts, {
         [`${k}days`]: n, [`${k}total_kwh`]: r1(total), [`${k}average_kwh`]: r1(mean), [`${k}median_kwh`]: r1(mid),
         [`${k}best_day`]: dayWords(best.day, true), [`${k}best_kwh`]: r1(best.kwh),
@@ -923,17 +948,18 @@ const statsTool: Tool = {
         + `best ${dayWords(best.day, true)} with ${kwh(best.kwh)}, worst ${dayWords(worst.day, true)} with ${kwh(worst.kwh)}`
         + `${perKwp != null ? `; ${r1(perKwp)} kWh per kWp, capacity factor ${r1(cf!)}%` : ''}`
         + `${low ? `; ${low} low day${low === 1 ? '' : 's'}` : ''}`
-        + `${change != null ? `; ${Math.abs(change)}% ${change >= 0 ? 'more' : 'less'} than the ${span} days before` : ''}.`);
+        + `${change != null ? `; ${Math.abs(change)}% ${change >= 0 ? 'more' : 'less'} a day than in the ${span} days before` : ''}.`);
       return [s.name, n, r1(total), r1(mean), r1(mid), `${dayWords(best.day, true)}: ${r1(best.kwh)}`, `${dayWords(worst.day, true)}: ${r1(worst.kwh)}`,
         r1(spread), perKwp != null ? r1(perKwp) : null, cf != null ? r1(cf) : null, low, change];
     });
     const notes = ['Capacity factor is the energy made against the panels running at their full size all day, every day. A low day is under half the median day.'];
+    if (partial.length) notes.unshift(`Left out, with too few readings to be whole days (under ${MIN_SAMPLES}): ${partial.join('; ')}.`);
     if (p.to === today) notes.unshift('Today is left out: it is not over yet.');
     return {
       tool: 'stats',
       title: 'Statistics, day by day',
       period: { from: full.from, to: full.to, label: p.to === today ? `${p.label}, to yesterday` : p.label },
-      columns: ['System', 'Days', 'Total (kWh)', 'Average day (kWh)', 'Median day (kWh)', 'Best day (kWh)', 'Worst day (kWh)', 'Spread (kWh)', 'kWh per kWp', 'Capacity factor (%)', 'Low days', 'Against before (%)'],
+      columns: ['System', 'Whole days', 'Total (kWh)', 'Average day (kWh)', 'Median day (kWh)', 'Best day (kWh)', 'Worst day (kWh)', 'Spread (kWh)', 'kWh per kWp', 'Capacity factor (%)', 'Low days', 'Average day against before (%)'],
       rows: table,
       facts,
       notes,

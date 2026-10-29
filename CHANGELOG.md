@@ -33,7 +33,7 @@ checkout of any tag says which release it is.
 
 - **An assistant, on the Ask tab.** A conversation in plain words, with
   follow-ups - "How much did I export last week?" … "and the week before?" -
-  about energy made, used, bought and sold, statistics (the average and median
+  about energy made, used, bought and sold, statistics from whole days (the average and median
   day, the best and worst, the spread, capacity factor, low days), systems
   compared per kWp, faults, why a day was low, a slow decline, a full report on
   any period, and how to do something in the app. A model chooses up to three

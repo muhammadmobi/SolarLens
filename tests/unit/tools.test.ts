@@ -382,8 +382,27 @@ describe('stats', () => {
     expect(r.notes[0]).toBe('Today is left out: it is not over yet.');
     // September to the 27th, 18 a day, against 5 to 31 August, 20 a day: 10% less.
     expect(r.facts).toMatchObject({ days: 27, total_kwh: 486, change_pct: -10 });
-    expect(r.summary).toContain('10% less than the 27 days before');
+    expect(r.summary).toContain('10% less a day than in the 27 days before');
     await expect(run('stats', { range: 'today' })).rejects.toThrow('at least one whole day');
+  });
+
+  it('counts whole days only: a first evening with one reading is no worst day, and is named', async () => {
+    await addSystem(h.env.DB, { id: ROOF, name: 'Roof', kwp: 5 });
+    // The first reading comes after dark and says nothing was made; the next two days are whole.
+    await addDay(h.env.DB, ROOF, '2026-09-20', 0, { readings: 1 });
+    await addDay(h.env.DB, ROOF, '2026-09-21', 20);
+    await addDay(h.env.DB, ROOF, '2026-09-22', 16);
+    const r = await run('stats', { from: '2026-09-20', to: '2026-09-22' });
+    expect(r.rows[0]).toEqual(['Roof', 2, 36, 18, 18, 'Mon 21 Sep 2026: 20', 'Tue 22 Sep 2026: 16', 2, 7.2, 15, 0, null]);
+    expect(r.notes[0]).toBe('Left out, with too few readings to be whole days (under 60): Roof: Sun 20 Sep 2026.');
+    // A system with no whole day at all says so.
+    const none = await run('stats', { from: '2026-09-20', to: '2026-09-20' });
+    expect(none.summary).toBe('Roof: no whole day recorded.');
+    // Energy keeps the evening in its table and total, but not as the lowest day.
+    const e = await run('energy', { from: '2026-09-20', to: '2026-09-22', group_by: 'day' });
+    expect(e.rows.map((x) => x[1])).toEqual([0, 20, 16]);
+    expect(e.facts).toMatchObject({ total_made_kwh: 36, lowest_made_period: 'Tue 22 Sep 2026', highest_made_period: 'Mon 21 Sep 2026', periods_with_data: 2 });
+    expect(e.notes).toContain('Not wholly recorded, so left out of the best and lowest day: Sun 20 Sep 2026.');
   });
 });
 
