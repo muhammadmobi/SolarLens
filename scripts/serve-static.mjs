@@ -6,6 +6,10 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..', 'public');
+// /demo/ serves site/, the GitHub Pages demo scripts/build-demo.mjs builds -
+// under a sub-path, as Pages serves it, so a root-absolute path left in it
+// fails here as it would there.
+const DEMO = join(import.meta.dirname, '..', 'site');
 const PORT = Number(process.env.PORT ?? 4173);
 // Kept in step with public/_headers: the manifest has to arrive as JSON or
 // Chrome discards it, and the install tests would pass against a broken app.
@@ -18,9 +22,11 @@ const TYPES = {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (url.pathname.startsWith('/api/')) { res.writeHead(404); res.end('no api in static mode'); return; }
-  let file = normalize(url.pathname === '/' ? '/index.html' : url.pathname).replace(/^(\.\.[/\\])+/, '');
+  const demo = url.pathname === '/demo' || url.pathname.startsWith('/demo/');
+  const path = demo ? url.pathname.slice('/demo'.length) || '/' : url.pathname;
+  let file = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
   try {
-    const body = await readFile(join(ROOT, file));
+    const body = await readFile(join(demo ? DEMO : ROOT, file));
     res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
     res.end(body);
   } catch {

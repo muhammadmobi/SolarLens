@@ -42,7 +42,7 @@ npm ci
 npm run typecheck             # types for src/ and tests/
 npm run test:unit             # ~530 tests, a few seconds
 npm run test:unit:coverage    # the same, with the coverage thresholds applied
-npm run test:e2e              # ~450 tests, a few minutes, needs Chrome
+npm run test:e2e              # ~460 tests, a few minutes, needs Chrome
 ```
 
 All of that runs with no Cloudflare account, no database and no vendor
@@ -366,6 +366,13 @@ break it mid-run).
 | After a release that changes relay code | Double-click `setup-solarlens-relay.cmd` on each relay laptop; the deploy summary says when |
 | After any release | Nothing: an open dashboard offers *Reload* within fifteen minutes, or on coming back to the tab, and a TV display reloads itself |
 | Occasionally | Check the D1 read budget if the dashboard is left open on many screens |
+
+**The demo**: `https://muhammadmobi.github.io/SolarLens/` is `public/` with `demo/demo.js` in
+front of it, answering every request with made-up data; `.github/workflows/pages.yml`
+publishes it when either changes on `main`. Pages has to be turned on once (Settings → Pages →
+source: GitHub Actions). When the API grows a field, the demo must grow it too -
+`tests/unit/fixture-contract.test.ts` fails until it does. `npm run screenshots` retakes the
+README's pictures from it.
 
 **Seeing what is happening**: the README's *Debugging the live system* has the
 commands - the Worker's live log, `/api/health`, a query against production,

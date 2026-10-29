@@ -22,7 +22,9 @@
     "test:e2e:ui": "playwright test --ui",
     "relay:solis": "node agent/solis-relay.mjs",
     "test:unit:coverage": "vitest run --coverage",
-    "cf": "node scripts/wrangler.mjs"
+    "cf": "node scripts/wrangler.mjs",
+    "demo:build": "node scripts/build-demo.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "hono": "^4.13.8"

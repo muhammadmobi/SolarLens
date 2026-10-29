@@ -14,7 +14,8 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bearer, createHarness, type Harness } from '../helpers/worker';
+import { bearer, createHarness, testReading, type Harness } from '../helpers/worker';
+import { insertReading } from '../../src/db';
 import { deviceHistory, devices, inverters } from '../fixtures/dashboard-api';
 
 const post = (body: unknown) => ({
@@ -117,5 +118,66 @@ describe('what the Worker makes of the raw payload', () => {
     expect(text).not.toContain('1000000000000000001');
     expect(text).not.toContain('62000000');
     expect(text).not.toContain('INV0001SERIAL');
+  });
+});
+
+/**
+ * The GitHub Pages demo makes its own answers up (demo/demo.js). They are held
+ * to the real Worker's field by field, as the end-to-end fixtures are, so the
+ * demo cannot show off a field the dashboard no longer gets - or miss one it
+ * does, and look emptier than the real thing.
+ */
+describe('the demo matches what the Worker sends', () => {
+  // demo/demo.js is a browser script; outside one it only publishes its data.
+  const demo = (() => {
+    const src = readFileSync('demo/demo.js', 'utf8');
+    const box: { SolarLensDemo?: { sample(now: number): Record<string, Record<string, unknown>> } } = {};
+    new Function('globalThis', 'window', 'document', src)(box, undefined, undefined);
+    return box.SolarLensDemo!.sample(Math.floor(Date.now() / 1000));
+  })();
+  const rowsOf = (answer: Record<string, unknown>, key: string) => answer[key] as Record<string, unknown>[];
+  let worker: Record<string, Record<string, unknown>>;
+
+  beforeAll(async () => {
+    // The vendor fixtures are dated; a sample from a minute ago gives the day
+    // curve and the daily history something to answer with.
+    const [{ id }] = h.d1.raw.prepare('SELECT id FROM inverters LIMIT 1').all() as { id: string }[];
+    await insertReading(h.env.DB, testReading({ inverterId: id, ts: Math.floor(Date.now() / 1000) - 60 }) as never);
+    worker = {};
+    for (const path of ['/api/series', '/api/history', '/api/status', '/api/health']) {
+      worker[path] = (await (await h.fetch(path)).json()) as Record<string, unknown>;
+    }
+  });
+
+  it('answers every read the dashboard makes', () => {
+    for (const path of ['/api/latest', '/api/series', '/api/devices', '/api/devices/history', '/api/history', '/api/periods', '/api/alarms', '/api/health', '/api/status', '/auth/status', '/auth/settings']) {
+      expect(demo, path).toHaveProperty([path]);
+    }
+  });
+
+  it('its systems, devices and link history have exactly the Worker\'s fields', () => {
+    const inv = fields(served.inverters[0]);
+    for (const row of rowsOf(demo['/api/latest'], 'inverters')) expect(fields(row), String(row.id)).toEqual(inv);
+    const dev = fields(served.devices[0]);
+    for (const row of rowsOf(demo['/api/devices'], 'devices')) expect(fields(row), String(row.id)).toEqual(dev);
+    const smp = fields(served.history.samples[0]);
+    for (const row of rowsOf(demo['/api/devices/history'], 'samples')) expect(fields(row)).toEqual(smp);
+  });
+
+  it('its day curve and daily history have exactly the Worker\'s fields', () => {
+    const point = fields(rowsOf(worker['/api/series'], 'points')[0]);
+    for (const row of rowsOf(demo['/api/series'], 'points').slice(0, 5)) expect(fields(row)).toEqual(point);
+    const day = fields(rowsOf(worker['/api/history'], 'rows')[0]);
+    for (const row of rowsOf(demo['/api/history'], 'rows').slice(0, 5)) expect(fields(row)).toEqual(day);
+  });
+
+  it('its status and health answers have the Worker\'s shape', () => {
+    expect(fields(demo['/api/status'])).toEqual(fields(worker['/api/status']));
+    expect(fields(demo['/api/health'])).toEqual(fields(worker['/api/health']));
+  });
+
+  it('names its devices in their history as it names them in the list', () => {
+    const ids = new Set(rowsOf(demo['/api/devices'], 'devices').map((d) => d.id));
+    for (const r of rowsOf(demo['/api/devices/history'], 'samples')) expect(ids.has(r.device_id)).toBe(true);
   });
 });
