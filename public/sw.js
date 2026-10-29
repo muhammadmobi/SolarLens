@@ -11,8 +11,19 @@
  * Its other job is to exist at all: an installable web app needs a worker with
  * a fetch handler, which is what turns the dashboard into something that can
  * live on a phone's home screen instead of inside a browser tab.
+ *
+ * What it keeps is the shell - the page and its icons - and never an answer
+ * from /api or /auth. Since 3.0 an answer depends on who asked: the owner sees
+ * a logger's network handles, and a private dashboard refuses a signed-out
+ * browser. A cache keyed by URL alone would hand the owner's answer to whoever
+ * used the browser next, offline, so those paths go to the network or fail.
+ * The same goes for anything the server marks no-store.
  */
-const VERSION = 'solarlens-v1';
+// v2: the v1 cache held /api answers; activating v2 deletes it.
+const VERSION = 'solarlens-v2';
+
+/** Answers that depend on who is asking, and are never kept here. */
+const neverKept = (url) => url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth') || url.pathname.startsWith('/s/');
 const SHELL = ['/', '/icon.svg', '/icon-192.png', '/icon-512.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -36,13 +47,17 @@ self.addEventListener('fetch', (event) => {
   // Only same-origin reads. A POST is an instruction, not a page, and replaying
   // one from a cache would be a bug with consequences.
   if (request.method !== 'GET') return;
-  if (new URL(request.url).origin !== self.location.origin) return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+  // Left to the browser, uncached: see neverKept above.
+  if (neverKept(url)) return;
 
   event.respondWith(
     fetch(request)
       .then((res) => {
-        // Opaque and error responses are not worth keeping; a 200 is.
-        if (res && res.ok && res.type === 'basic') {
+        // Opaque and error responses are not worth keeping; a 200 is - unless
+        // the server said not to keep it.
+        if (res && res.ok && res.type === 'basic' && !/no-store/i.test(res.headers.get('cache-control') ?? '')) {
           const copy = res.clone();
           caches.open(VERSION).then((c) => c.put(request, copy)).catch(() => {});
         }
