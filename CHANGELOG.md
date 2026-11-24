@@ -14,6 +14,29 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [3.0.2] — 2026-11-24
+
+A security update of Hono, the framework the Worker is built on. Nothing
+changes on the dashboard.
+
+### Security
+
+- **Hono 4.13.21**, past five moderate advisories against every version up to
+  4.13.15. Four cover parts SolarLens does not use: `mount()`
+  ([GHSA-4m76-xfj5-7975](https://github.com/advisories/GHSA-4m76-xfj5-7975)),
+  the `css` helper
+  ([GHSA-3gg2-335m-rxc6](https://github.com/advisories/GHSA-3gg2-335m-rxc6)),
+  `csrf()` ([GHSA-46wx-v44x-9hh2](https://github.com/advisories/GHSA-46wx-v44x-9hh2))
+  and `validator('form')`
+  ([GHSA-4h7h-rv7c-7m2v](https://github.com/advisories/GHSA-4h7h-rv7c-7m2v)).
+  The fifth does: the router could skip wildcard middleware for some route
+  sets and for paths with an encoded line terminator
+  ([GHSA-h7mg-cq63-vhpq](https://github.com/advisories/GHSA-h7mg-cq63-vhpq)),
+  and the owner's guard on Settings, the check on every `/api/` request,
+  identifying the caller and the rate limit are all wildcard middleware.
+  `package.json` now asks for 4.13.21 at least. The weekly Security run, which
+  failed on 16 and 23 November for this, passes again.
+
 ## [3.0.1] — 2026-10-29
 
 A fix to how a deploy tells the owner about the relay laptops. Nothing changes
@@ -1827,6 +1850,7 @@ First working aggregator: two clouds, one screen.
 - Raw telemetry is no longer always empty — the `latest` query never selected
   the column it displays.
 
+[3.0.2]: https://github.com/muhammadmobi/SolarLens/compare/v3.0.1...v3.0.2
 [3.0.1]: https://github.com/muhammadmobi/SolarLens/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.11.0...v3.0.0
 [2.11.0]: https://github.com/muhammadmobi/SolarLens/compare/v2.10.0...v2.11.0
