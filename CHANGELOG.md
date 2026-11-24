@@ -14,6 +14,18 @@ the announcement.
 When a release is tagged, `version` in `package.json` is set to match it, so a
 checkout of any tag says which release it is.
 
+## [Unreleased]
+
+### Security
+
+- **Vitest 5.1.1**, with its coverage plugin, past two advisories in
+  `@vitest/mocker`
+  ([GHSA-qxg6-89mg-rqv8](https://github.com/advisories/GHSA-qxg6-89mg-rqv8),
+  [GHSA-xp26-3454-mjgp](https://github.com/advisories/GHSA-xp26-3454-mjgp)) -
+  the test runner only, nothing the Worker serves. Vitest pins its own
+  `@vitest/mocker` and the coverage plugin pins Vitest, so the three move
+  together; Dependabot's security update could not do that by itself.
+
 ## [3.0.2] — 2026-11-24
 
 A security update of Hono, the framework the Worker is built on. Nothing

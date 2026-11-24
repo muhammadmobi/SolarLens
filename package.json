@@ -36,10 +36,10 @@
     "@cloudflare/workers-types": "^5.20260919.1",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.4",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.1.1",
     "playwright-core": "^1.63.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1",
+    "vitest": "^5.1.1",
     "wrangler": "^4.135.0"
   }
 }
